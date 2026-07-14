@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Data & databases (do not commit market data / user data)
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/*.db-shm
+data/*.db-wal
+data/*.db-journal
+data/*.csv
+data/cache/
+
+# Secrets / connection profiles (accounts, passwords, authcodes)
+backend/config/connections.json
+backend/config/*.secret.json
+*.secret.json
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+logs/
+
+# pytest
+backend/.pytest_tmp/
+.pytest_cache/
+
+# Runtime pids / process logs
+*.pid
+backend/uvicorn.out.log
+backend/uvicorn.err.log
+frontend/vite.out.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

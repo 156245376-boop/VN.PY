@@ -1,0 +1,13 @@
+# 纯 Python 核心依赖:无需 vnpy / GPU 即可启动整个平台
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+numpy==2.2.1
+pandas==2.2.3
+python-multipart==0.0.20
+# 在线历史数据下载(可选,缺失时可用 CSV 导入)
+akshare==1.15.78
+# 测试
+pytest==8.3.4
+httpx==0.28.1

@@ -1,0 +1,4 @@
+# GPU 加速依赖(可选)。CuPy 需按 CUDA 版本选择 wheel。
+# 本机 RTX 3060 / 驱动 CUDA 13.2,选择 cuda12x 系列 wheel(向后兼容 CUDA 12+ 运行时)。
+# 安装:pip install cupy-cuda12x
+cupy-cuda12x==13.3.0

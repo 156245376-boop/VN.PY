@@ -1,0 +1,106 @@
+# 用户选择类配置的默认值(R22.2)。
+#
+# **本文件不得出现市场事实类取值** —— 手续费率、保证金率、合约乘数、最小变动
+# 价位、交易时段、涨跌停幅度属于 meta/ 的带生效日期表(R22.1/R22.3)。
+#
+# 判据一句话:**「这个值在 2020 年有一个不同的正确答案吗?」**
+# 有 → meta/ 的 SCD-2 表;没有 → 本文件。
+#
+# 放错的后果是静默的:把保证金率写进这里,意味着回测 2019 年用的是今天的保证金,
+# 每个资金受限的回测结果都是错的,而且不会报错(B4)。
+#
+# 凭证不在此处 —— 见 conf/local.toml.template(R22.4)。
+
+[paths]
+# 运行期数据根。唯一不可重建的是 raw/ 子树:代码能重写,curated/ 能从 raw 重建,
+# 但自录的 tick 没了就永久没了(R25.13 的备份接口针对的正是它)。
+data_root = "data"
+results_root = "results"
+
+[timezone]
+# 全系统统一时区(R10.9)。交易日与夜盘归属均以此为基准。
+name = "Asia/Shanghai"
+
+[log]
+level = "INFO"          # R20.2
+retention_days = 90     # R20.4
+
+[monitor]
+snapshot_interval = 1.0     # 秒,R20.6
+refresh_interval = 3.0      # 秒,R20.14
+heartbeat_timeout = 30.0    # 秒,R20.13
+# 行情中断判定阈值。冷门与远月合约大量分钟无成交,故 R20.15 要求同时满足
+# 「同品种当日主力合约在同一时段收到了 Tick」才告警 —— 否则全市场录制下
+# 每天会产生几千条假告警,把真告警淹没(D1)。
+tick_timeout = 60.0         # 秒
+
+[storage]
+max_write_retries = 3       # R4.7,重试必须有上限
+max_buffer_records = 100000 # R4.8,超限落兜底文件,防 OOM(D4)
+tick_batch_size = 500       # R4.4
+tick_batch_seconds = 3.0    # R4.4
+max_tick_symbols = 20       # R25.7
+warn_size_gb = 200          # R25.10
+
+[gateway]
+max_queries_per_second = 1  # R1.12,CTP 查询流控约 1 次/秒(C5)
+max_orders_per_second = 2
+max_cancels_per_second = 2
+reconnect_interval = 10.0   # 秒,R1.7
+max_reconnect_attempts = 30 # R1.7
+
+[risk]
+max_margin_ratio = 0.5              # R19.4
+max_position_per_symbol = 10        # R19.5
+max_daily_loss_ratio = 0.03         # R19.6,当日开盘权益的 3%
+max_orders_per_second = 2           # R19.7
+max_cancels_per_symbol_per_day = 400  # R19.8
+margin_monitor_interval = 60.0      # 秒,R19.14
+pre_holiday_reduce_enabled = true   # R19.16
+pre_holiday_max_position_ratio = 0.5
+
+[expiry]
+# 合约到期与交割。**这是修订清单里唯一会直接产生资金损失的缺失项(B1)** ——
+# 个人客户绝大多数商品期货不能进交割,全自动下系统某天会抱着仓位进交割月。
+force_close_days_before = 5      # 交易日,R31.1
+auto_roll_enabled = false        # R31.4,默认只平不换
+close_timeout_minutes = 30       # R31.6
+
+[backtest]
+slippage_ticks = 1        # R12.3,默认 1 个最小变动价位
+roll_slippage_ticks = 2   # R12.10,换月两腿的点差成本
+symbol_order = []         # R13.5,同一时间戳多合约的固定处理顺序
+
+[performance]
+annual_days = 240      # R14.2
+risk_free_rate = 0.0   # R14.3
+
+[optimizer]
+mode = "grid"          # R15.3
+max_workers = 0        # 0 表示按物理核心数减 1(R15.4)
+max_combinations = 10000  # R15.6
+
+[live]
+max_strategies = 20        # R16.10
+order_timeout_seconds = 60 # R17.12
+
+[account]
+query_interval = 5.0   # 秒,R18.2
+
+[backfill]
+auto_enabled = false           # R9.2
+source_priority = ["tqsdk", "akshare"]  # R9.3
+
+[continuous]
+confirm_days = 2   # R28.4,连续确认防抖
+
+[costs]
+reconcile_tolerance = 0.05  # R29.10,费用对账差额占比告警阈值
+
+[alert]
+push_url = ""      # R21.4,为空则不推送
+push_retries = 3   # R21.6
+dedup_window = 300.0  # 秒,R21.8
+
+[strategy]
+path = "src/strategy/library"  # R11.12

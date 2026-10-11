@@ -1,0 +1,112 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qf"
+version = "0.0.1"
+description = "个人自用国内期货交易与回测系统"
+requires-python = "==3.13.*"
+# 依赖精确钉死(计划第 8 节):vnpy_ctp 的 wheel 与 Python 小版本、CTP API 版本三者绑定,
+# 放宽任何一条都会在升级时失去可对照的基线。CTP 版本记录见 docs/DEPENDENCIES.md。
+dependencies = [
+    "vnpy==4.4.0",
+    "vnpy_ctp==6.7.11.4",
+    "vnpy_ctastrategy==1.4.1",
+    "vnpy_ctabacktester==1.3.0",
+    "duckdb==1.5.5",
+    "pyarrow==25.0.1",
+    "polars==1.44.1",
+    "pandas==2.3.3",
+    "numpy==2.5.2",
+    "typer==0.27.2",
+    "rich==15.0.0",
+    "pydantic-settings==2.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.3",
+    "ruff==0.16.5",
+    "mypy==2.3.1",
+    "import-linter==2.14",
+]
+
+[project.scripts]
+qf = "apps.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/core",
+    "src/config",
+    "src/obs",
+    "src/meta",
+    "src/data",
+    "src/indicators",
+    "src/strategy",
+    "src/costs",
+    "src/execution",
+    "src/risk",
+    "src/engines",
+    "src/gateway",
+    "src/runtime",
+    "src/apps",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+# 领域逻辑测试的预期值须经外部权威资料人工核对(R34.6)。标记为 pending_expected
+# 的用例在预期值填入前必须失败而非通过(R34.7),由 tests/conftest.py 强制。
+markers = [
+    "pending_expected: 预期值待人工依据外部权威资料填入,当前必然失败",
+    "covers(*criteria): 显式声明测试覆盖的验收标准编号,格式为 R<n>.<m>",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+ignore = [
+    # RUF001-003:全角标点与数学符号在中文正文里是正常写法。这三条规则针对的是
+    # ASCII 代码中的同形字符混淆,与本项目的中文注释与文档冲突,且无真实风险。
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # N818:异常名不加 Error 后缀是刻意选择。本项目的异常层级按**处置方式**命名
+    # (HaltRequired / Rejected / Retryable / Skipped),使捕获点读起来即是处置语义
+    # (R32.2)。加后缀会得到 SkippedError、RetryableError 这类别扭且更含混的名字。
+    "N818",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 一次性脚手架脚本,内含成段中文说明作为数据表。换行会破坏其可读性,而它不参与
+# 运行期逻辑 —— Phase 0 之后不再执行。
+"tools/scaffold_modules.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+# tests/meta/store_double.py 是项目自有的测试替身,由 pytest 的 rootdir 机制以顶层
+# 模块名导入。ruff 无法从 src 根推断出它属于本项目(tests/meta 没有 __init__.py,
+# 而按 tests 根推断会得到与真实包 meta 冲突的名字),故显式声明。
+# 不声明会把 import 归入第三方依赖块,使"项目内模块"和"外部依赖"看起来一样。
+known-first-party = ["store_double"]
+
+[tool.mypy]
+python_version = "3.13"
+mypy_path = "src"
+namespace_packages = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true
+
+# vnpy 未提供完整类型标注,仅在允许接触它的模块边界放宽
+[[tool.mypy.overrides]]
+module = ["vnpy.*", "vnpy_ctp.*", "vnpy_ctastrategy.*", "talib.*"]
+ignore_missing_imports = true

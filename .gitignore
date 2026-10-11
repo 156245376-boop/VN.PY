@@ -1,0 +1,27 @@
+# 凭证:CTP 账号密码、穿透式监管 AppID/AuthCode(R22.4/R22.5)
+conf/local.toml
+
+# 运行期数据根(R25):raw/ 内的自录 tick 不可重建,须靠 R25.13 的备份接口而非版本库
+data/
+
+# 回测与优化产物
+results/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+
+# 编辑器与系统
+# .vscode/settings.json 例外:其中的 PYTHONUTF8=1 是项目级必需项而非个人偏好 ——
+# 缺了它 lint-imports 在中文 Windows 上直接抛 GbkDecodeError(见 docs/DEPENDENCIES.md)。
+.vscode/*
+!.vscode/settings.json
+.idea/
+Thumbs.db
+desktop.ini

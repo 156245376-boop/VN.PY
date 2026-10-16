@@ -8,6 +8,8 @@
 | --- | --- |
 | `pyproject.toml`、`uv.lock` | 新路线依赖及可复现版本 |
 | `.venv-tqsdk/` | 当前环境，Python 3.13.11 / TqSdk 3.10.2 |
+| `启动天勤.vbs`、`tools/gui_entry.py` | 双击启动中文窗口，隔离环境并验证 |
+| `qf/gui.py`、`qf/desktop.py` | 内存凭证、后台运行、停止和结果展示 |
 | `tools/setup.ps1` | 锁定安装，隔离旧环境变量 |
 | `tools/check.ps1` | 封存完整性、环境身份、依赖与开发检查 |
 | `tools/run.ps1` | data-check、backtest、paper；模拟默认观察 |

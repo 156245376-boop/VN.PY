@@ -5,6 +5,7 @@ import importlib.metadata
 import json
 import math
 import secrets
+import socket
 import subprocess
 import time
 from numbers import Real
@@ -39,12 +40,14 @@ def provenance():
                     hashlib.sha256(path.read_bytes()).hexdigest())
     for name in ("pyproject.toml", "uv.lock"):
         digest.update((root / name).read_bytes())
+    process_options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
-                            text=True, check=True).stdout.strip()
+                            text=True, check=True, **process_options).stdout.strip()
     changed = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True,
-                             check=True).stdout
+                             check=True, **process_options).stdout
     summary = subprocess.run(["git", "diff", "HEAD", "--stat"], cwd=root,
-                             capture_output=True, check=True).stdout.decode("utf-8", "replace")
+                             capture_output=True, check=True,
+                             **process_options).stdout.decode("utf-8", "replace")
     return {"commit": commit, "dirty": bool(changed), "source_sha256": digest.hexdigest(),
             "source_manifest": manifest, "change_summary": summary,
             "sdk": importlib.metadata.version("tqsdk"), "timezone": "Asia/Shanghai"}
@@ -87,9 +90,22 @@ def wait_ready(api, predicate, timeout, seen):
     check_connections(api, seen)
 
 
-def tracked_api(sdk, journal, **kwargs):
+def chart_address():
+    with socket.socket() as candidate:
+        candidate.bind(("127.0.0.1", 0))
+        return f"http://127.0.0.1:{candidate.getsockname()[1]}"
+
+
+def tracked_api(sdk, journal, *, web_gui=False, progress=None, **kwargs):
     class ResearchApi(sdk.TqApi):
         execution_guard = None
+
+        def _print(self, message, *args, **print_kwargs):
+            # 只拦截 SDK 在 HTTP 服务就绪后发出的地址通知，不转发任何通知原文。
+            if web_gui and isinstance(message, str) and message.startswith(
+                    f"您可以访问 {web_gui} "):
+                emit_progress(progress, "chart_ready", url=web_gui)
+            return super()._print(message, *args, **print_kwargs)
 
         def insert_order(self, symbol, direction, offset="", volume=0, limit_price=None,
                          advanced=None, order_id=None, account=None, offset_leg2=""):
@@ -108,11 +124,12 @@ def tracked_api(sdk, journal, **kwargs):
             journal.order(order.order_id, symbol, direction, offset, volume)
             return order
 
-    return ResearchApi(debug=False, disable_print=True, web_gui=False, **kwargs)
+    return ResearchApi(debug=False, disable_print=True, web_gui=web_gui, **kwargs)
 
 
 def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
-         duration=0, stop_requested=lambda: False, fee_multiplier=1, progress=None):
+         duration=0, stop_requested=lambda: False, fee_multiplier=1, progress=None,
+         chart=False, hold_chart=False):
     emit_progress(progress, "record_creating")
     if resume:
         journal = Journal.resume(root / resume, config.public())
@@ -144,7 +161,8 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
             # 3.10.2 的 date 参数按交易日扩展，包含前一日（周一为上周五）夜盘。
             start_ns, end_ns = kwargs["backtest"]._start_dt, kwargs["backtest"]._end_dt
             journal.set("replay_bounds_ns", [start_ns, end_ns])
-        api = tracked_api(sdk, journal, **kwargs)
+        api = tracked_api(sdk, journal, web_gui=chart_address() if chart else False,
+                          progress=progress, **kwargs)
         emit_progress(progress, "waiting_data")
         if mode == "backtest":
             symbol = config.symbol
@@ -268,6 +286,18 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
     finally:
         if guard:
             guard.enabled = False
+        if hold_chart and api and status == "backtest_finished":
+            if task:
+                task.cancel()
+            emit_progress(progress, "report_ready")
+            while not stop_requested():
+                try:
+                    api.wait_update(deadline=time.time() + 0.5)
+                except sdk.BacktestFinished:
+                    continue
+                except Exception:
+                    journal.event("chart_view_ended")
+                    break
         emit_progress(progress, "stopping")
         confirmed = task is None
         if api:
@@ -318,7 +348,8 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
 
 
 def execute(mode, config, root, credentials, *, sdk=None, activate=False, resume=None,
-            duration=0, stop_requested=lambda: False, progress=None):
+            duration=0, stop_requested=lambda: False, progress=None, chart=False,
+            hold_chart=False):
     if mode not in {"data-check", "backtest", "paper"}:
         raise ValueError("不支持的运行模式")
     if (activate or resume) and mode != "paper":
@@ -334,10 +365,14 @@ def execute(mode, config, root, credentials, *, sdk=None, activate=False, resume
                      stop_requested=stop_requested, progress=progress)
     if mode == "paper":
         with PaperLock(root):
-            return _one(mode, config, root, credentials, sdk, **arguments)
+            return _one(mode, config, root, credentials, sdk, chart=chart, **arguments)
     first = _one(mode, config, root, credentials, sdk, **arguments)
     if mode == "backtest" and first["status"] == "backtest_finished":
-        second = _one(mode, config, root, credentials, sdk, fee_multiplier=2, **arguments)
+        if stop_requested():
+            return dict(first, status="stopped", reason="comparison_cancelled")
+        emit_progress(progress, "baseline_complete")
+        second = _one(mode, config, root, credentials, sdk, fee_multiplier=2,
+                      chart=chart, hold_chart=hold_chart, **arguments)
         comparison = {"baseline": first, "double_fee": second,
                       "method": "two_independent_TqSim_replays"}
         (root / first["run_id"] / "comparison.json").write_text(

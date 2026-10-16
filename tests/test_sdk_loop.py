@@ -19,7 +19,7 @@ class Api:
     def __init__(self, **kwargs):
         assert kwargs["debug"] is False
         assert kwargs["disable_print"] is True
-        assert kwargs["web_gui"] is False
+        assert kwargs["web_gui"] is False or kwargs["web_gui"].startswith("http://127.0.0.1:")
         self.kwargs = kwargs
         self._data = {"notify": {}}
         self.steps = 0
@@ -81,6 +81,9 @@ class Api:
 
     def close(self):
         self.closed = True
+
+    def _print(self, *args, **kwargs):
+        pass
 
 
 class Sim:
@@ -303,3 +306,32 @@ def test_quiet_market_still_emits_periodic_heartbeat(tmp_path, sdk, monkeypatch)
     heartbeats = [fields["elapsed"] for stage, fields in events if stage == "heartbeat"]
     assert heartbeats == [15, 30]
     assert not hasattr(Api.instances[0], "target")
+
+
+def test_chart_uses_loopback_and_only_relays_known_local_url(tmp_path, sdk):
+    from qf.journal import Journal
+    from qf.runtime import tracked_api
+    events = []
+    j = Journal.create(tmp_path, "paper", {})
+    api = tracked_api(sdk, j, account=Sim(100000), auth=object(),
+                      web_gui="http://127.0.0.1:12345",
+                      progress=lambda stage, **fields: events.append((stage, fields)))
+    api._print("private-auth-message")
+    api._print("您可以访问 http://127.0.0.1:12345 查看策略绘制出的 K 线图形。")
+    assert events == [("chart_ready", {"url": "http://127.0.0.1:12345"})]
+    assert api.kwargs["debug"] is False
+    j.close()
+
+
+def test_gui_backtest_keeps_final_chart_only_and_disables_execution(tmp_path, sdk):
+    events = []
+    result = execute("backtest", config(), tmp_path, ("u", "p"), sdk=sdk,
+                     chart=True, hold_chart=True,
+                     stop_requested=lambda: any(e[0] == "report_ready" for e in events),
+                     progress=lambda stage, **fields: events.append((stage, fields)))
+    assert result["status"] == "backtest_finished"
+    assert len(Api.instances) == 2
+    assert Api.instances[0].kwargs["web_gui"] is False
+    assert Api.instances[1].kwargs["web_gui"].startswith("http://127.0.0.1:")
+    assert all(not api.execution_guard.enabled for api in Api.instances)
+    assert all(api.target.cancelled and api.closed for api in Api.instances)

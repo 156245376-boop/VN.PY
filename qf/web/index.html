@@ -74,7 +74,7 @@
           <button id="next" class="quiet">下一页</button></div></footer>
       </section>
       <section class="card chart-card">
-        <div class="section-title"><div><h2 id="chart-title">选择一个品种查看分钟图</h2><span id="chart-detail">主连用于观察，实际合约单独标识</span></div><span class="tag">1 分钟</span></div>
+        <div class="section-title"><div><h2 id="chart-title">选择一个品种查看行情图</h2><span id="chart-detail">选择品种后显示当前主力合约的中文名称与交割月份</span></div><span class="tag">周期可在图中切换</span></div>
         <div id="chart-placeholder" class="empty">连接后选择品种，天勤原生图表会显示在窗口内。</div>
         <iframe id="chart" title="天勤原生分钟图" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer" hidden></iframe>
       </section>
@@ -89,5 +89,6 @@
   </div>
   <div class="bottom-note"><span id="heartbeat">等待连接</span><span>行情时间以交易所返回为准 · 程序心跳不代表收到新行情</span></div>
 </div>
+<script src="labels.js"></script>
 <script src="app.js"></script>
 </body></html>

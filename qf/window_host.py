@@ -1,8 +1,10 @@
 """独立 WebView2 主窗口；仅可信主页面具有业务桥接。"""
 
+import json
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from qf.desktop import allowed_chart_url
 
@@ -16,6 +18,31 @@ def show_chart(url: str) -> str:
     if not allowed_chart_url(url):
         raise ValueError("仅允许当前本机天勤图形地址")
     return url
+
+
+def _install_chart_labels(window):
+    """只给本机子页增加显示标签，保持 SDK 安装文件与业务标识原样。"""
+    try:
+        from System import Action
+
+        location = urlsplit(window.get_current_url())
+        if location.scheme != "http" or location.hostname != "127.0.0.1":
+            raise ValueError("工作台来源无效")
+        origin = f"{location.scheme}://{location.netloc}"
+        assets = Path(__file__).with_name("web")
+        script = ("(() => {if(window.parent===window || location.protocol!=='http:' || "
+                  "location.hostname!=='127.0.0.1')return;const qfParentOrigin="
+                  + json.dumps(origin) + ";\n"
+                  + (assets / "labels.js").read_text(encoding="utf-8") + "\n"
+                  + (assets / "native-labels.js").read_text(encoding="utf-8") + "\n})();")
+        tasks = []
+        window.native.Invoke(Action(lambda: tasks.append(
+            window.native.webview.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(script))))
+        if not tasks[0].Wait(5000):
+            raise TimeoutError("中文标签未就绪")
+        window.evaluate_js("window.dispatchEvent(new Event('qf-native-labels-ready'))")
+    except Exception:
+        window.evaluate_js("window.dispatchEvent(new Event('qf-native-labels-error'))")
 
 
 def run_window(page: Path, bridge, request_close, *, webview_module=None):
@@ -43,6 +70,7 @@ def run_window(page: Path, bridge, request_close, *, webview_module=None):
         return False
 
     window.events.closing += closing
+    window.events.loaded += lambda: _install_chart_labels(window)
     try:
         webview_module.start(gui="edgechromium", debug=False, http_server=True,
                              private_mode=True)

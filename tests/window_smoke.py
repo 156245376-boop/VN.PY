@@ -24,7 +24,7 @@ ready, stop = threading.Event(), threading.Event()
 address = chart_address()
 
 
-def serve():
+def serve(initial_data=None, *, probe=False):
     async def main():
         helper = object.__new__(TqWebHelper)
         helper._api = SimpleNamespace(
@@ -33,6 +33,29 @@ def serve():
         )
         helper._data = {"action": {"mode": "run", "accounts": {}, "user_name": "offline"},
                         "trade": {}, "subscribed": [], "draw_chart_datas": {}, "snapshots": {}}
+        if initial_data:
+            helper._data.update(initial_data)
+        if probe:
+            from aiohttp import web
+
+            def index(request):
+                html = (Path(tqsdk.__file__).parent / "web/index.html").read_text("utf-8")
+                script = '''<script>
+                setInterval(()=>parent.postMessage({kind:'offline-native-probe',
+                  text:document.body.innerText, bridge:!!window.pywebview?.api,
+                  selected:document.querySelector('.tq-top-view .title')?.textContent,
+                  original:document.querySelector('.tq-top-view .title')?.title},'*'),100);
+                addEventListener('message',event=>{
+                  if(event.data?.kind==='offline-native-click')
+                    document.querySelectorAll('.subscribed-list button')[1]?.click();
+                  if(event.data?.kind==='offline-native-period')
+                    [...document.querySelectorAll('.ivu-radio-wrapper')]
+                      .find(item=>item.textContent.trim()==='30分钟')?.click();
+                });</script>'''
+                return web.Response(text=html.replace("</body>", script + "</body>"),
+                                    content_type="text/html")
+
+            helper.httpserver_index_handler = index
         helper._conn_diff_chans = set()
         helper._http_server_host = "127.0.0.1"
         helper._http_server_port = int(address.rsplit(":", 1)[1])

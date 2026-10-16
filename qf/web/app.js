@@ -6,12 +6,14 @@ let api, state={catalog:[],rows:[],favorites:[]}, selected=null, page=0, favorit
 let ticking=false, pending=null, sending=false, lastView='', currentChart='';
 const favoriteQueue=[];
 let favoriteSaving=false, favoriteVersion=0;
+let nativeLabelsReady=false;
+const labels=window.QfLabels;
 const text = (tag,value,cls) => {const e=document.createElement(tag); e.textContent=value; if(cls)e.className=cls;return e};
 const number = (value,digits=0) => value===null||value===undefined?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:digits});
 const notice = message => {$('notice').textContent=message||''};
 function filtered(){const query=$('search').value.trim().toLowerCase(),exchange=$('exchange').value;
   return state.catalog.filter(r=>(!exchange||r.exchange===exchange)&&(!favoritesOnly||state.favorites.includes(r.continuous))&&
-    [r.name,r.product,r.exchange,r.continuous].join(' ').toLowerCase().includes(query));}
+    [r.name,r.product,r.exchange,labels.exchangeName(r.exchange),r.continuous].join(' ').toLowerCase().includes(query));}
 async function sendView(symbols){const key=JSON.stringify([symbols,selected]);if(key===lastView)return;
   lastView=key;pending={symbols,selected};if(sending)return;sending=true;
   try{while(pending){const request=pending;pending=null;const result=await api.set_view(request.symbols,request.selected);if(!result.ok)notice(result.reason)}}
@@ -34,8 +36,10 @@ function render(){const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40)
     const favorite=text('button',state.favorites.includes(item.continuous)?'★':'☆',state.favorites.includes(item.continuous)?'saved':'');
     favorite.title='添加或移除自选';favorite.onclick=event=>{event.stopPropagation();toggleFavorite(item.continuous)};
     const star=document.createElement('td');star.append(favorite);row.append(star);
-    const name=text('td',item.name);name.append(text('small',item.product+' · '+item.exchange));row.append(name);
-    row.append(text('td',q.underlying||'—'),text('td',number(q.last_price,3)),
+    const name=text('td',labels.productName(item));name.append(text('small',labels.exchangeName(item.exchange)+' · '+item.product));row.append(name);
+    const actual=text('td',q.underlying?labels.contractName(q.underlying,state.catalog):'等待主力合约');
+    if(q.underlying)actual.append(text('small',q.underlying));
+    row.append(actual,text('td',number(q.last_price,3)),
       text('td',q.change_percent==null?'—':number(q.change_percent,2)+'%',q.change_percent>0?'up':q.change_percent<0?'down':''),
       text('td',number(q.volume)),text('td',number(q.open_interest)),text('td',q.quote_time?q.quote_time.slice(11,19):'尚无行情'));
     $('market-rows').append(row);}
@@ -44,14 +48,17 @@ function render(){const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40)
   $('catalog-note').textContent=state.cache_state==='live'?'目录来自当前账户 · 报价以右侧时间为准':state.catalog.length?'上次保存的品种目录 · 连接后更新':'尚无本机目录，请先连接';
   $('favorite-count').textContent=state.favorites.length;$('favorites').replaceChildren();
   for(const symbol of state.favorites){const item=state.catalog.find(r=>r.continuous===symbol),q=quotes.get(symbol)||{};
-    const row=text('div','', 'favorite'),label=text('div',item?item.name:symbol);label.append(text('small',q.underlying||symbol));
+    const row=text('div','', 'favorite'),label=text('div',item?labels.productName(item):symbol);
+    label.append(text('small',labels.contractName(q.underlying||symbol,state.catalog)));label.title=q.underlying||symbol;
     row.append(label,text('span',number(q.last_price,2)));row.onclick=()=>choose(symbol);
     const remove=text('button','×');remove.title='移除自选';remove.onclick=event=>{event.stopPropagation();toggleFavorite(symbol)};row.append(remove);$('favorites').append(row)}
   if(!state.favorites.length)$('favorites').append(text('p','点击品种旁的 ☆，建立自己的观察列表。'));
   const item=state.catalog.find(r=>r.continuous===selected),quote=quotes.get(selected);
-  $('chart-title').textContent=item?item.name+' · 分钟观察':'选择一个品种查看分钟图';
-  $('chart-detail').textContent=item?item.continuous+' → '+(quote?.underlying||'等待主力映射'):'主连用于观察，实际合约单独标识';
-  const address=state.selected===selected&&/^http:\/\/127\.0\.0\.1:\d{1,5}\/?$/.test(state.chart_url||'')?state.chart_url:'';
+  $('chart-title').textContent=item?labels.productName(item)+' · 行情图':'选择一个品种查看行情图';
+  $('chart-detail').textContent=item?'观察品种：'+labels.contractName(item.continuous,state.catalog)+'；当前主力：'+
+    (quote?.underlying?labels.contractName(quote.underlying,state.catalog):'等待服务确认'):'选择品种后显示当前主力合约的中文名称与交割月份';
+  $('chart-detail').title=item?item.continuous+' → '+(quote?.underlying||'等待确认'):'';
+  const address=nativeLabelsReady&&state.selected===selected&&/^http:\/\/127\.0\.0\.1:\d{1,5}\/?$/.test(state.chart_url||'')?state.chart_url:'';
   if(address!==currentChart){currentChart=address;$('chart').src=address||'about:blank'}
   $('chart').hidden=!address;$('chart-placeholder').hidden=!!address;
   if(api&&state.catalog.length)sendView(visible.map(r=>r.continuous));
@@ -79,4 +86,11 @@ for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>
   for(const section of ['home','research','news','settings'])$(section+'-panel').hidden=section!==view;
   $('market-layout').hidden=!['home','market'].includes(view);
   $('page-title').textContent={home:'研究工作台',market:'行情与品种',research:'策略研究与模拟',news:'新闻与事件',settings:'设置与资源'}[view]};
+function sendChartLabels(){if(!currentChart)return;
+  $('chart').contentWindow.postMessage({kind:'qf-chart-labels',catalog:state.catalog},new URL(currentChart).origin)}
+$('chart').addEventListener('load',sendChartLabels);
+addEventListener('message',event=>{if(currentChart&&event.source===$('chart').contentWindow&&
+  event.origin===new URL(currentChart).origin&&event.data?.kind==='qf-chart-ready')sendChartLabels()});
+addEventListener('qf-native-labels-ready',()=>{nativeLabelsReady=true;if(api)render()});
+addEventListener('qf-native-labels-error',()=>notice('图表中文说明未能准备完成，请重新打开工作台。'));
 addEventListener('pywebviewready',()=>{api=window.pywebview.api;tick();setInterval(tick,700)});

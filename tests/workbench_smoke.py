@@ -21,7 +21,11 @@ from qf.workbench import WorkbenchBridge  # noqa: E402
 
 
 def exercise():
-    server = threading.Thread(target=serve, daemon=True)
+    native_data = {"action": {"mode": "run", "accounts": {}, "user_name": "offline",
+                              "file_name": "workbench_entry.py"},
+                   "subscribed": [{"symbol": "DCE.m2701", "dur_nano": 60000000000},
+                                  {"symbol": "SHFE.rb2701", "dur_nano": 60000000000}]}
+    server = threading.Thread(target=lambda: serve(native_data), daemon=True)
     server.start()
     assert ready.wait(5)
     market_module.chart_address = lambda: address
@@ -71,6 +75,19 @@ def exercise():
                     window.evaluate_js('document.querySelector("#market-rows tr").click()')
                     check('document.querySelector("#chart-title").textContent.includes("豆粕")')
                     check('document.querySelector("#chart").hidden===false')
+                    detail = window.evaluate_js(
+                        'document.querySelector("#chart-detail").textContent')
+                    assert "2027年1月合约" in detail and "KQ.m@" not in detail, detail
+                    assert window.evaluate_js(
+                        'document.querySelector("#market-rows td:nth-child(3)").textContent'
+                    ).startswith("豆粕")
+                    names = window.evaluate_js('''[
+                        QfLabels.contractName('CZCE.WH701',[
+                          {name:'强麦主连',exchange:'CZCE',product:'WH'}]),
+                        QfLabels.contractName('SHFE.zz2701',[]),
+                        QfLabels.translate('SHFE.rb2701 30m',state.catalog)]''')
+                    assert names == ["强麦 · 701合约（1月）", "名称待确认（SHFE.zz2701）",
+                                     "螺纹钢 · 2027年1月合约 30分钟"]
                     window.evaluate_js('document.querySelector("#search").value="";'
                                        'document.querySelector("#search").dispatchEvent('
                                        'new Event("input"));'
@@ -89,6 +106,10 @@ def exercise():
                         )
                         from System import Action
                         from System.IO import FileAccess, FileMode, FileStream
+                        if len(sys.argv) > 2 and sys.argv[2] == "chart":
+                            window.evaluate_js('document.querySelector("#chart-title")'
+                                               '.scrollIntoView({block:"start"})')
+                            time.sleep(0.4)
                         stream = FileStream(str(Path(sys.argv[1]).resolve()), FileMode.Create,
                                             FileAccess.Write)
                         tasks = []

@@ -74,20 +74,20 @@ pywebview 版本及 Python 要求已通过 PyPI 官方元数据核实，实际 W
 **Interfaces:**
 - Consumes：原有环境验证与 locked 安装；`qf.desktop.allowed_chart_url(url)`。
 - Produces：`run_window(page: Path, bridge: object, request_close: Callable[[], bool]) -> None`；
-  `show_chart(url: str) -> None`，只接受已验证的本机地址。
+  `show_chart(url: str) -> str`，只接受并返回已验证的本机地址，由可信页面内嵌图表。
 
-- [ ] **Step 1：编写失败测试。** `test_requires_webview2_without_ie_fallback`：引擎不可用明确失败；
+- [x] **Step 1：编写失败测试。** `test_requires_webview2_without_ie_fallback`：引擎不可用明确失败；
   `test_chart_rejects_external_address`：外网/含凭证地址不进入内嵌视图；
   `test_close_waits_for_session_cleanup`：关闭请求未完成时窗口不销毁，完成后正常退出。
-- [ ] **Step 2：运行** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_window_host.py`，确认缺接口失败。
-- [ ] **Step 3：补最小实现及依赖。** 新增 `desktop=["pywebview==6.2.1"]` 依赖组，setup/check 同步该组；
+- [x] **Step 2：运行** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_window_host.py`，确认缺接口失败。
+- [x] **Step 3：补最小实现及依赖。** 新增 `desktop=["pywebview==6.2.1"]` 依赖组，setup/check 同步该组；
   经 `.\tools\setup.ps1 -UpdateLock` 安装；固定 `gui="edgechromium"`，不静默回退旧引擎。
   扩展已有安装脚本行为测试，确认 desktop 依赖组确实随安装/检查使用，环境恢复保护不退化。
   主窗口仅加载项目可信资源；原生图表视图不暴露应用业务桥接；外链走系统浏览器。
-- [ ] **Step 4：运行定向测试及真实 WebView2 离线烟测。** 加载本地测试页、调用最小桥接、
+- [x] **Step 4：运行定向测试及真实 WebView2 离线烟测。** 加载本地测试页、调用最小桥接、
   展示真实 SDK 本地 HTTP 图形资源（内存认证替身，无账户连接），关闭后端口与线程退出。
   无法在当前环境可靠内嵌时记录确切原因，不替换 SDK、不降低到 IE；解决后才标记完成。
-- [ ] **Step 5：执行** `.\tools\check.ps1`，通过后提交 `feat: add isolated WebView2 window host`。
+- [x] **Step 5：执行** `.\tools\check.ps1`，通过后提交 `feat: add isolated WebView2 window host`。
 
 ### Task 2：中文目录、行情行与自选持久化
 
@@ -100,16 +100,16 @@ pywebview 版本及 Python 要求已通过 PyPI 官方元数据核实，实际 W
 - Produces：`WorkbenchStore(root: Path).load() -> dict`；
   `save(catalog: list[dict], favorites: list[str]) -> None`，只持久化目录和自选。
 
-- [ ] **Step 1：编写失败测试。** `test_searches_chinese_code_and_exchange` 用“螺纹钢/rb/SHFE”检索同一手工夹具；
+- [x] **Step 1：编写失败测试。** `test_searches_chinese_code_and_exchange` 用“螺纹钢/rb/SHFE”检索同一手工夹具；
   `test_missing_name_and_nonfinite_prices_are_explicit` 校验缺名称、NaN、零结算价；
   `test_old_cache_contains_no_live_quotes_or_credentials` 检查持久化白名单；
   `test_corrupt_settings_is_reported_without_overwriting_original` 检查损坏配置可见且不被无声覆盖。
-- [ ] **Step 2：运行** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_market.py tests/test_workbench_store.py`，确认新功能失败。
-- [ ] **Step 3：实现标准化和存储。** 使用天勤 `instrument_name/exchange_id/product_id/underlying_symbol`；
+- [x] **Step 2：运行** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_market.py tests/test_workbench_store.py`，确认新功能失败。
+- [x] **Step 3：实现标准化和存储。** 使用天勤 `instrument_name/exchange_id/product_id/underlying_symbol`；
   最新价和前结算可用时计算涨跌幅，否则 null。原子保存到 Git 忽略的 `data/workbench/`，不保存报价或凭证。
   数据状态区分尚未就绪、连接中断和已有行情；行情时间直接显示，休市不凭无新 Tick 判定断线。
-- [ ] **Step 4：运行定向测试**，确认中文/代码检索、null 数值、旧缓存标识与写入中断保护通过。
-- [ ] **Step 5：执行** `.\tools\check.ps1`，通过后提交 `feat: add Chinese futures catalog and watchlist storage`。
+- [x] **Step 4：运行定向测试**，确认中文/代码检索、null 数值、旧缓存标识与写入中断保护通过。
+- [x] **Step 5：执行** `.\tools\check.ps1`，通过后提交 `feat: add Chinese futures catalog and watchlist storage`。
 
 ### Task 3：有界订阅的只读行情后台
 
@@ -121,19 +121,19 @@ pywebview 版本及 Python 要求已通过 PyPI 官方元数据核实，实际 W
   `set_view(continuous: list[str], selected: str | None) -> None`；`snapshot() -> dict`；
   `stop() -> None`；`running: bool`。快照为复制值，UI 不读取 SDK 活引用。
 
-- [ ] **Step 1：编写失败测试。** `test_readonly_session_never_inserts_orders`；
+- [x] **Step 1：编写失败测试。** `test_readonly_session_never_inserts_orders`；
   `test_latest_selection_wins_and_subscription_budget_is_bounded`；
   `test_main_mapping_changes_update_display_without_trading`；
   `test_stop_during_connect_closes_returned_api_and_masks_error`；
   `test_heartbeat_does_not_replace_quote_timestamp`。SDK 替身下单接口直接失败，真实时间/选中顺序用手工夹具。
-- [ ] **Step 2：运行** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_market_session.py`，确认新接口失败。
-- [ ] **Step 3：实现会话。** API 只在一个后台线程创建/使用/关闭，显式 `TqSim()`、`debug=False`、`disable_print=True`；
+- [x] **Step 2：运行** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_market_session.py`，确认新接口失败。
+- [x] **Step 3：实现会话。** API 只在一个后台线程创建/使用/关闭，显式 `TqSim()`、`debug=False`、`disable_print=True`；
   查询 CONT 目录，订阅可见与自选并读取选中品种分钟线，所有变化通过 `wait_update()` 推进。
   初版活跃订阅预算为 100 个行情对象（含选中真实合约）；超预算明确反馈。
   SDK 无单品种退订时，以重新创建只读行情会话清理累计订阅，不触碰模拟账户会话。
   选择命令以递增版本合并，只处理最新请求；映射更新立即显示，绝不调用目标持仓或下单。
-- [ ] **Step 4：运行定向测试**，确认异常收尾、数据时间、订阅预算及快速切换均通过。
-- [ ] **Step 5：执行** `.\tools\check.ps1`，通过后提交 `feat: stream bounded read-only main-contract quotes`。
+- [x] **Step 4：运行定向测试**，确认异常收尾、数据时间、订阅预算及快速切换均通过。
+- [x] **Step 5：执行** `.\tools\check.ps1`，通过后提交 `feat: stream bounded read-only main-contract quotes`。
 
 ### Task 4：工作台桥接和中文页面
 
@@ -146,20 +146,20 @@ pywebview 版本及 Python 要求已通过 PyPI 官方元数据核实，实际 W
   `open_resource(key)`、`disconnect()`；各返回 `{ok: bool, reason: str}` 或白名单状态。
   资源 key 固定映射官方文档/旧研究入口，不能传任意路径、命令或模块名。
 
-- [ ] **Step 1：编写失败测试。** `test_bridge_serializes_only_public_fields` 将假令牌混入后台替身并确认不外泄；
+- [x] **Step 1：编写失败测试。** `test_bridge_serializes_only_public_fields` 将假令牌混入后台替身并确认不外泄；
   `test_stale_selection_cannot_replace_current_chart`；`test_resource_keys_do_not_execute_arbitrary_commands`；
   `test_favorites_are_validated_and_survive_restart`；`test_closing_window_waits_until_disconnect_finishes`。
-- [ ] **Step 2：运行** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_workbench.py`，确认功能缺失失败。
-- [ ] **Step 3：实现桥接和页面。** 页顶状态、左侧导航、中间品种表与选中 K 线、右侧自选/新闻区域。
+- [x] **Step 2：运行** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_workbench.py`，确认功能缺失失败。
+- [x] **Step 3：实现桥接和页面。** 页顶状态、左侧导航、中间品种表与选中 K 线、右侧自选/新闻区域。
   首页研究入口保持可见；未接入研究表单用明确说明，提供旧研究入口，不制作假回测结果。
   表格中文/代码检索、交易所筛选、收藏、选中合约详情；显示主连与真实主力、数据时间和连接状态。
   实时列表每页 40 行，自选最多 50 项，选择与真实主力引用合并去重后纳入 Task 3 的 100 对象预算。
   登录提交后清空页面密码框，页面状态/缓存中不保留凭证；业务桥接只供可信主页面使用。
   新闻区域显示真实未接入状态和官方来源链接，不自动抓取网页或启用事件规则。
-- [ ] **Step 4：离线真实窗口交互验收。** 用无账户服务替身检查中文搜索、切换/收藏、图形内嵌、
+- [x] **Step 4：离线真实窗口交互验收。** 用无账户服务替身检查中文搜索、切换/收藏、图形内嵌、
   断开/重连状态和关闭；每个窗口测试在独立进程运行，避免重复 Tk/Tcl 生命周期影响。
   检查默认 1280×820 及较小窗口下主要控件可达；不自动打开外部行情浏览器。
-- [ ] **Step 5：执行** `.\tools\check.ps1`，通过后提交 `feat: add the Chinese desktop market workbench`。
+- [x] **Step 5：执行** `.\tools\check.ps1`，通过后提交 `feat: add the Chinese desktop market workbench`。
 
 ### Task 5：启动切换、文档与最终验收
 
@@ -168,13 +168,13 @@ pywebview 版本及 Python 要求已通过 PyPI 官方元数据核实，实际 W
 **Interfaces:** 新入口沿用原 `tools/gui_entry.py` 的环境变量隔离和 `verify_environment()`；
 旧 `tools/gui_entry.py` 保留，桌面快捷方式仍指向原 VBS，VBS 在最终离线验收后才切换新入口。
 
-- [ ] **Step 1：编写失败测试。** `test_new_entry_isolates_environment_and_uses_project_runtime`；
+- [x] **Step 1：编写失败测试。** `test_new_entry_isolates_environment_and_uses_project_runtime`；
   `test_missing_webview_runtime_is_actionable_without_account_output`；
   `test_launcher_opens_workbench_and_retains_legacy_entry`。运行实际入口/受控子进程，不能只搜索脚本文字。
-- [ ] **Step 2：运行定向测试**，确认入口尚未实现时失败。
-- [ ] **Step 3：实现并更新文档。** 新增依赖随锁定安装；缺 WebView2 明确报告并提供官方安装入口，
+- [x] **Step 2：运行定向测试**，确认入口尚未实现时失败。
+- [x] **Step 3：实现并更新文档。** 新增依赖随锁定安装；缺 WebView2 明确报告并提供官方安装入口，
   不擅自弹出安装器；已有运行中的旧窗口不终止。说明本批范围及后三批目标，不宣称已完成策略界面。
-- [ ] **Step 4：运行** `.\tools\check.ps1` 与双击启动离线验收；一次独立完整分支复核。
+- [x] **Step 4：运行** `.\tools\check.ps1` 与双击启动离线验收；一次独立完整分支复核。
   关键发现用复现测试修复；只有文案/边角建议记录后由用户选择，不混入本批。
 - [ ] **Step 5：用户本机安全输入后联网验收**：中文目录实际返回、自选行情更新、真实主力映射、
   选中分钟图、关闭释放；休市时明确只能验收读取，不能声称已验收开盘实时更新。
@@ -188,4 +188,29 @@ pywebview 版本及 Python 要求已通过 PyPI 官方元数据核实，实际 W
 - `catalog/rows/selected/chart_url` 为共同字段；SDK 活引用、认证对象及账户原始响应不越过后台边界。
 - 登录、选择、关闭等跨线程请求先序列化；不存在 UI 线程直接调用 TqApi 的路径。
 - 默认沿用当前用户指定项目和分支；执行前记录 Git 工作区与基线，不擅自切走用户已打开的软件目录。
-- 计划供用户审阅；用户已确认整体设计，但尚未审阅本文件。审阅后沿用本会话逐项实现方式。
+- 用户已审阅并以“开始执行”确认本计划；沿用本会话逐项实现方式。
+
+## 实施与验收记录（2026-10-16）
+
+- 基线 `b94d21a`；第一批代码已实现。Task 1—4 与 Task 5 离线部分通过，联网验收待用户本机输入。
+- `tools/check.ps1`：111 passed in 26.43s；Ruff、依赖一致性、SDK 135 项资源哈希和封存校验通过。
+- 真实 WebView2 离线窗口验证：本机 SDK 图形资源、桥接、中文搜索、切换、自选、980 像素布局、断开、
+  VBS 启动及合作关闭。数据为受控替身，未建立账户会话。
+- 一次独立完整复核：无 Critical；两项 Important 已修复，并分别观察复现测试失败后通过。
+  连续收藏串行保存，轮询不会覆盖保存中的状态；映射在 `wait_update()` 更新后再次核对，避免新合约配旧图。
+- 延后的小项：行情表只显示时分秒，尚未增加完整日期悬浮提示。休市/跨日报价日期显示待补充。
+
+本次裁定及边界：
+
+1. `show_chart()` 返回已校验本机地址，由隔离 iframe 显示，不维护全局窗口对象；
+   若内嵌生命周期需调整，改动集中在图表接入处。
+2. 真实权限、中文目录、开盘更新、原生图形真实数据留给本机联网验收；
+   无凭证时不代建会话，若实际权限或呈现不同，需针对该返回继续排查。
+3. 真实网络故障下 SDK 构造、查询、关闭耗时尚未实测；受控停止通过，窗口等待释放而不强杀，
+   异常网络下仍可能等待较久，需后续联网演练确认。
+4. 原研究执行及用户明确延期事项保持原范围；回归检查通过，本批只读行情，
+   原研究流程既有局限仍需独立验收。
+
+用户验收顺序：重新双击桌面“天勤策略工作台” → 输入快期凭证并连接行情 → 搜索中文品种并切换分钟图 →
+连续添加自选 → 断开并关闭。开盘时另核对报价时间持续变化；休市只能验收读取与操作。
+后续进入策略、参数与回测复盘批次；实验比较、持续模拟、新闻与自动事件规则继续保留。

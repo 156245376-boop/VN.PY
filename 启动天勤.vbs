@@ -4,7 +4,7 @@ Set fs = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
 root = fs.GetParentFolderName(WScript.ScriptFullName)
 python = fs.BuildPath(root, ".venv-tqsdk\Scripts\pythonw.exe")
-entry = fs.BuildPath(root, "tools\gui_entry.py")
+entry = fs.BuildPath(root, "tools\workbench_entry.py")
 If Not fs.FileExists(python) Then
     MsgBox "Python environment is missing. Run tools/setup.ps1 first.", 48, "TqSdk"
     WScript.Quit 1

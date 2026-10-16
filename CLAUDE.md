@@ -8,7 +8,10 @@
 | --- | --- |
 | `pyproject.toml`、`uv.lock` | 新路线依赖及可复现版本 |
 | `.venv-tqsdk/` | 当前环境，Python 3.13.11 / TqSdk 3.10.2 |
-| `启动天勤.vbs`、`tools/gui_entry.py` | 双击启动中文窗口，隔离环境并验证 |
+| `启动天勤.vbs`、`tools/workbench_entry.py` | 双击启动独立 WebView2 工作台，隔离环境并验证 |
+| `qf/workbench.py`、`qf/window_host.py`、`qf/web/` | 可信桌面桥接、窗口与中文页面 |
+| `qf/market.py`、`qf/market_session.py`、`qf/workbench_store.py` | 中文目录、只读行情与本机自选 |
+| `tools/gui_entry.py` | 保留的原研究窗口入口 |
 | `qf/gui.py`、`qf/desktop.py` | 内存凭证、后台运行、停止和结果展示 |
 | `qf/catalog_gui.py`、`qf/native_catalog.py` | 天勤现成功能目录、示例只读查看与资源核对 |
 | `tools/setup.ps1` | 锁定安装，隔离旧环境变量 |
@@ -27,4 +30,4 @@
 旧 `.venv` 原地保留，不用于当前安装与运行。
 旧需求、代码和 ADR 均已封存，默认不读取；过渡方案和实施记录不属于日常必读资料。
 官方组件与权限边界按需查 `docs/tqsdk-native-kit.md`，不必为日常开发加载全部示例。
-下一阶段桌面工作台设计已确认，第一批实施计划待审阅；入口见需求文档末节。
+桌面工作台第一批已实施，离线检查通过；真实目录/实时行情需用户本机验证。后续目标见需求末节。

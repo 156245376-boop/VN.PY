@@ -266,3 +266,40 @@ def test_resume_does_not_time_out_a_target_never_submitted_in_this_process(
                       stop_requested=lambda: Api.instances[-1].steps >= 2)
     assert resumed["status"] == "stopped"
     assert Api.instances[-1].target.targets == []
+
+
+def test_progress_reports_data_ready_before_observing_and_stopping(tmp_path, sdk):
+    events = []
+    result = execute("paper", config(), tmp_path, ("u", "p"), sdk=sdk,
+                     stop_requested=lambda: True,
+                     progress=lambda stage, **fields: events.append((stage, fields)))
+    assert result["status"] == "stopped"
+    stages = [stage for stage, fields in events]
+    assert stages.index("connecting") < stages.index("data_ready") < stages.index("observing")
+    assert stages.index("observing") < stages.index("stopping")
+    assert all(not hasattr(api, "target") for api in Api.instances)
+
+
+def test_progress_callback_failure_cannot_interrupt_cleanup(tmp_path, sdk):
+    def broken(stage, **fields):
+        raise OSError("terminal is closed")
+    result = execute("paper", config(), tmp_path, ("u", "p"), sdk=sdk,
+                     stop_requested=lambda: True, progress=broken)
+    assert result["status"] == "stopped"
+    assert Api.instances[0].closed
+
+
+def test_quiet_market_still_emits_periodic_heartbeat(tmp_path, sdk, monkeypatch):
+    import itertools
+
+    import qf.runtime as runtime
+    clock = itertools.count(0, 15)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: next(clock))
+    events = []
+    result = execute("paper", config(), tmp_path, ("u", "p"), sdk=sdk,
+                     stop_requested=lambda: Api.instances[-1].steps >= 2,
+                     progress=lambda stage, **fields: events.append((stage, fields)))
+    assert result["status"] == "stopped"
+    heartbeats = [fields["elapsed"] for stage, fields in events if stage == "heartbeat"]
+    assert heartbeats == [15, 30]
+    assert not hasattr(Api.instances[0], "target")

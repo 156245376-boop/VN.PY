@@ -12,6 +12,39 @@ from qf.config import load_config
 from qf.runtime import execute
 
 
+def console_progress(stream):
+    messages = {
+        "credentials_received": "凭证输入完成，准备启动（不会显示账号和密码）。",
+        "sdk_loading": "正在加载天勤 SDK……",
+        "sdk_ready": "天勤 SDK 已加载。",
+        "record_creating": "正在创建本机实验记录……",
+        "connecting": "正在连接天勤账户并完成认证，请稍候……",
+        "waiting_data": "账户已连接，正在等待主力合约、行情和分钟数据……",
+        "data_ready": "行情、分钟线和账户数据已就绪。",
+        "backtesting": "正在进行历史回测……",
+        "stopping": "正在收尾并核对状态，请稍候……",
+        "done": "本次运行已结束，正在输出结果。",
+    }
+
+    def notify(stage, **fields):
+        if stage in {"observing", "paper_active", "heartbeat"}:
+            elapsed = fields.get("elapsed", 0)
+            duration = fields.get("duration", 0)
+            if (type(elapsed) is not int or type(duration) is not int
+                    or elapsed < 0 or duration < 0):
+                return
+            total = f" / {duration} 秒" if duration else " 秒（持续运行）"
+            prefix = {"observing": "模拟账户只读观察已开始，不发送委托",
+                      "paper_active": "模拟交易已启用", "heartbeat": "程序仍在运行"}[stage]
+            message = f"{prefix}；已运行 {elapsed}{total}。"
+        else:
+            message = messages.get(stage)
+        if message:
+            print(message, file=stream, flush=True)
+
+    return notify
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="天勤研究与快期模拟；不提供实盘入口")
     parser.add_argument("mode", choices=["data-check", "backtest", "paper"])
@@ -47,14 +80,16 @@ def main(argv=None):
 
     previous = signal.signal(signal.SIGINT, request_stop)
     logging_level = logging.root.manager.disable
+    progress = console_progress(sys.stdout)
     try:
+        progress("credentials_received")
         # SDK通知、认证异常、第三方输出一律不进入终端与实验文件。
         logging.disable(logging.CRITICAL)
         with open(os.devnull, "w", encoding="utf-8") as sink:
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
                 result = execute(args.mode, config, root / "results", (user, password),
                                  activate=args.activate, resume=args.resume, duration=args.duration,
-                                 stop_requested=lambda: stop)
+                                 stop_requested=lambda: stop, progress=progress)
     except Exception:
         result = {"status": "failed", "reason": "startup_or_local_record_error"}
     finally:

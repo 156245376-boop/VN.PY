@@ -17,6 +17,15 @@ from qf.strategy import completed_signal
 DISCONNECTED = {2019112910, 2019112911}
 
 
+def emit_progress(progress, stage, **fields):
+    if progress is not None:
+        try:
+            progress(stage, **fields)
+        except Exception:
+            # 终端关闭或输出失败不能妨碍运行状态核对和撤单收尾。
+            pass
+
+
 def provenance():
     root = Path(__file__).resolve().parent.parent
     digest = hashlib.sha256()
@@ -103,7 +112,8 @@ def tracked_api(sdk, journal, **kwargs):
 
 
 def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
-         duration=0, stop_requested=lambda: False, fee_multiplier=1):
+         duration=0, stop_requested=lambda: False, fee_multiplier=1, progress=None):
+    emit_progress(progress, "record_creating")
     if resume:
         journal = Journal.resume(root / resume, config.public())
     else:
@@ -126,6 +136,7 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
                 raise Frozen("resume_account_mismatch")
             journal.set("identity_salt", salt)
             journal.set("account_binding", binding)
+        emit_progress(progress, "connecting")
         account = sdk.TqKq() if is_paper else sdk.TqSim(init_balance=config.initial_balance)
         kwargs = {"account": account, "auth": sdk.TqAuth(*credentials)}
         if mode == "backtest":
@@ -134,6 +145,7 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
             start_ns, end_ns = kwargs["backtest"]._start_dt, kwargs["backtest"]._end_dt
             journal.set("replay_bounds_ns", [start_ns, end_ns])
         api = tracked_api(sdk, journal, **kwargs)
+        emit_progress(progress, "waiting_data")
         if mode == "backtest":
             symbol = config.symbol
             continuous = None
@@ -157,6 +169,7 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
                                 and math.isfinite(acct.balance)), config.timeout_seconds, seen)
         journal.set("initial_equity", float(acct.balance))
         journal.set("data_time", str(quote.datetime))
+        emit_progress(progress, "data_ready")
         if mode == "data-check":
             journal.set("data_check", {"continuous": config.continuous, "symbol": symbol,
                                        "quote_time": str(quote.datetime),
@@ -188,11 +201,18 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
         if guard.enabled:
             task = sdk.TargetPosTask(api, symbol)
         start_time = time.monotonic()
+        emit_progress(progress, ("paper_active" if activate else "observing")
+                      if is_paper else "backtesting", elapsed=0, duration=duration)
+        next_heartbeat = 15
         pending_since = None
         submitted_target = None
         # paper 启动时跳过已有历史柱；只从下一根新完成柱开始。
         initial_bar = int(serial.iloc[-2].datetime) if is_paper else 0
         while True:
+            elapsed = int(time.monotonic() - start_time) if is_paper else 0
+            if is_paper and elapsed >= next_heartbeat:
+                emit_progress(progress, "heartbeat", elapsed=elapsed, duration=duration)
+                next_heartbeat = (elapsed // 15 + 1) * 15
             check_connections(api, seen)
             for fill in trades_snapshot(trades):
                 guard.accept_fill(fill)
@@ -248,6 +268,7 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
     finally:
         if guard:
             guard.enabled = False
+        emit_progress(progress, "stopping")
         confirmed = task is None
         if api:
             if mode == "backtest":
@@ -292,11 +313,12 @@ def _one(mode, config, root, credentials, sdk, *, activate=False, resume=None,
         journal.export()
         journal.close()
         result.update(status=status, reason=reason)
+        emit_progress(progress, "done")
     return dict(result, status=status, reason=reason)
 
 
 def execute(mode, config, root, credentials, *, sdk=None, activate=False, resume=None,
-            duration=0, stop_requested=lambda: False):
+            duration=0, stop_requested=lambda: False, progress=None):
     if mode not in {"data-check", "backtest", "paper"}:
         raise ValueError("不支持的运行模式")
     if (activate or resume) and mode != "paper":
@@ -304,10 +326,12 @@ def execute(mode, config, root, credentials, *, sdk=None, activate=False, resume
     if resume and (Path(resume).name != resume or resume in {".", ".."}):
         raise ValueError("恢复参数必须是本地 run_id")
     if sdk is None:
+        emit_progress(progress, "sdk_loading")
         import tqsdk as sdk
+        emit_progress(progress, "sdk_ready")
     root.mkdir(parents=True, exist_ok=True)
     arguments = dict(activate=activate, resume=resume, duration=duration,
-                     stop_requested=stop_requested)
+                     stop_requested=stop_requested, progress=progress)
     if mode == "paper":
         with PaperLock(root):
             return _one(mode, config, root, credentials, sdk, **arguments)

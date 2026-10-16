@@ -48,7 +48,7 @@ try {
             & uv pip check --python $python --no-python-downloads
         }
         Invoke-Check 'pytest' { & $python -I -B -m pytest }
-        Invoke-Check 'ruff' { & $python -I -B -m ruff check tools tests }
+        Invoke-Check 'ruff' { & $python -I -B -m ruff check qf tools tests }
         Write-Host 'All checks passed. No account session was created.'
     }
     finally { Pop-Location }

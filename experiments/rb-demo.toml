@@ -1,0 +1,10 @@
+# 链路验收示例，不代表盈利策略或实盘参数。
+symbol = "SHFE.rb2505"
+continuous = "KQ.m@SHFE.rb"
+start = 2025-03-03
+end = 2025-03-07
+initial_balance = 100000.0
+period = 15
+lots = 1
+timeout_seconds = 30
+execution_timeout_seconds = 90

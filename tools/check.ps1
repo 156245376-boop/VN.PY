@@ -42,7 +42,8 @@ try {
         }
         Invoke-Check 'installed versions' {
             & uv sync --project $projectRoot --python 3.13.11 `
-                --locked --check --extra dev --extra official-examples --no-python-downloads
+                --locked --check --extra dev --extra official-examples --extra desktop `
+                --no-python-downloads
         }
         Invoke-Check 'dependency compatibility' {
             & uv pip check --python $python --no-python-downloads

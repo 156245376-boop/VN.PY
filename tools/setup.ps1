@@ -41,7 +41,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "uv lock update failed: $LASTEXITCODE" }
     }
     $syncOptions = @('--project', $projectRoot, '--python', '3.13.11', '--locked',
-                     '--extra', 'dev', '--extra', 'official-examples')
+                     '--extra', 'dev', '--extra', 'official-examples', '--extra', 'desktop')
     if ($RepairSdk) { $syncOptions += @('--reinstall-package', 'tqsdk') }
     & uv sync @syncOptions
     if ($LASTEXITCODE -ne 0) { throw "uv sync failed: $LASTEXITCODE" }

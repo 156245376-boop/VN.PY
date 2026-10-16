@@ -111,7 +111,7 @@ try { & 'SCRIPT_PATH' OPERATION | Out-Null } catch { $succeeded = $false }
     assert info["succeeded"] is True
     assert info["restored"] == "old-environment"
     expected = [["sync", "--project", str(project), "--python", "3.13.11", "--locked",
-                 "--extra", "dev", "--extra", "official-examples"]]
+                 "--extra", "dev", "--extra", "official-examples", "--extra", "desktop"]]
     if operation == "-UpdateLock":
         expected.insert(0, ["lock", "--project", str(project), "--python", "3.13.11"])
     else:

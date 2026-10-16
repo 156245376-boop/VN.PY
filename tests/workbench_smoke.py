@@ -29,7 +29,19 @@ def exercise():
     result, errors = {}, []
     with tempfile.TemporaryDirectory() as temp:
         session = market_module.MarketSession(sdk=sdk)
-        bridge = WorkbenchBridge(Path(temp), session)
+
+        class DelayedFavorites(WorkbenchBridge):
+            def __init__(self):
+                super().__init__(Path(temp), session)
+                self._save_started = threading.Event()
+                self._save_release = threading.Event()
+
+            def set_favorites(self, symbols):
+                self._save_started.set()
+                assert self._save_release.wait(5)
+                return super().set_favorites(symbols)
+
+        bridge = DelayedFavorites()
         original = webview.create_window
 
         def create(*args, **kwargs):
@@ -59,8 +71,18 @@ def exercise():
                     window.evaluate_js('document.querySelector("#market-rows tr").click()')
                     check('document.querySelector("#chart-title").textContent.includes("豆粕")')
                     check('document.querySelector("#chart").hidden===false')
-                    window.evaluate_js('document.querySelector("#market-rows button").click()')
-                    check('document.querySelector("#favorite-count").textContent==="1"')
+                    window.evaluate_js('document.querySelector("#search").value="";'
+                                       'document.querySelector("#search").dispatchEvent('
+                                       'new Event("input"));'
+                                       'document.querySelectorAll("#market-rows button")'
+                                       '.forEach(button=>button.click())')
+                    assert bridge._save_started.wait(3)
+                    # 收藏保存未返回期间，真实页面仍会轮询旧的服务端状态。
+                    time.sleep(0.8)
+                    bridge._save_release.set()
+                    check('document.querySelector("#favorite-count").textContent==="2"')
+                    assert set(bridge.get_state()["favorites"]) == {
+                        "KQ.m@SHFE.rb", "KQ.m@DCE.m"}
                     if len(sys.argv) > 1:
                         from Microsoft.Web.WebView2.Core import (
                             CoreWebView2CapturePreviewImageFormat,

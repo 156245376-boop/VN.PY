@@ -4,6 +4,8 @@ const names = {idle:'等待连接',connecting:'正在连接',ready:'行情已就
   disconnected:'行情连接中断',stopping:'正在断开，请稍候',stopped:'已断开',failed:'连接未完成'};
 let api, state={catalog:[],rows:[],favorites:[]}, selected=null, page=0, favoritesOnly=false;
 let ticking=false, pending=null, sending=false, lastView='', currentChart='';
+const favoriteQueue=[];
+let favoriteSaving=false, favoriteVersion=0;
 const text = (tag,value,cls) => {const e=document.createElement(tag); e.textContent=value; if(cls)e.className=cls;return e};
 const number = (value,digits=0) => value===null||value===undefined?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:digits});
 const notice = message => {$('notice').textContent=message||''};
@@ -16,8 +18,14 @@ async function sendView(symbols){const key=JSON.stringify([symbols,selected]);if
   catch(_){notice('品种切换未完成，请检查连接。');lastView=''}finally{sending=false}}
 function choose(symbol){selected=symbol;currentChart='';$('chart').hidden=true;$('chart').src='about:blank';
   render();}
-async function toggleFavorite(symbol){const values=state.favorites.includes(symbol)?state.favorites.filter(s=>s!==symbol):[...state.favorites,symbol];
-  const result=await api.set_favorites(values);notice(result.reason);if(result.ok){state.favorites=values;lastView='';render()}}
+async function toggleFavorite(symbol){favoriteQueue.push(symbol);if(favoriteSaving)return;
+  favoriteSaving=true;favoriteVersion++;
+  try{while(favoriteQueue.length){const current=favoriteQueue.shift();
+    const values=state.favorites.includes(current)?state.favorites.filter(s=>s!==current):[...state.favorites,current];
+    try{const result=await api.set_favorites(values);notice(result.reason);
+      if(result.ok){state.favorites=values;lastView='';render()}}
+    catch(_){notice('自选保存未完成，请重试。')}}
+  }finally{favoriteSaving=false;favoriteVersion++}}
 function render(){const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40));page=Math.min(page,pages-1);
   const visible=all.slice(page*40,page*40+40),quotes=new Map(state.rows.map(r=>[r.continuous,r]));
   $('market-rows').replaceChildren();$('empty').hidden=visible.length>0;
@@ -48,7 +56,9 @@ function render(){const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40)
   $('chart').hidden=!address;$('chart-placeholder').hidden=!!address;
   if(api&&state.catalog.length)sendView(visible.map(r=>r.continuous));
 }
-async function tick(){if(ticking)return;ticking=true;try{state=await api.get_state();if(!selected)selected=state.selected;
+async function tick(){if(ticking)return;ticking=true;const version=favoriteVersion;try{const incoming=await api.get_state();
+  if(favoriteSaving||version!==favoriteVersion)incoming.favorites=state.favorites;
+  state=incoming;if(!selected)selected=state.selected;
   $('status').textContent=names[state.status]||'状态待核实';
   $('login').disabled=['connecting','ready','waiting_data','disconnected','stopping'].includes(state.status);
   $('disconnect').disabled=['idle','stopped','failed'].includes(state.status);

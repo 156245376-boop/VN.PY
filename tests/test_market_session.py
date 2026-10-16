@@ -117,6 +117,25 @@ def test_main_mapping_changes_update_display_without_trading(session):
     until(lambda: any(r["underlying"] == "SHFE.rb2705" for r in session.snapshot()["rows"]))
 
 
+def test_mapping_update_never_publishes_a_chart_for_the_previous_contract(session):
+    published = []
+    original = session._publish
+
+    def capture(**values):
+        if values.get("chart_url") and values.get("rows"):
+            actual = next(r["underlying"] for r in values["rows"]
+                          if r["continuous"] == "KQ.m@SHFE.rb")
+            published.append((actual, FakeApi.instances[-1].klines[-1]))
+        original(**values)
+
+    session._publish = capture
+    session.start("u", "p")
+    until(lambda: bool(published))
+    FakeApi.mapping = "SHFE.rb2705"
+    until(lambda: ("SHFE.rb2705", "SHFE.rb2705") in published)
+    assert all(display == chart for display, chart in published), published
+
+
 def test_stop_during_connect_closes_returned_api_and_masks_error(session):
     FakeApi.block = threading.Event()
     session.start("u", "p")

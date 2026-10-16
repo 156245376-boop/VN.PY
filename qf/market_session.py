@@ -176,6 +176,11 @@ class MarketSession:
                         subscribed.add(underlying)
                         chart_symbol = underlying
             api.wait_update(deadline=time.time() + 0.2)
+            # 映射可能在本次更新中改变；发布前再次核对，避免新合约配旧图。
+            if selected and chart_symbol and (
+                    quotes[selected].get("underlying_symbol", "") != chart_symbol):
+                self._publish(version=version, chart_url=None, reason="main_contract_changed")
+                return
             # SDK 3.10.2 无公开 connected；仅读取已核实的通知码，丢弃通知原文。
             for key, notify in list(getattr(api, "_data", {}).get("notify", {}).items()):
                 if key.startswith("_") or key in seen:

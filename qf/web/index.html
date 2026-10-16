@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>天勤策略工作台</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside class="navigation">
+  <div class="brand"><span class="brand-icon">研</span><div>策略工作台<small>天勤 · 个人量化研究</small></div></div>
+  <div class="nav-label">工作空间</div>
+  <nav aria-label="工作空间">
+    <button class="nav active" data-view="home">◫　研究首页</button>
+    <button class="nav" data-view="market">▥　行情与品种</button>
+    <button class="nav" data-view="research">⌘　策略与参数</button>
+    <button class="nav" data-view="research">↗　回测与比较</button>
+    <button class="nav" data-view="research">◎　模拟运行</button>
+    <button class="nav" data-view="news">◷　新闻与事件</button>
+  </nav>
+  <div class="nav-bottom"><button class="nav" data-view="settings">⚙　设置与资源</button>
+    <small>凭证仅在当前窗口中使用<br>关闭后不保存账号密码</small></div>
+</aside>
+<div class="workspace">
+  <header><div><span class="eyebrow">个人期货策略研究</span><h1 id="page-title">研究工作台</h1></div>
+    <div class="header-state"><span class="mode">只读行情</span><span id="status" role="status">正在准备窗口</span></div>
+  </header>
+  <section class="connection card">
+    <form id="login-form"><label>快期账号<input id="user" autocomplete="off" placeholder="天勤注册账号" required></label>
+      <label>密码<input id="password" type="password" autocomplete="off" placeholder="仅本次使用" required></label>
+      <button id="login" class="primary" disabled>连接行情</button></form>
+    <button id="disconnect" class="quiet">断开连接</button>
+    <span id="connection-note">连接后读取品种目录与实时主力行情</span>
+  </section>
+  <div id="notice" role="status"></div>
+  <section id="home-panel" class="welcome card">
+    <div><span class="eyebrow">下一次实验，从一个想法开始</span><h2>浏览市场，准备你的策略研究</h2>
+      <p>选择品种观察主力行情；在研究窗口运行示例回测，或核对快期模拟账户。</p></div>
+    <button class="primary" data-resource="legacy">打开策略研究窗口 ↗</button>
+  </section>
+  <section id="research-panel" class="card information" hidden>
+    <span class="eyebrow">研究与模拟</span><h2>继续你的策略验证</h2>
+    <p>现有研究窗口提供固定样本回测、基准与双倍费用比较，以及快期模拟观察和显式模拟策略。</p>
+    <p>自由选择策略参数、复制实验与历史 K 线复盘尚未接入此页面。</p>
+    <button class="primary" data-resource="legacy">打开现有研究窗口</button>
+  </section>
+  <section id="news-panel" class="card information" hidden>
+    <span class="eyebrow">新闻与财经日历</span><h2>关注影响交易的事件</h2>
+    <p>新闻源尚未连接。这里将展示事件时间、重要性、关联品种，以及开仓暂停和恢复条件。</p>
+    <p>事件自动保护当前未启用；已有模拟策略不会因此自动暂停。</p>
+    <button data-resource="calendar">查看金十财经日历 ↗</button>
+    <button data-resource="jin10">查看官方数据接入 ↗</button>
+  </section>
+  <section id="settings-panel" class="card information" hidden>
+    <span class="eyebrow">本机环境与资源</span><h2>天勤 TqSdk 3.10.2</h2>
+    <p>Python 3.13.11 · WebView2 独立窗口 · 行情只读会话。数据覆盖与权限按账户实际返回核实。</p>
+    <p>官方组件、示例源码和检查入口可在研究窗口的“天勤现成功能”中查看。</p>
+    <button data-resource="legacy">打开研究与资源窗口</button>
+    <button data-resource="docs">天勤图形界面说明 ↗</button>
+  </section>
+  <div id="market-layout" class="market-layout">
+    <main class="main-column">
+      <section class="card market-card">
+        <div class="section-title"><div><h2>国内期货 · 主力行情</h2><span id="catalog-note">尚无本机目录，请先连接</span></div>
+          <button id="only-favorites" class="quiet">只看自选</button></div>
+        <div class="filters"><input id="search" aria-label="搜索品种" placeholder="搜索中文品种、代码或交易所…">
+          <select id="exchange" aria-label="交易所"><option value="">全部交易所</option><option value="SHFE">上期所</option>
+            <option value="DCE">大商所</option><option value="CZCE">郑商所</option><option value="CFFEX">中金所</option>
+            <option value="INE">上期能源</option><option value="GFEX">广期所</option></select></div>
+        <div class="table-scroll"><table><thead><tr><th>自选</th><th>品种 / 代码</th><th>实际主力</th><th>最新价</th>
+          <th>涨跌幅</th><th>成交量</th><th>持仓量</th><th>行情时间</th></tr></thead><tbody id="market-rows"></tbody></table>
+          <div id="empty" class="empty">连接快期账号后，这里显示真实品种与行情。<br><small>本机缓存只保存目录和自选，不保存实时报价。</small></div></div>
+        <footer><span id="count">0 个品种</span><div><button id="prev" class="quiet">上一页</button><span id="page">1 / 1</span>
+          <button id="next" class="quiet">下一页</button></div></footer>
+      </section>
+      <section class="card chart-card">
+        <div class="section-title"><div><h2 id="chart-title">选择一个品种查看分钟图</h2><span id="chart-detail">主连用于观察，实际合约单独标识</span></div><span class="tag">1 分钟</span></div>
+        <div id="chart-placeholder" class="empty">连接后选择品种，天勤原生图表会显示在窗口内。</div>
+        <iframe id="chart" title="天勤原生分钟图" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer" hidden></iframe>
+      </section>
+    </main>
+    <aside class="right-column">
+      <section class="card side-card"><span class="eyebrow">跟踪列表</span><h2>我的自选 <small id="favorite-count">0</small></h2><div id="favorites" class="favorites"></div></section>
+      <section class="card side-card events"><span class="eyebrow">事件观察</span><h2>新闻与财经日历</h2><span class="tag neutral">尚未接入</span>
+        <p>关注央行决议、经济数据与突发新闻，按重要性关联研究品种。</p><div class="event-line">低　中　高　重大</div>
+        <p class="subtle">事件开仓保护尚未启用</p><button class="quiet" data-resource="calendar">查看金十日历 ↗</button></section>
+      <section class="card side-card"><span class="eyebrow">当前使用方式</span><h3>浏览行情不会产生委托</h3><p>切换品种只改变观察对象。策略执行与账户持仓在研究窗口中核对。</p></section>
+    </aside>
+  </div>
+  <div class="bottom-note"><span id="heartbeat">等待连接</span><span>行情时间以交易所返回为准 · 程序心跳不代表收到新行情</span></div>
+</div>
+<script src="app.js"></script>
+</body></html>

@@ -81,6 +81,46 @@ def test_initialize_lock_refuses_existing_lock(tmp_path):
     assert (project / "uv.lock").read_bytes() == b"existing-lock\n"
 
 
+@pytest.mark.parametrize("operation", ["-UpdateLock", "-RepairSdk"])
+def test_explicit_maintenance_preserves_environment_and_installs_examples(tmp_path, operation):
+    project = tmp_path / "project"
+    (project / "tools").mkdir(parents=True)
+    shutil.copyfile(ROOT / "tools/setup.ps1", project / "tools/setup.ps1")
+    (project / "uv.lock").write_bytes(b"existing-lock\n")
+    script = r'''
+$ErrorActionPreference = 'Stop'
+$env:UV_PROJECT_ENVIRONMENT = 'old-environment'
+$global:calls = [Collections.Generic.List[object]]::new()
+function global:uv {
+    $global:calls.Add(@{args=@($args);selected=$env:UV_PROJECT_ENVIRONMENT})
+    $global:LASTEXITCODE = 0
+}
+$succeeded = $true
+try { & 'SCRIPT_PATH' OPERATION | Out-Null } catch { $succeeded = $false }
+@{succeeded=$succeeded;calls=@($global:calls.ToArray());restored=$env:UV_PROJECT_ENVIRONMENT} |
+    ConvertTo-Json -Depth 5 -Compress
+'''.replace("SCRIPT_PATH", str(project / "tools/setup.ps1").replace("'", "''")).replace(
+        "OPERATION", operation,
+    )
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-Command", script],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", check=True,
+    )
+    info = json.loads(result.stdout)
+    assert info["succeeded"] is True
+    assert info["restored"] == "old-environment"
+    expected = [["sync", "--project", str(project), "--python", "3.13.11", "--locked",
+                 "--extra", "dev", "--extra", "official-examples"]]
+    if operation == "-UpdateLock":
+        expected.insert(0, ["lock", "--project", str(project), "--python", "3.13.11"])
+    else:
+        expected[0] += ["--reinstall-package", "tqsdk"]
+    assert [call["args"] for call in info["calls"]] == expected
+    assert all(Path(call["selected"]) == project / ".venv-tqsdk" for call in info["calls"])
+    assert (project / "uv.lock").read_bytes() == b"existing-lock\n"
+
+
 def load_probe():
     assert (ROOT / "tools/environment_probe.py").is_file(), "environment probe is not implemented"
     return importlib.import_module("tools.environment_probe")

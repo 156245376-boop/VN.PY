@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+from qf.catalog_gui import CatalogPanel
 from qf.desktop import RUN_ID, DesktopSession, allowed_chart_url
 
 STAGE_TEXT = {
@@ -78,7 +79,7 @@ class DesktopApp:
         header = ttk.Frame(root, padding=(26, 20))
         header.grid(row=0, column=0, columnspan=2, sticky="ew")
         ttk.Label(header, text="天勤策略工作台", style="Title.TLabel").pack(anchor="w")
-        ttk.Label(header, text="螺纹钢 · 分钟策略 · 研究与快期模拟",
+        ttk.Label(header, text="项目提供本机操作窗口 · 行情、账户与回测图形使用天勤原生页面",
                   background="#f2f5fa").pack(anchor="w", pady=(5, 0))
 
         left = ttk.Frame(root, style="Card.TFrame", padding=22)
@@ -130,6 +131,8 @@ class DesktopApp:
         summary_frame = ttk.Frame(notebook, style="Card.TFrame", padding=12)
         notebook.add(log_frame, text=" 运行状态 ")
         notebook.add(summary_frame, text=" 结果摘要 ")
+        self.catalog = CatalogPanel(notebook)
+        notebook.add(self.catalog, text=" 天勤现成功能 ")
         self.log_text = self._text_area(log_frame)
         self.summary_text = self._text_area(summary_frame)
         self._replace(self.summary_text, "完成回测或结束观察后，这里显示结果与实验记录位置。\n\n"

@@ -1,6 +1,6 @@
 # Lock-controlled installation into the isolated TqSdk environment.
 [CmdletBinding()]
-param([switch]$InitializeLock)
+param([switch]$InitializeLock, [switch]$UpdateLock, [switch]$RepairSdk)
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -13,6 +13,9 @@ foreach ($name in $names) {
 }
 
 try {
+    if ($InitializeLock -and $UpdateLock) {
+        throw 'Choose only one lock operation.'
+    }
     foreach ($name in @('VIRTUAL_ENV', 'PYTHONPATH', 'PYTHONHOME')) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
@@ -32,7 +35,15 @@ try {
     elseif (-not (Test-Path -LiteralPath $lockPath -PathType Leaf)) {
         throw 'uv.lock is missing. Use -InitializeLock only for an approved initial lock.'
     }
-    & uv sync --project $projectRoot --python 3.13.11 --locked --extra dev
+    elseif ($UpdateLock) {
+        # Resolve explicit dependency changes while retaining compatible locked versions.
+        & uv lock --project $projectRoot --python 3.13.11
+        if ($LASTEXITCODE -ne 0) { throw "uv lock update failed: $LASTEXITCODE" }
+    }
+    $syncOptions = @('--project', $projectRoot, '--python', '3.13.11', '--locked',
+                     '--extra', 'dev', '--extra', 'official-examples')
+    if ($RepairSdk) { $syncOptions += @('--reinstall-package', 'tqsdk') }
+    & uv sync @syncOptions
     if ($LASTEXITCODE -ne 0) { throw "uv sync failed: $LASTEXITCODE" }
     Write-Output 'TqSdk environment installation finished. Run tools/check.ps1 to verify.'
 }

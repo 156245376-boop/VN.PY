@@ -42,10 +42,13 @@ try {
         }
         Invoke-Check 'installed versions' {
             & uv sync --project $projectRoot --python 3.13.11 `
-                --locked --check --extra dev --no-python-downloads
+                --locked --check --extra dev --extra official-examples --no-python-downloads
         }
         Invoke-Check 'dependency compatibility' {
             & uv pip check --python $python --no-python-downloads
+        }
+        Invoke-Check 'official components and resources (no account session)' {
+            & $python -I -B tools/native_inventory.py
         }
         Invoke-Check 'pytest' { & $python -I -B -m pytest }
         Invoke-Check 'ruff' { & $python -I -B -m ruff check qf tools tests }

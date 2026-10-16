@@ -1,6 +1,8 @@
 import time
 import tkinter as tk
 
+from test_credentials import MemoryStore
+
 from qf.desktop import DesktopSession
 from qf.gui import DesktopApp
 
@@ -20,11 +22,13 @@ def test_window_masks_password_runs_observer_and_stops_without_terminal(tmp_path
     root = tk.Tk()
     root.withdraw()
     session = DesktopSession(tmp_path, execute_fn=execute)
-    app = DesktopApp(root, session)
+    store = MemoryStore()
+    store.save("saved-user", "private-password")
+    app = DesktopApp(root, session, credential_store=store)
     try:
         assert app.password_entry.cget("show")
-        app.user.set("u")
-        app.password.set("private-password")
+        assert app.user.get() == "saved-user"
+        assert app.password.get() == ""
         app.observe_button.invoke()
         end = time.monotonic() + 5
         while not opened and time.monotonic() < end:
@@ -38,6 +42,8 @@ def test_window_masks_password_runs_observer_and_stops_without_terminal(tmp_path
         assert not session.running
         assert "已停止" in app.status.get()
         assert "private-password" not in app.log_text.get("1.0", "end")
+        app.forget_login()
+        assert store.load() is None
     finally:
         session.stop()
         if session.thread:

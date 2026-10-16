@@ -8,6 +8,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from qf.catalog_gui import CatalogPanel
+from qf.credentials import SavedLogin
 from qf.desktop import RUN_ID, DesktopSession, allowed_chart_url
 
 STAGE_TEXT = {
@@ -39,13 +40,19 @@ REASON_TEXT = {
 
 
 class DesktopApp:
-    def __init__(self, root, session):
+    def __init__(self, root, session, *, credential_store=None):
         self.root, self.session = root, session
         self.chart_url = None
         self.last_result = None
         self.closing = False
-        self.user = tk.StringVar()
+        self._login = SavedLogin(session.results_root.parent, store=credential_store)
+        saved = self._login.info()
+        self.user = tk.StringVar(value=saved["user"])
         self.password = tk.StringVar()
+        self.remember = tk.BooleanVar(value=True)
+        self.credential_note = tk.StringVar(value=saved["issue"] or (
+            "密码已保存，留空即可连接；也可输入新密码。" if saved["saved"]
+            else "连接成功后由 Windows 安全保存，下次无需再输入。"))
         self.status = tk.StringVar(value="等待登录")
         self.elapsed = tk.StringVar(value="填写快期账号，选择要做的操作")
         self._build()
@@ -91,8 +98,11 @@ class DesktopApp:
         ttk.Label(left, text="密码").pack(anchor="w")
         self.password_entry = ttk.Entry(left, textvariable=self.password, show="●", width=29)
         self.password_entry.pack(fill="x", pady=(4, 6))
-        ttk.Label(left, text="凭证仅在本次窗口内存中使用。",
-                  foreground="#778399").pack(anchor="w", pady=(0, 18))
+        ttk.Checkbutton(left, text="记住账号和密码", variable=self.remember).pack(anchor="w")
+        ttk.Label(left, textvariable=self.credential_note, wraplength=250,
+                  foreground="#778399").pack(anchor="w", pady=(4, 4))
+        ttk.Button(left, text="忘记已保存的账号密码", command=self.forget_login).pack(
+            fill="x", pady=(0, 10))
         self.observe_button = ttk.Button(left, text="连接并观察", style="Primary.TButton",
                                          command=lambda: self.start("paper"))
         self.observe_button.pack(fill="x", pady=4)
@@ -169,11 +179,16 @@ class DesktopApp:
 
     def start(self, mode, *, activate=False):
         try:
-            self.session.start(mode, self.user.get().strip(), self.password.get(),
-                               activate=activate)
+            if self.session.running:
+                raise ValueError("已有运行中的实验。")
+            credentials = self._login.resolve(self.user.get(), self.password.get())
+            self._login.prepare(*credentials, self.remember.get())
+            self.session.start(mode, *credentials, activate=activate)
         except ValueError as exc:
+            self._login.discard()
             messagebox.showinfo("尚未开始", str(exc), parent=self.root)
             return
+        self.password.set("")
         self.chart_url = None
         self.last_result = None
         self.status.set("正在启动" + ("模拟交易" if activate else ""))
@@ -185,6 +200,15 @@ class DesktopApp:
             button.state(["disabled"])
         action = "模拟交易" if activate else "回测" if mode == "backtest" else "只读观察"
         self.log("开始" + action + "。")
+
+    def forget_login(self):
+        try:
+            self._login.forget()
+            self.user.set("")
+            self.password.set("")
+            self.credential_note.set("已忘记账号密码；当前运行不受影响。")
+        except ValueError:
+            self.credential_note.set("忘记账号密码未完成，请稍后重试。")
 
     def stop(self):
         self.session.stop()
@@ -243,12 +267,19 @@ class DesktopApp:
     def poll_messages(self):
         for message in self.session.drain():
             if message["type"] == "result":
+                self._login.discard()
                 self._show_result(message["result"])
                 if self.closing:
                     self.root.destroy()
                     return
                 continue
             stage = message["stage"]
+            if stage in ("data_ready", "backtesting", "observing", "paper_active"):
+                self._login.confirm()
+                saved = self._login.info()
+                self.credential_note.set(saved["issue"] or (
+                    "账号密码已由 Windows 安全保存，下次无需再输入。" if saved["saved"]
+                    else "本次不保存账号密码。"))
             text = STAGE_TEXT.get(stage, "正在处理")
             if stage != "heartbeat":
                 self.status.set(text)
@@ -264,6 +295,7 @@ class DesktopApp:
         self.root.after(100, self.poll_messages)
 
     def close(self):
+        self._login.discard()
         if self.session.running:
             self.closing = True
             self.stop()

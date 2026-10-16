@@ -11,6 +11,7 @@
 | `启动天勤.vbs`、`tools/workbench_entry.py` | 双击启动独立 WebView2 工作台，隔离环境并验证 |
 | `qf/workbench.py`、`qf/window_host.py`、`qf/web/` | 可信桌面桥接、窗口与中文页面 |
 | `qf/market.py`、`qf/market_session.py`、`qf/workbench_store.py` | 中文目录、只读行情与本机自选 |
+| `qf/credentials.py` | Windows 安全保存快期凭证，两窗口共用，可忘记；密码不进项目文件 |
 | `tools/gui_entry.py` | 保留的原研究窗口入口 |
 | `qf/gui.py`、`qf/desktop.py` | 内存凭证、后台运行、停止和结果展示 |
 | `qf/catalog_gui.py`、`qf/native_catalog.py` | 天勤现成功能目录、示例只读查看与资源核对 |

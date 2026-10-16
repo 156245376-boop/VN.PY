@@ -19,7 +19,7 @@
     <button class="nav" data-view="news">◷　新闻与事件</button>
   </nav>
   <div class="nav-bottom"><button class="nav" data-view="settings">⚙　设置与资源</button>
-    <small>凭证仅在当前窗口中使用<br>关闭后不保存账号密码</small></div>
+    <small>账号密码由 Windows 安全保存<br>可随时忘记已保存的凭证</small></div>
 </aside>
 <div class="workspace">
   <header><div><span class="eyebrow">个人期货策略研究</span><h1 id="page-title">研究工作台</h1></div>
@@ -27,10 +27,13 @@
   </header>
   <section class="connection card">
     <form id="login-form"><label>快期账号<input id="user" autocomplete="off" placeholder="天勤注册账号" required></label>
-      <label>密码<input id="password" type="password" autocomplete="off" placeholder="仅本次使用" required></label>
-      <button id="login" class="primary" disabled>连接行情</button></form>
+      <label>密码<input id="password" type="password" autocomplete="off" placeholder="请输入快期密码" required></label>
+      <button id="login" class="primary" disabled>连接行情</button>
+      <label class="remember"><input id="remember-login" type="checkbox" checked>记住账号和密码</label></form>
     <button id="disconnect" class="quiet">断开连接</button>
+    <button id="forget-login" class="quiet">忘记账号密码</button>
     <span id="connection-note">连接后读取品种目录与实时主力行情</span>
+    <span id="credential-note">勾选后，连接成功会由 Windows 保存，下次无需再输入。</span>
   </section>
   <div id="notice" role="status"></div>
   <section id="home-panel" class="welcome card">

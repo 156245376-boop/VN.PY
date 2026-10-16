@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from test_credentials import MemoryStore
 
 CATALOG = [{"continuous": "KQ.m@SHFE.rb", "name": "螺纹钢", "exchange": "SHFE", "product": "rb"},
            {"continuous": "KQ.m@DCE.m", "name": "豆粕", "exchange": "DCE", "product": "m"}]
@@ -34,7 +35,7 @@ class Session:
 @pytest.fixture
 def bridge(tmp_path):
     module = importlib.import_module("qf.workbench")
-    return module.WorkbenchBridge(tmp_path, Session())
+    return module.WorkbenchBridge(tmp_path, Session(), credential_store=MemoryStore())
 
 
 def test_bridge_serializes_only_public_fields(bridge):
@@ -82,6 +83,24 @@ def test_missing_credentials_and_bad_chart_never_escape(bridge):
     bridge._session.state["chart_url"] = "https://example.com/?token=private-token"
     assert bridge.get_state()["chart_url"] is None
     assert not bridge.set_view(["KQ.m@SHFE.rb"], "not-a-contract")["ok"]
+
+
+def test_remembered_credentials_connect_without_returning_password_to_page(bridge):
+    module = importlib.import_module("qf.workbench")
+    received = []
+    bridge._session.start = lambda user, password: received.append((user, password))
+    assert bridge.login("offline-user", "private-password", True)["ok"]
+    bridge.get_state()  # 连接成功才保存。
+    restored = module.WorkbenchBridge(bridge._root, Session(),
+                                      credential_store=bridge._login._store)
+    restored._session.start = lambda user, password: received.append((user, password))
+    assert restored.get_login_state()["user"] == "offline-user"
+    assert restored.login("offline-user", "", True)["ok"]
+    assert received == [("offline-user", "private-password")] * 2
+    assert "private-password" not in str(restored.get_state()) + str(restored.get_login_state())
+    assert restored.forget_login()["ok"]
+    assert not restored.get_login_state()["saved"]
+    assert not restored.login("offline-user", "", True)["ok"]
 
 
 def test_real_workbench_search_selection_favorites_chart_and_disconnect():

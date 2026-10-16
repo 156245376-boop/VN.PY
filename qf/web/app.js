@@ -8,9 +8,17 @@ const favoriteQueue=[];
 let favoriteSaving=false, favoriteVersion=0;
 let nativeLabelsReady=false;
 const labels=window.QfLabels;
+let savedLogin={user:'',saved:false},loginStatus='';
 const text = (tag,value,cls) => {const e=document.createElement(tag); e.textContent=value; if(cls)e.className=cls;return e};
 const number = (value,digits=0) => value===null||value===undefined?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:digits});
 const notice = message => {$('notice').textContent=message||''};
+function passwordHint(){const available=savedLogin.saved&&$('user').value.trim()===savedLogin.user;
+  $('password').required=!available;
+  $('password').placeholder=available?'密码已保存，留空使用':'请输入快期密码'}
+async function refreshLogin(fill=false){savedLogin=await api.get_login_state();
+  if(fill)$('user').value=savedLogin.user;passwordHint();
+  $('credential-note').textContent=savedLogin.issue||(savedLogin.saved?
+    '账号密码已由 Windows 保存；密码留空即可连接。':'勾选后，连接成功会由 Windows 保存，下次无需再输入。')}
 function filtered(){const query=$('search').value.trim().toLowerCase(),exchange=$('exchange').value;
   return state.catalog.filter(r=>(!exchange||r.exchange===exchange)&&(!favoritesOnly||state.favorites.includes(r.continuous))&&
     [r.name,r.product,r.exchange,labels.exchangeName(r.exchange),r.continuous].join(' ').toLowerCase().includes(query));}
@@ -66,6 +74,7 @@ function render(){const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40)
 async function tick(){if(ticking)return;ticking=true;const version=favoriteVersion;try{const incoming=await api.get_state();
   if(favoriteSaving||version!==favoriteVersion)incoming.favorites=state.favorites;
   state=incoming;if(!selected)selected=state.selected;
+  if(loginStatus!==state.status){loginStatus=state.status;await refreshLogin()}
   $('status').textContent=names[state.status]||'状态待核实';
   $('login').disabled=['connecting','ready','waiting_data','disconnected','stopping'].includes(state.status);
   $('disconnect').disabled=['idle','stopped','failed'].includes(state.status);
@@ -74,9 +83,14 @@ async function tick(){if(ticking)return;ticking=true;const version=favoriteVersi
 }catch(_){notice('窗口状态读取未完成，请稍候。')}finally{ticking=false}}
 $('login-form').onsubmit=async event=>{event.preventDefault();let password=$('password').value;
   const user=$('user').value.trim();$('password').value='';$('login').disabled=true;
-  try{const result=await api.login(user,password);notice(result.reason);selected=null;lastView='';await tick()}
+  try{const result=await api.login(user,password,$('remember-login').checked);notice(result.reason);
+    selected=null;lastView='';await tick()}
   catch(_){notice('连接未完成，请核对本机环境。');$('login').disabled=false}finally{password=null}};
 $('disconnect').onclick=async()=>{notice((await api.disconnect()).reason);await tick()};
+$('user').addEventListener('input',passwordHint);
+$('forget-login').onclick=async()=>{try{const result=await api.forget_login();notice(result.reason);
+  if(result.ok){$('user').value='';$('password').value='';await refreshLogin()}}
+  catch(_){notice('忘记账号密码未完成，请稍后重试。')}};
 for(const id of ['search','exchange'])$(id).addEventListener(id==='search'?'input':'change',()=>{page=0;render()});
 $('prev').onclick=()=>{page--;render()};$('next').onclick=()=>{page++;render()};
 $('only-favorites').onclick=()=>{favoritesOnly=!favoritesOnly;$('only-favorites').textContent=favoritesOnly?'查看全部':'只看自选';page=0;render()};
@@ -93,4 +107,6 @@ addEventListener('message',event=>{if(currentChart&&event.source===$('chart').co
   event.origin===new URL(currentChart).origin&&event.data?.kind==='qf-chart-ready')sendChartLabels()});
 addEventListener('qf-native-labels-ready',()=>{nativeLabelsReady=true;if(api)render()});
 addEventListener('qf-native-labels-error',()=>notice('图表中文说明未能准备完成，请重新打开工作台。'));
-addEventListener('pywebviewready',()=>{api=window.pywebview.api;tick();setInterval(tick,700)});
+addEventListener('pywebviewready',async()=>{api=window.pywebview.api;
+  try{await refreshLogin(true)}catch(_){notice('已保存的账号暂时无法读取，请手动输入。')}
+  tick();setInterval(tick,700)});

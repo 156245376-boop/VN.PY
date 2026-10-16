@@ -5,6 +5,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
+from qf.credentials import SavedLogin
 from qf.desktop import allowed_chart_url
 from qf.market import catalog_rows
 from qf.market_session import MarketSession
@@ -24,7 +25,7 @@ ROW_FIELDS = ("continuous", "name", "exchange", "product", "underlying", "last_p
 
 
 class WorkbenchBridge:
-    def __init__(self, root: Path, session: MarketSession):
+    def __init__(self, root: Path, session: MarketSession, *, credential_store=None):
         self._root, self._session = root, session
         self._lock = threading.RLock()
         self._store = WorkbenchStore(root / "data/workbench")
@@ -32,19 +33,34 @@ class WorkbenchBridge:
         self._catalog, self._favorites = cached["catalog"], cached["favorites"]
         self._issue = cached["issue"]
         self._selected = None
+        self._login = SavedLogin(root, store=credential_store)
 
-    def login(self, user, password):
+    def get_login_state(self):
+        with self._lock:
+            return self._login.info()
+
+    def forget_login(self):
         with self._lock:
             try:
-                if not isinstance(user, str) or not isinstance(password, str):
-                    raise ValueError("invalid credentials")
-                if not user.strip() or not password:
-                    raise ValueError("empty credentials")
-                self._session.start(user.strip(), password)
+                self._login.forget()
+                return {"ok": True, "reason": "已忘记账号密码；当前连接不受影响。"}
+            except ValueError:
+                return {"ok": False, "reason": "忘记账号密码未完成，请稍后重试。"}
+
+    def login(self, user, password, remember=True):
+        with self._lock:
+            try:
+                if self._session.running:
+                    raise ValueError("already running")
+                credentials = self._login.resolve(user, password)
+                self._login.prepare(*credentials, remember)
+                self._session.start(*credentials)
                 self._selected = None
                 return {"ok": True, "reason": "正在连接行情，请稍候。"}
             except Exception:
-                return {"ok": False, "reason": "未开始连接，请填写凭证并确认行情已停止。"}
+                self._login.discard()
+                return {"ok": False,
+                        "reason": "未开始连接，请填写或使用已保存的凭证，并确认行情已停止。"}
 
     def get_state(self):
         with self._lock:
@@ -54,6 +70,10 @@ class WorkbenchBridge:
                 self._catalog = catalog
                 self._save()
             status = raw.get("status") if raw.get("status") in STATUSES else "failed"
+            if status in ("ready", "waiting_data"):
+                self._login.confirm()
+            elif status in ("failed", "stopped"):
+                self._login.discard()
             if self._selected is None:
                 self._selected = raw.get("selected")
             address = raw.get("chart_url")
@@ -65,7 +85,8 @@ class WorkbenchBridge:
                     "selected": self._selected, "chart_url": address,
                     "reason": REASONS.get(raw.get("reason"), ""),
                     "heartbeat_seconds": heartbeat if type(heartbeat) is int else 0,
-                    "favorites": list(self._favorites), "issue": self._issue,
+                    "favorites": list(self._favorites),
+                    "issue": self._issue or self._login.info()["issue"],
                     "cache_state": "live" if catalog and status in ("ready", "waiting_data")
                     else "cached" if self._catalog else "empty"}
 
@@ -126,6 +147,8 @@ class WorkbenchBridge:
             return {"ok": False, "reason": "无法打开入口，请核对本机环境。"}
 
     def disconnect(self):
+        with self._lock:
+            self._login.discard()
         self._session.stop()
         return {"ok": True, "reason": "正在断开行情连接。"}
 

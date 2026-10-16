@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import webview  # noqa: E402
+from test_credentials import MemoryStore  # noqa: E402
 from test_market_session import FakeApi  # noqa: E402
 from window_smoke import address, ready, serve, stop  # noqa: E402
 
@@ -36,7 +37,9 @@ def exercise():
 
         class DelayedFavorites(WorkbenchBridge):
             def __init__(self):
-                super().__init__(Path(temp), session)
+                credential_store = MemoryStore()
+                credential_store.save("offline-user", "offline-pass")
+                super().__init__(Path(temp), session, credential_store=credential_store)
                 self._save_started = threading.Event()
                 self._save_release = threading.Event()
 
@@ -63,9 +66,12 @@ def exercise():
             def interact():
                 try:
                     check('document.querySelector("#login").disabled===false')
-                    window.evaluate_js('document.querySelector("#user").value="offline-user";'
-                                       'document.querySelector("#password").value="offline-pass";'
-                                       'document.querySelector("#login-form").requestSubmit()')
+                    assert window.evaluate_js(
+                        'document.querySelector("#user").value') == "offline-user"
+                    assert window.evaluate_js('document.querySelector("#password").value') == ""
+                    assert window.evaluate_js(
+                        'document.querySelector("#password").required') is False
+                    window.evaluate_js('document.querySelector("#login-form").requestSubmit()')
                     check('document.querySelectorAll("#market-rows tr").length===2')
                     assert window.evaluate_js('document.querySelector("#password").value') == ""
                     window.evaluate_js('document.querySelector("#search").value="豆粕";'
@@ -125,8 +131,14 @@ def exercise():
                         'document.querySelector("#news-panel").hidden') is False
                     window.evaluate_js('document.querySelector("#disconnect").click()')
                     check('document.querySelector("#status").textContent==="已断开"')
+                    window.evaluate_js('document.querySelector("#forget-login").click()')
+                    check('document.querySelector("#user").value===""')
+                    assert bridge.get_login_state()["saved"] is False
+                    assert window.evaluate_js(
+                        'document.querySelector("#password").required') is True
                     result.update(search=True, selection=True, favorites=True,
-                                  chart=True, responsive=True, disconnect=True)
+                                  chart=True, responsive=True, disconnect=True,
+                                  remembered_login=True)
                 except Exception as exc:
                     errors.append(str(exc))
                 finally:

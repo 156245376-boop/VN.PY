@@ -37,7 +37,7 @@ def fixture_klines(symbol, duration, *, daily=False):
         for i, value in enumerate(stamps)}}}}
 
 
-def serve(initial_data=None, *, probe=False):
+def serve(initial_data=None, *, probe=False, extra_script=""):
     async def main():
         helper = object.__new__(TqWebHelper)
         helper._api = SimpleNamespace(
@@ -117,7 +117,8 @@ def serve(initial_data=None, *, probe=False):
                     [...document.querySelectorAll('.ivu-radio-wrapper')]
                       .find(item=>item.textContent.trim()==='30分钟')?.click();
                 });</script>'''
-                return web.Response(text=html.replace("<head>", "<head>" + script),
+                return web.Response(text=html.replace("<head>", "<head>" + script
+                                                     + "<script>" + extra_script + "</script>"),
                                     content_type="text/html")
 
             helper.httpserver_index_handler = index

@@ -34,6 +34,7 @@ def _install_chart_labels(window):
                   "location.hostname!=='127.0.0.1')return;const qfParentOrigin="
                   + json.dumps(origin) + ";\n"
                   + (assets / "labels.js").read_text(encoding="utf-8") + "\n"
+                  + (assets / "native-tools.js").read_text(encoding="utf-8") + "\n"
                   + (assets / "native-history.js").read_text(encoding="utf-8") + "\n"
                   + (assets / "native-labels.js").read_text(encoding="utf-8") + "\n})();")
         tasks = []

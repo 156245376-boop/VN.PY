@@ -191,11 +191,13 @@
         const draw = chartProto.draw;
         chartProto.draw = function (...args) {
           current = this;
+          window.QfNativeTools?.attach(this);
           patchGestures(this);
           patchAxis(this);
           delete this.__qfHistoryDrawing;
           try {
             const result = draw.apply(this, args);
+            window.QfNativeTools?.render(this);
             if (this.__qfHistoryDrawing) records.set(this, this.__qfHistoryDrawing);
             else records.delete(this);
             issuesForDraw.delete(this);

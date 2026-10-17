@@ -81,7 +81,7 @@
         <div class="section-title"><div><h2 id="chart-title">选择一个品种查看行情图</h2><span id="chart-detail">选择品种后显示当前主力合约的中文名称与交割月份</span></div>
           <div class="chart-actions"><select id="chart-source" aria-label="图表历史类型">
             <option value="actual">当前主力合约</option><option value="continuous">主力连续历史</option>
-          </select><button id="expand-chart" disabled>放大 K 线</button></div></div>
+          </select><button id="chart-favorite" disabled>☆ 添加自选</button><button id="expand-chart" disabled>放大 K 线</button></div></div>
         <p id="chart-units" class="chart-units">价格单位按品种显示 · 成交量和持仓量单位为手</p>
         <p id="history-note" class="chart-units">当前主力合约：历史范围取决于该月份合约的上市时间。跨年份走势可切换“主力连续历史”。</p>
         <div id="history-controls" class="history-controls" hidden>
@@ -104,6 +104,9 @@
         <p class="subtle">事件开仓保护尚未启用</p><button class="quiet" data-resource="calendar">查看金十日历 ↗</button></section>
       <section class="card side-card"><span class="eyebrow">当前使用方式</span><h3>浏览行情不会产生委托</h3><p>切换品种只改变观察对象。策略执行与账户持仓在研究窗口中核对。</p></section>
     </aside>
+  </div>
+  <div id="market-context-menu" class="market-context-menu" role="menu" hidden>
+    <span id="market-context-name"></span><button id="market-context-favorite" role="menuitem">添加自选</button>
   </div>
   <div class="bottom-note"><span id="heartbeat">等待连接</span><span>行情时间以交易所返回为准 · 程序心跳不代表收到新行情</span></div>
 </div>

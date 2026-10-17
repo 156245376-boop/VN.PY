@@ -22,6 +22,8 @@ PROBE = Path(__file__).with_name("native_tools_browser.js").read_text(encoding="
 def exercise():
     data = {"subscribed": [{"symbol": "SHFE.rb2701", "dur_nano": 60000000000}],
             "klines": fixture_klines("SHFE.rb2701", 60000000000)}
+    data["klines"]["SHFE.rb2701"].update(
+        fixture_klines("SHFE.rb2701", 3600000000000)["SHFE.rb2701"])
     preview = "--preview" in sys.argv
     script = PROBE.replace("PREVIEW", "true" if preview else "false")
     server = threading.Thread(target=lambda: serve(data, probe=True, extra_script=script),

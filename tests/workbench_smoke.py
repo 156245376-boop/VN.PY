@@ -216,6 +216,30 @@ def exercise():
                     check('document.querySelector("#favorite-count").textContent==="2"')
                     assert set(bridge.get_state()["favorites"]) == {
                         "KQ.m@SHFE.rb", "KQ.m@DCE.m"}
+                    assert window.evaluate_js('!!document.querySelector("#chart-favorite")')
+                    check('document.querySelector("#chart-favorite").textContent.includes("取消自选")')
+                    frame_before = window.evaluate_js('document.querySelector("#chart").src')
+                    window.evaluate_js('document.querySelector("#chart-favorite").click()')
+                    check('document.querySelector("#favorite-count").textContent==="1"')
+                    assert bridge.get_state()["favorites"] == ["KQ.m@SHFE.rb"]
+                    window.evaluate_js('''document.querySelector('[data-symbol="KQ.m@SHFE.rb"]')
+                      .dispatchEvent(new MouseEvent('contextmenu',{
+                        bubbles:true,cancelable:true,clientX:200,clientY:300}));''')
+                    check('!document.querySelector("#market-context-menu").hidden')
+                    assert "取消自选" in window.evaluate_js(
+                        'document.querySelector("#market-context-menu").textContent')
+                    window.evaluate_js('document.querySelector('
+                                       '"#market-context-menu button").click()')
+                    check('document.querySelector("#favorite-count").textContent==="0"')
+                    assert window.evaluate_js('selected') == "KQ.m@DCE.m"
+                    window.evaluate_js('''document.querySelector('[data-symbol="KQ.m@DCE.m"]')
+                      .dispatchEvent(new MouseEvent('contextmenu',{
+                        bubbles:true,cancelable:true,clientX:200,clientY:300}));
+                      document.querySelector('#market-context-menu button').click();''')
+                    check('document.querySelector("#favorite-count").textContent==="1"')
+                    assert bridge.get_state()["favorites"] == ["KQ.m@DCE.m"]
+                    assert window.evaluate_js(
+                        'document.querySelector("#chart").src') == frame_before
                     if len(sys.argv) > 1:
                         from Microsoft.Web.WebView2.Core import (
                             CoreWebView2CapturePreviewImageFormat,

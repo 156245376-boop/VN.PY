@@ -6,6 +6,7 @@ let api, state={catalog:[],rows:[],favorites:[]}, selected=null, page=0, favorit
 let ticking=false, pending=null, sending=false, lastView='', currentChart='',exiting=false,pollTimer;
 const favoriteQueue=[];
 let favoriteSaving=false, favoriteVersion=0;
+let favoriteContextSymbol=null;
 let nativeLabelsReady=false;
 let chartMode='actual',chartFrameReady=false,loadStarted=0;
 let chartState=null,chartProblem='',currentChartRevision=0;
@@ -74,12 +75,29 @@ async function toggleFavorite(symbol){favoriteQueue.push(symbol);if(favoriteSavi
     try{const result=await api.set_favorites(values);notice(result.reason);
       if(result.ok){state.favorites=values;lastView='';render()}}
     catch(_){notice('自选保存未完成，请重试。')}}
-  }finally{favoriteSaving=false;favoriteVersion++}}
+  }finally{favoriteSaving=false;favoriteVersion++;renderFavoriteActions()}}
+function favoriteLabel(symbol){return state.favorites.includes(symbol)?'★ 取消自选':'☆ 添加自选'}
+function renderFavoriteActions(){
+  $('chart-favorite').textContent=favoriteLabel(selected);
+  $('chart-favorite').disabled=favoriteSaving||!state.catalog.some(row=>row.continuous===selected);
+  const item=state.catalog.find(row=>row.continuous===favoriteContextSymbol);
+  $('market-context-name').textContent=item?labels.productName(item):'';
+  $('market-context-favorite').textContent=favoriteLabel(favoriteContextSymbol);
+  $('market-context-favorite').disabled=favoriteSaving||!item;
+}
+function closeFavoriteMenu(){$('market-context-menu').hidden=true;favoriteContextSymbol=null}
+function showFavoriteMenu(event,symbol){event.preventDefault();event.stopPropagation();
+  favoriteContextSymbol=symbol;renderFavoriteActions();const menu=$('market-context-menu');menu.hidden=false;
+  const rect=menu.getBoundingClientRect();
+  menu.style.left=Math.max(4,Math.min(event.clientX,innerWidth-rect.width-8))+'px';
+  menu.style.top=Math.max(4,Math.min(event.clientY,innerHeight-rect.height-8))+'px';
+}
 function render(){if(exiting)return;const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40));page=Math.min(page,pages-1);
   const visible=all.slice(page*40,page*40+40),quotes=new Map(state.rows.map(r=>[r.continuous,r]));
   $('market-rows').replaceChildren();$('empty').hidden=visible.length>0;
   for(const item of visible){const q=quotes.get(item.continuous)||{},row=document.createElement('tr');
     row.dataset.symbol=item.continuous;if(item.continuous===selected)row.className='selected';row.onclick=()=>choose(item.continuous);
+    row.oncontextmenu=event=>showFavoriteMenu(event,item.continuous);
     const favorite=text('button',state.favorites.includes(item.continuous)?'★':'☆',state.favorites.includes(item.continuous)?'saved':'');
     favorite.title='添加或移除自选';favorite.onclick=event=>{event.stopPropagation();toggleFavorite(item.continuous)};
     const star=document.createElement('td');star.append(favorite);row.append(star);
@@ -109,6 +127,7 @@ function render(){if(exiting)return;const all=filtered(),pages=Math.max(1,Math.c
   if(!state.favorites.length)$('favorites').append(text('p','点击品种旁的 ☆，建立自己的观察列表。'));
   const item=state.catalog.find(r=>r.continuous===selected),quote=quotes.get(selected);
   $('chart-title').textContent=item?labels.productName(item)+' · 行情图':'选择一个品种查看行情图';
+  renderFavoriteActions();
   $('chart-detail').textContent=item?'观察品种：'+labels.contractName(item.continuous,state.catalog)+'；当前主力：'+
     (quote?.underlying?labels.contractName(quote.underlying,state.catalog):'等待服务确认'):'选择品种后显示当前主力合约的中文名称与交割月份';
   $('chart-detail').title=item?item.continuous+' → '+(quote?.underlying||'等待确认'):'';
@@ -152,6 +171,12 @@ $('disconnect').onclick=async()=>{const result=await api.disconnect();notice(res
 function expandChart(expanded){$('chart-card').classList.toggle('expanded',expanded);
   document.body.classList.toggle('chart-expanded',expanded);$('expand-chart').textContent=expanded?'还原 K 线（Esc）':'放大 K 线'}
 $('expand-chart').onclick=()=>expandChart(!$('chart-card').classList.contains('expanded'));
+$('chart-favorite').onclick=()=>toggleFavorite(selected);
+$('market-context-favorite').onclick=()=>{const symbol=favoriteContextSymbol;closeFavoriteMenu();
+  if(state.catalog.some(row=>row.continuous===symbol))toggleFavorite(symbol)};
+document.addEventListener('mousedown',event=>{if(!$('market-context-menu').contains(event.target))closeFavoriteMenu()});
+addEventListener('keydown',event=>{if(event.key==='Escape')closeFavoriteMenu()});
+addEventListener('scroll',closeFavoriteMenu,true);addEventListener('resize',closeFavoriteMenu);addEventListener('blur',closeFavoriteMenu);
 $('chart-source').onchange=()=>{chartMode=$('chart-source').value;choose(selected)};
 addEventListener('keydown',event=>{if(event.key==='Escape')expandChart(false)});
 $('user').addEventListener('input',passwordHint);

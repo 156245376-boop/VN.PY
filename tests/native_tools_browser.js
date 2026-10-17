@@ -60,6 +60,17 @@ const toolsTimer=setInterval(()=>{
     check(line&&Math.abs(Number(line.getAttribute('y1'))-r.scale(drawing.drawings[0].points[0].price))<0.01,'drawing drifted after resize');
     document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
     check(tools.inspect().mode==='pan','escape did not restore pan');
+    const ax=Number(line.getAttribute('x1'))+canvas.getBoundingClientRect().left;
+    const ay=Number(line.getAttribute('y1'))+canvas.getBoundingClientRect().top;
+    mouse('mousedown',ax,ay);mouse('mouseup',ax,ay,{buttons:0});
+    check(document.querySelectorAll('svg[aria-label] circle').length===2,'selection handles missing');
+    mouse('mousedown',ax,ay);
+    mouse('mousemove',ax+c.bar.step*2,ay+12,{buttons:1});
+    mouse('mouseup',ax+c.bar.step*2,ay+12,{buttons:0});
+    check(tools.inspect().drawings[0].points[0].time!==drawing.drawings[0].points[0].time,'endpoint edit failed');
+    tools.undo();
+    check(tools.inspect().drawings[0].points[0].time===drawing.drawings[0].points[0].time,'edit undo failed');
+    tools.select('pan');
     mouse('mousedown');await wait(130);
     mouse('mousemove',x+80,y,{movementX:80});mouse('mouseup',x+80,y,{buttons:0});
     check(c.chartCtrl.pixelLeft<before,'left drag not restored');
@@ -67,7 +78,29 @@ const toolsTimer=setInterval(()=>{
     canvas.dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-100}));
     await wait(120);check(c.bar.step>step,'wheel zoom lost');
     tools.undo();check(tools.inspect().drawings.length===0,'undo failed');
-    if(PREVIEW){tools.select('horizontal');mouse('mousedown');tools.select('pan');mouse('contextmenu',x,y,{button:2,buttons:0});}
-    parent.postMessage({kind:'native-tools-result',result:{axes:true,resize:true,menu:true,drawing:true,cancel:true,pan:true,wheel:true,bridge:!!window.pywebview?.api}},'*');
+    const period=label=>[...document.querySelectorAll('.ivu-radio-wrapper')]
+      .find(el=>el.textContent.trim()===label).click();
+    const until=async test=>{for(let i=0;i<80;i++){if(test())return;await wait(30)}throw Error('period change timeout')};
+    period('1小时');await until(()=>c.duration===3600e9&&window.QfNativeHistory.inspect().status==='ready');
+    c.setRange(0,2);tools.select('rectangle');
+    const cr=canvas.getBoundingClientRect();
+    mouse('mousedown',cr.left+1,cr.top+50);mouse('mouseup',cr.left+1,cr.top+50,{buttons:0});
+    mouse('mousedown',cr.left+c.bar.step+1,cr.top+110);mouse('mouseup',cr.left+c.bar.step+1,cr.top+110,{buttons:0});
+    tools.select('pan');const rectangle=tools.inspect().drawings[0];
+    check(rectangle.points[1].time-rectangle.points[0].time===7200e9,'hour rectangle is not two full bars');
+    period('1分钟');await until(()=>c.duration===60e9&&window.QfNativeHistory.inspect().status==='ready');
+    await wait(150);
+    check(tools.inspect().drawings.length===1,'drawing vanished across periods');
+    const box=document.querySelector('svg[aria-label] rect');
+    check(box&&Math.abs(Number(box.getAttribute('width'))-120*c.bar.step)<0.1,'minute rectangle does not cover 120 bars');
+    check(c.chartCtrl.range.leftId<=10,'switch did not keep drawing date in view');
+    tools.select('pan');
+    if(PREVIEW){
+      const br=canvas.getBoundingClientRect(),xx=br.left+Math.max(1,Number(box.getAttribute('x')));
+      const yy=br.top+Number(box.getAttribute('y'));
+      mouse('mousedown',xx,yy);mouse('mouseup',xx,yy,{buttons:0});
+      mouse('contextmenu',xx+20,yy+20,{button:2,buttons:0});
+    }
+    parent.postMessage({kind:'native-tools-result',result:{axes:true,resize:true,menu:true,drawing:true,edit:true,cross_period:true,cancel:true,pan:true,wheel:true,bridge:!!window.pywebview?.api}},'*');
   })().catch(error=>parent.postMessage({kind:'native-tools-result',error:error.message},'*'));
 },30);

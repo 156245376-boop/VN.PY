@@ -27,12 +27,17 @@ function scale() {
   fn.invert = value => d[0] + (value - r[0]) * (d[1] - d[0]) / (r[1] - r[0]);
   return fn;
 }
-function fixture(tick = 1) {
+function fixture(tick = 1, focusEnabled = false) {
   const body = new Element(), doc = new Element();
   Object.assign(doc, {body, createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag)});
   const win = new Element();
   const context = vm.createContext({window: win, document: doc, console, clearTimeout,
     MouseEvent: class { constructor(type, values) { Object.assign(this, {type}, values); } }});
+  const callbacks = [], packets = [], replies = {};
+  if (focusEnabled) {
+    context.setTimeout = fn => { callbacks.push(fn); return callbacks.length; };
+    doc.querySelector = () => ({__vue__: {$tqsdk: {setChart: packet => packets.push(packet), getChart: id => replies[id]}}});
+  }
   vm.runInContext(fs.readFileSync(file, 'utf8'), context);
   const root = new Element(), parent = new Element(), canvas = parent.appendChild(new Element('canvas'));
   function axis() {
@@ -51,11 +56,17 @@ function fixture(tick = 1) {
       _centerTopCanvas: {dom: canvas}, _rightTd: {dom: new Element()}}};
   const api = win.QfNativeTools;
   chart.draw = () => { api.attach(chart); left.draw([Infinity, -Infinity]); right.draw([100, 120]); api.render(chart); };
+  chart.setRange = (leftId, rightId) => { chart.chartCtrl.range = {leftId, rightId}; chart.draw(); };
+  chart.bar.fullWidth = 640;
+  chart.bar.setBarWidth = width => { chart.bar.barWidth = width; chart.bar.step = width + (width <= 3 ? 0 : width <= 17 ? 1 : 2); };
   chart.draw();
   const fire = (type, values = {}) => root.fire(type, {target: canvas, ...values});
-  return {api, chart, left, right, root, canvas, doc, win, fire};
+  return {api, chart, left, right, root, canvas, doc, win, fire, packets, replies, flush: () => callbacks.shift()?.()};
 }
-function test(name, fn) { fn(); console.log('PASS ' + name); }
+function test(name, fn) {
+  if (process.argv[2] && !name.includes(process.argv[2])) return;
+  fn(); console.log('PASS ' + name);
+}
 test('resize expands upper price range without stretching the price scale', () => {
   const f = fixture();
   f.chart.mainBoard.height = f.right.height = f.left.height = f.canvas.clientHeight = 300;
@@ -121,7 +132,7 @@ test('rectangles and trend lines remain anchored after panning and bar ids chang
   f.fire('mousedown', {clientX: 130, clientY: 120});
   f.fire('mousedown', {clientX: 210, clientY: 70});
   const svg = f.canvas.parentElement.children.find(el => el.tagName === 'svg');
-  assert.equal(svg.children[0].attributes.width, '80');
+  assert.equal(svg.children[0].attributes.width, '88');
   assert.equal(svg.children[0].attributes.height, '50');
   const x = Number(svg.children[0].attributes.x);
   f.chart.chartCtrl.pixelLeft = 80; f.api.render(f.chart);
@@ -131,5 +142,184 @@ test('rectangles and trend lines remain anchored after panning and bar ids chang
   f.chart.chartCtrl.pixelLeft = 160; f.api.render(f.chart);
   assert.equal(Number(svg.children[0].attributes.x), x - 80, '时间锚点不随缓存编号变化而漂移');
   f.api.clear(); assert.equal(svg.children.length, 0);
+});
+test('rectangle corner can be edited, escape rolls back and undo restores the last edit', () => {
+  const f = fixture();
+  f.api.select('rectangle');
+  f.fire('mousedown', {clientX: 130, clientY: 120});
+  f.fire('mousedown', {clientX: 210, clientY: 70});
+  f.api.select('pan');
+  f.fire('mousedown', {clientX: 130, clientY: 120}); f.win.fire('mouseup');
+  assert.ok(f.api.inspect().selected, '点击图形应选中并显示控制点');
+  const before = f.api.inspect().drawings[0].points[0];
+  f.fire('mousedown', {clientX: 130, clientY: 120});
+  f.doc.fire('mousemove', {buttons: 1, clientX: 146, clientY: 130});
+  f.win.fire('mouseup');
+  let p = f.api.inspect().drawings[0].points[0];
+  assert.equal(p.time, before.time + 120e9);
+  assert.equal(p.price, 109);
+  f.api.undo();
+  assert.deepEqual(f.api.inspect().drawings[0].points[0], before);
+  f.fire('mousedown', {clientX: 130, clientY: 120}); f.win.fire('mouseup');
+  f.fire('mousedown', {clientX: 130, clientY: 120});
+  f.doc.fire('mousemove', {buttons: 1, clientX: 154, clientY: 140});
+  f.doc.fire('keydown', {key: 'Escape'});
+  assert.deepEqual(f.api.inspect().drawings[0].points[0], before);
+  assert.equal(f.chart.chartCtrl.pixelLeft, 0, '编辑不得同时拖动K线');
+});
+test('moving rectangle border translates both anchors and delete removes only selection', () => {
+  const f = fixture();
+  f.api.select('rectangle');
+  f.fire('mousedown', {clientX: 130, clientY: 120});
+  f.fire('mousedown', {clientX: 210, clientY: 70}); f.api.select('pan');
+  const before = f.api.inspect().drawings[0].points.map(p => ({...p}));
+  f.fire('mousedown', {clientX: 170, clientY: 120});
+  f.doc.fire('mousemove', {buttons: 1, clientX: 178, clientY: 130}); f.win.fire('mouseup');
+  const after = f.api.inspect().drawings[0].points;
+  for (let i = 0; i < 2; i++) {
+    assert.equal(after[i].time, before[i].time + 60e9);
+    assert.equal(after[i].price, before[i].price - 1);
+  }
+  f.doc.fire('keydown', {key: 'Delete'});
+  assert.equal(f.api.inspect().drawings.length, 0);
+  f.api.undo(); assert.equal(f.api.inspect().drawings.length, 1);
+});
+test('two full hourly candles become exactly 120 minute candles on the same symbol', () => {
+  const f = fixture(), start = Date.parse('2026-10-19T09:00:00+08:00') * 1e6;
+  f.chart.duration = 3600e9;
+  f.chart.mainSeries.data = [0, 1].map(i => ({datetime: start + i * 3600e9}));
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 1}; f.chart.draw();
+  f.api.select('rectangle');
+  f.fire('mousedown', {clientX: 51, clientY: 30});
+  f.fire('mousedown', {clientX: 59, clientY: 120});
+  const anchors = f.api.inspect().drawings[0].points;
+  assert.equal(anchors[0].time, start);
+  assert.equal(anchors[1].time, start + 7200e9);
+  f.chart.duration = 60e9; f.chart.bar.step = 4; f.chart.bar.barWidth = 3;
+  f.chart.mainSeries.data = Array.from({length: 120}, (_, i) => ({datetime: start + i * 60e9}));
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 119}; f.chart.draw();
+  assert.equal(f.api.inspect().drawings.length, 1);
+  const svg = f.canvas.parentElement.children.find(el => el.tagName === 'svg');
+  assert.equal(svg.children[0].attributes.x, '0');
+  assert.equal(svg.children[0].attributes.width, '480');
+});
+test('Monday daily rectangle covers Friday night and Monday sessions across periods', () => {
+  const f = fixture(), day = Date.parse('2026-10-19T00:00:00+08:00') * 1e6;
+  f.chart.duration = 86400e9; f.chart.mainSeries.data = [{datetime: day}];
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 0}; f.chart.draw();
+  f.api.select('rectangle'); f.fire('mousedown', {clientX: 51, clientY: 30});
+  f.fire('mousedown', {clientX: 51, clientY: 120});
+  const anchors = f.api.inspect().drawings[0].points;
+  assert.equal(anchors[0].time, Date.parse('2026-10-16T18:00:00+08:00') * 1e6);
+  assert.equal(anchors[1].time, Date.parse('2026-10-19T18:00:00+08:00') * 1e6);
+  const night = Date.parse('2026-10-16T21:00:00+08:00') * 1e6;
+  const morning = Date.parse('2026-10-19T09:00:00+08:00') * 1e6;
+  f.chart.duration = 60e9;
+  f.chart.mainSeries.data = [night, morning].flatMap(t => Array.from({length: 60}, (_, i) => ({datetime: t + i * 60e9})));
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 119}; f.chart.draw();
+  assert.equal(f.api.inspect().drawings.length, 1);
+  const shape = f.canvas.parentElement.children.find(el => el.tagName === 'svg').children[0];
+  assert.ok(Number(shape.attributes.x) <= 0);
+  assert.ok(Number(shape.attributes.x) + Number(shape.attributes.width) >= 120 * 8);
+});
+test('uncached period requests the drawing date and releases its temporary subscription after loading', () => {
+  const f = fixture(1, true), start = Date.parse('2025-03-03T09:00:00+08:00') * 1e6;
+  f.chart.duration = 3600e9; f.chart.mainSeries.data = [0, 1].map(i => ({datetime: start + i * 3600e9}));
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 1}; f.chart.draw();
+  f.api.select('rectangle'); f.fire('mousedown', {clientX: 51}); f.fire('mousedown', {clientX: 59});
+  f.chart.duration = 60e9;
+  f.chart.mainSeries.data = Array.from({length: 220}, (_, i) => ({datetime: start + 300 * 86400e9 + i * 60e9}));
+  f.chart.draw(); f.flush();
+  assert.equal(f.packets[0].focus_datetime, start + 3600e9);
+  assert.equal(f.packets[0].symbol, 'TEST.a');
+  assert.equal(f.packets[0].duration, 60e9);
+  f.chart.mainSeries.data = Array.from({length: 120}, (_, i) => ({datetime: start + i * 60e9}));
+  f.chart.mainSeries.last_id = 119; f.flush();
+  assert.equal(f.chart.chartCtrl.range.leftId, 0);
+  assert.equal(f.chart.chartCtrl.range.rightId, 119);
+  assert.equal(f.packets.at(-1).symbol, '');
+  assert.equal(f.packets.at(-1).view_width, 0);
+});
+test('confirmed daily focus may start after a closed weekend without inventing night bars', () => {
+  const f = fixture(1, true), day = Date.parse('2026-10-19T00:00:00+08:00') * 1e6;
+  f.chart.duration = 86400e9; f.chart.mainSeries.data = [{datetime: day}];
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 0}; f.chart.draw();
+  f.api.select('rectangle'); f.fire('mousedown', {clientX: 51, clientY: 30});
+  f.fire('mousedown', {clientX: 51, clientY: 120});
+  f.chart.duration = 60e9;
+  f.chart.mainSeries.data = Array.from({length: 120}, (_, i) => ({datetime: day + 9 * 3600e9 + i * 60e9}));
+  f.chart.mainSeries.last_id = 119; f.chart.draw(); f.flush();
+  const request = f.packets[0];
+  f.replies.qf_drawing_focus = {_epoch: 1, more_data: false,
+    state: {...request, ins_list: request.symbol}};
+  f.flush();
+  assert.equal(f.chart.chartCtrl.range.leftId, 0);
+  assert.equal(f.chart.chartCtrl.range.rightId, 119);
+  assert.equal(f.packets.at(-1).view_width, 0);
+});
+test('manual browsing cancels pending historical focus so late data cannot steal the viewport', () => {
+  const f = fixture(1, true), start = Date.parse('2025-03-03T09:00:00+08:00') * 1e6;
+  f.chart.duration = 3600e9; f.chart.mainSeries.data = [0, 1].map(i => ({datetime: start + i * 3600e9}));
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 1}; f.chart.draw();
+  f.api.select('rectangle'); f.fire('mousedown', {clientX: 51}); f.fire('mousedown', {clientX: 59});
+  f.chart.duration = 60e9;
+  f.chart.mainSeries.data = Array.from({length: 220}, (_, i) => ({datetime: start + 300 * 86400e9 + i * 60e9}));
+  f.chart.draw(); f.flush();
+  f.fire('wheel');
+  const requestCount = f.packets.length;
+  f.chart.chartCtrl.range = {leftId: 100, rightId: 180};
+  f.chart.mainSeries.data = Array.from({length: 120}, (_, i) => ({datetime: start + i * 60e9}));
+  f.chart.mainSeries.last_id = 119; f.flush();
+  assert.equal(f.chart.chartCtrl.range.leftId, 100);
+  assert.equal(f.packets.length, requestCount);
+  assert.equal(f.packets.at(-1).view_width, 0);
+});
+test('native current-day close chart keeps its own viewport instead of following old candle dates', () => {
+  const f = fixture(1, true);
+  f.api.select('trend'); f.fire('mousedown', {clientX: 130}); f.fire('mousedown', {clientX: 210});
+  f.chart.mainType = 'close'; f.chart.chartCtrl.range = {leftId: 40, rightId: 99};
+  f.chart.draw(); f.flush();
+  assert.equal(f.packets.length, 0);
+  assert.equal(f.chart.chartCtrl.range.leftId, 40);
+});
+test('vertical drag of rectangle right corner cannot add another candle to its time span', () => {
+  const f = fixture(); f.api.select('rectangle');
+  f.fire('mousedown', {clientX: 130, clientY: 120});
+  f.fire('mousedown', {clientX: 210, clientY: 70}); f.api.select('pan');
+  const before = f.api.inspect().drawings[0].points.map(p => ({...p}));
+  const x = 50 + 21 * 8;
+  f.fire('mousedown', {clientX: x, clientY: 70}); f.win.fire('mouseup');
+  f.fire('mousedown', {clientX: x, clientY: 70});
+  f.doc.fire('mousemove', {clientX: x, clientY: 80, buttons: 1}); f.win.fire('mouseup');
+  const after = f.api.inspect().drawings[0].points;
+  assert.equal(after[1].time, before[1].time);
+  assert.notEqual(after[1].price, before[1].price);
+});
+test('explicit year/latest-style range navigation cancels pending focus before late data arrives', () => {
+  const f = fixture(1, true), start = Date.parse('2025-03-03T09:00:00+08:00') * 1e6;
+  f.chart.duration = 3600e9; f.chart.mainSeries.data = [0, 1].map(i => ({datetime: start + i * 3600e9}));
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 1}; f.chart.draw();
+  f.api.select('rectangle'); f.fire('mousedown', {clientX: 51}); f.fire('mousedown', {clientX: 59});
+  f.chart.duration = 60e9;
+  f.chart.mainSeries.data = Array.from({length: 220}, (_, i) => ({datetime: start + 300 * 86400e9 + i * 60e9}));
+  f.chart.draw(); f.flush();
+  f.chart.setRange(100, 180);
+  f.chart.mainSeries.data = Array.from({length: 120}, (_, i) => ({datetime: start + i * 60e9}));
+  f.chart.mainSeries.last_id = 119; f.flush();
+  assert.equal(f.chart.chartCtrl.range.leftId, 100);
+});
+test('clearing the drawing also cancels its pending historical focus', () => {
+  const f = fixture(1, true), start = Date.parse('2025-03-03T09:00:00+08:00') * 1e6;
+  f.chart.duration = 3600e9; f.chart.mainSeries.data = [0, 1].map(i => ({datetime: start + i * 3600e9}));
+  f.chart.chartCtrl.range = {leftId: 0, rightId: 1}; f.chart.draw();
+  f.api.select('rectangle'); f.fire('mousedown', {clientX: 51}); f.fire('mousedown', {clientX: 59});
+  f.chart.duration = 60e9;
+  f.chart.mainSeries.data = Array.from({length: 220}, (_, i) => ({datetime: start + 300 * 86400e9 + i * 60e9}));
+  f.chart.draw(); f.flush(); f.api.clear();
+  f.chart.mainSeries.data = Array.from({length: 120}, (_, i) => ({datetime: start + i * 60e9}));
+  f.chart.mainSeries.last_id = 119; f.flush();
+  assert.equal(f.chart.chartCtrl.range.rightId, 1);
+  assert.equal(f.api.inspect().drawings.length, 0);
+  assert.equal(f.packets.at(-1).view_width, 0);
 });
 console.log('NATIVE_TOOLS_OFFLINE_OK');

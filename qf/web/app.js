@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const names = {idle:'未连接',connecting:'正在连接',ready:'已连接',waiting_data:'已连接',
   disconnected:'连接中断',stopping:'正在断开',stopped:'已断开',failed:'连接失败'};
 let api, state={catalog:[],rows:[],favorites:[]}, selected=null, page=0, favoritesOnly=false;
-let ticking=false, pending=null, sending=false, lastView='', currentChart='';
+let ticking=false, pending=null, sending=false, lastView='', currentChart='',exiting=false,pollTimer;
 const favoriteQueue=[];
 let favoriteSaving=false, favoriteVersion=0;
 let nativeLabelsReady=false;
@@ -24,7 +24,7 @@ async function refreshLogin(fill=false){savedLogin=await api.get_login_state();
 function filtered(){const query=$('search').value.trim().toLowerCase(),exchange=$('exchange').value;
   return state.catalog.filter(r=>(!exchange||r.exchange===exchange)&&(!favoritesOnly||state.favorites.includes(r.continuous))&&
     [r.name,r.product,r.exchange,labels.exchangeName(r.exchange),r.continuous].join(' ').toLowerCase().includes(query));}
-async function sendView(symbols){const key=JSON.stringify([symbols,selected]);if(key===lastView)return;
+async function sendView(symbols){if(exiting)return;const key=JSON.stringify([symbols,selected]);if(key===lastView)return;
   lastView=key;pending={symbols,selected};if(sending)return;sending=true;
   try{while(pending){const request=pending;pending=null;const result=await api.set_view(request.symbols,request.selected);if(!result.ok)notice(result.reason)}}
   catch(_){notice('品种切换未完成，请检查连接。');lastView=''}finally{sending=false}}
@@ -38,7 +38,7 @@ async function toggleFavorite(symbol){favoriteQueue.push(symbol);if(favoriteSavi
       if(result.ok){state.favorites=values;lastView='';render()}}
     catch(_){notice('自选保存未完成，请重试。')}}
   }finally{favoriteSaving=false;favoriteVersion++}}
-function render(){const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40));page=Math.min(page,pages-1);
+function render(){if(exiting)return;const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40));page=Math.min(page,pages-1);
   const visible=all.slice(page*40,page*40+40),quotes=new Map(state.rows.map(r=>[r.continuous,r]));
   $('market-rows').replaceChildren();$('empty').hidden=visible.length>0;
   for(const item of visible){const q=quotes.get(item.continuous)||{},row=document.createElement('tr');
@@ -85,7 +85,8 @@ function render(){const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40)
   $('expand-chart').disabled=!address;
   if(api&&state.catalog.length&&['ready','waiting_data','disconnected'].includes(state.status))sendView(visible.map(r=>r.continuous));
 }
-async function tick(){if(ticking)return;ticking=true;const version=favoriteVersion;try{const incoming=await api.get_state();
+async function tick(){if(exiting||ticking)return;ticking=true;const version=favoriteVersion;try{const incoming=await api.get_state();
+  if(exiting)return;
   if(favoriteSaving||version!==favoriteVersion)incoming.favorites=state.favorites;
   state=incoming;if(!selected)selected=state.selected||state.catalog.find(r=>r.product==='rb')?.continuous||state.catalog[0]?.continuous;
   if(loginStatus!==state.status){loginStatus=state.status;await refreshLogin()}
@@ -128,6 +129,10 @@ addEventListener('message',event=>{if(currentChart&&event.source===$('chart').co
   event.origin===new URL(currentChart).origin&&event.data?.kind==='qf-chart-ready')sendChartLabels()});
 addEventListener('qf-native-labels-ready',()=>{nativeLabelsReady=true;if(api)render()});
 addEventListener('qf-native-labels-error',()=>notice('图表中文说明未能准备完成，请重新打开工作台。'));
+window.qfPrepareExit=()=>{exiting=true;clearInterval(pollTimer);pending=null;currentChart='';
+  $('chart').src='about:blank';$('chart').hidden=true;$('password').value='';
+  document.querySelectorAll('button,input,select').forEach(element=>element.disabled=true);
+  notice('正在退出，请稍候…')};
 addEventListener('pywebviewready',async()=>{api=window.pywebview.api;
   try{await refreshLogin(true)}catch(_){notice('已保存的账号暂时无法读取，请手动输入。')}
-  tick();setInterval(tick,700)});
+  if(!exiting){tick();pollTimer=setInterval(tick,700)}});

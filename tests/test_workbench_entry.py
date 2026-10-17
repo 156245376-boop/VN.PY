@@ -55,6 +55,31 @@ def test_launcher_opens_workbench_and_retains_legacy_entry():
     assert (ROOT / "tools/gui_entry.py").is_file()
     script = r'''
 $ErrorActionPreference='Stop'
+Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class OwnedExitDialog {
+    public delegate bool WindowCallback(IntPtr hwnd, IntPtr arg);
+    [DllImport("user32.dll")] static extern bool EnumWindows(WindowCallback cb, IntPtr arg);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out int pid);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    static extern int GetWindowText(IntPtr h, StringBuilder title, int count);
+    [DllImport("user32.dll")]
+    static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    public static void Confirm(int ownedPid) {
+        EnumWindows((hwnd, arg) => {
+            int pid; GetWindowThreadProcessId(hwnd, out pid);
+            if (pid == ownedPid) {
+                var title = new StringBuilder(128); GetWindowText(hwnd, title, 128);
+                if (title.ToString() == "确认退出")
+                    PostMessage(hwnd, 0x0111, new IntPtr(1), IntPtr.Zero);
+            }
+            return true;
+        }, IntPtr.Zero);
+    }
+}
+'@
 $launcher=Start-Process -FilePath wscript.exe -ArgumentList '"LAUNCHER"' `
     -WindowStyle Hidden -PassThru
 $owned=[Collections.Generic.HashSet[int]]::new()
@@ -81,7 +106,11 @@ try {
         $candidate=Get-Process -Id $processId -ErrorAction SilentlyContinue
         if ($candidate -and $candidate.MainWindowHandle -ne 0) {
             $null=$candidate.CloseMainWindow()
-            $null=$candidate.WaitForExit(6000)
+            $closeEnd=[DateTime]::UtcNow.AddSeconds(6)
+            while (-not $candidate.HasExited -and [DateTime]::UtcNow -lt $closeEnd) {
+                [OwnedExitDialog]::Confirm($candidate.Id)
+                $null=$candidate.WaitForExit(50)
+            }
         }
     }
 }

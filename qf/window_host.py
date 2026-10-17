@@ -55,18 +55,28 @@ def run_window(page: Path, bridge, request_close, *, webview_module=None):
         width=1280, height=820, min_size=(960, 680), text_select=True,
     )
     waiting = threading.Event()
+    allow_close = threading.Event()
 
     def finish_close():
+        if window.events.loaded.is_set():
+            try:
+                window.evaluate_js("window.qfPrepareExit?.()")
+            except Exception:
+                pass  # 页面尚未就绪或已销毁时，后台清理仍须继续。
         while not request_close():
             time.sleep(0.1)
+        allow_close.set()
         window.destroy()
 
     def closing():
-        if request_close():
+        if allow_close.is_set():
             return True
-        if not waiting.is_set():
-            waiting.set()
-            threading.Thread(target=finish_close, daemon=True).start()
+        if waiting.is_set():
+            return False
+        if not window.create_confirmation_dialog("确认退出", "确定退出天勤策略工作台吗？"):
+            return False
+        waiting.set()
+        threading.Thread(target=finish_close, daemon=True).start()
         return False
 
     window.events.closing += closing

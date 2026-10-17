@@ -1,5 +1,6 @@
 """一个线程拥有只读 TqApi；业务对象仅以白名单快照离开线程。"""
 
+import asyncio
 import contextlib
 import copy
 import logging
@@ -9,6 +10,32 @@ import time
 
 from qf.market import CONTINUOUS, catalog_rows, quote_row
 from qf.runtime import chart_address
+
+
+def _close_api(api):
+    """先释放本会话图表请求，避免 SDK 3.10.2 等待未返回的 peek_message。"""
+    loop = getattr(api, "_loop", None)
+    if loop is not None and not loop.is_closed():
+        from aiohttp.web_protocol import RequestHandler
+
+        async def release_chart_requests():
+            codes = {RequestHandler.start.__code__, RequestHandler._handle_request.__code__}
+            tasks = [task for task in asyncio.all_tasks(loop)
+                     if getattr(task.get_coro(), "cr_code", None) in codes]
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        create_task = getattr(api, "create_task", loop.create_task)
+        task = create_task(release_chart_requests())
+        if hasattr(api, "_run_until_task_done"):
+            # SDK 会主动 stop 自有事件循环，必须使用它的驱动器推进清理任务。
+            api._run_until_task_done(task)
+            task.result()
+        else:
+            loop.run_until_complete(task)
+    api.close()
 
 
 class MarketSession:
@@ -144,7 +171,7 @@ class MarketSession:
                             self.set_view(requested, default)
                 self._serve_view(api, catalog, address, chart_ready)
             finally:
-                api.close()
+                _close_api(api)
 
     def _serve_view(self, api, catalog, address, chart_ready):
         known = {r["continuous"]: r for r in catalog}

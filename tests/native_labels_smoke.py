@@ -55,6 +55,7 @@ def exercise():
         def create(*args, **kwargs):
             kwargs["hidden"] = True
             window = original(*args, **kwargs)
+            window.create_confirmation_dialog = lambda *args: True
 
             def interact():
                 try:

@@ -83,7 +83,6 @@ function render(){const all=filtered(),pages=Math.max(1,Math.ceil(all.length/40)
   $('chart-placeholder').textContent=state.chart_status==='unavailable'?'当前合约K线未返回或读取失败，可切换其他品种；连接状态请看顶部指示灯。':
     state.connected===true?'正在载入所选品种的 K 线，请稍候。':'连接后将自动选择品种并载入 K 线。';
   $('expand-chart').disabled=!address;
-  $('open-chart').disabled=!address;
   if(api&&state.catalog.length&&['ready','waiting_data','disconnected'].includes(state.status))sendView(visible.map(r=>r.continuous));
 }
 async function tick(){if(ticking)return;ticking=true;const version=favoriteVersion;try{const incoming=await api.get_state();
@@ -107,7 +106,6 @@ $('disconnect').onclick=async()=>{const result=await api.disconnect();notice(res
 function expandChart(expanded){$('chart-card').classList.toggle('expanded',expanded);
   document.body.classList.toggle('chart-expanded',expanded);$('expand-chart').textContent=expanded?'还原 K 线（Esc）':'放大 K 线'}
 $('expand-chart').onclick=()=>expandChart(!$('chart-card').classList.contains('expanded'));
-$('open-chart').onclick=()=>expandChart(true);
 addEventListener('keydown',event=>{if(event.key==='Escape')expandChart(false)});
 $('user').addEventListener('input',passwordHint);
 $('forget-login').onclick=async()=>{try{const result=await api.forget_login();notice(result.reason);
@@ -123,7 +121,8 @@ for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>
   $('market-layout').hidden=!['home','market'].includes(view);
   $('page-title').textContent={home:'研究工作台',market:'行情与品种',research:'策略研究与模拟',news:'新闻与事件',settings:'设置与资源'}[view]};
 function sendChartLabels(){if(!currentChart)return;
-  $('chart').contentWindow.postMessage({kind:'qf-chart-labels',catalog:state.catalog},new URL(currentChart).origin)}
+  const symbol=state.rows.find(row=>row.continuous===selected)?.underlying||'';
+  $('chart').contentWindow.postMessage({kind:'qf-chart-labels',catalog:state.catalog,symbol},new URL(currentChart).origin)}
 $('chart').addEventListener('load',sendChartLabels);
 addEventListener('message',event=>{if(currentChart&&event.source===$('chart').contentWindow&&
   event.origin===new URL(currentChart).origin&&event.data?.kind==='qf-chart-ready')sendChartLabels()});

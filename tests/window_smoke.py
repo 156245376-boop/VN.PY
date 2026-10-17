@@ -44,7 +44,17 @@ def serve(initial_data=None, *, probe=False):
                 setInterval(()=>parent.postMessage({kind:'offline-native-probe',
                   text:document.body.innerText, bridge:!!window.pywebview?.api,
                   selected:document.querySelector('.tq-top-view .title')?.textContent,
-                  original:document.querySelector('.tq-top-view .title')?.title},'*'),100);
+                  original:document.querySelector('.tq-top-view .title')?.title,
+                  layout:(()=>{
+                    const left=document.querySelector('.tq-top-view .left-view');
+                    if(!left)return null;
+                    const toolbar=left.children[0],chart=left.children[1];
+                    const controls=[toolbar.querySelector('.title'),
+                      toolbar.querySelector('.tq-button-group-durations'),
+                      toolbar.querySelector('.ivu-checkbox-wrapper')];
+                    return {width:innerWidth,chartTop:chart.getBoundingClientRect().top,
+                      bottoms:controls.map(e=>e?.getBoundingClientRect().bottom)};
+                  })()},'*'),100);
                 addEventListener('message',event=>{
                   if(event.data?.kind==='offline-native-click')
                     document.querySelectorAll('.subscribed-list button')[1]?.click();

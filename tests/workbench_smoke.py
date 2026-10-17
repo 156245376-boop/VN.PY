@@ -27,7 +27,7 @@ def exercise():
                               "file_name": "workbench_entry.py"},
                    "subscribed": [{"symbol": "DCE.m2701", "dur_nano": 60000000000},
                                   {"symbol": "SHFE.rb2701", "dur_nano": 60000000000}]}
-    server = threading.Thread(target=lambda: serve(native_data), daemon=True)
+    server = threading.Thread(target=lambda: serve(native_data, probe=True), daemon=True)
     server.start()
     assert ready.wait(5)
     market_module.chart_address = lambda: address
@@ -77,9 +77,15 @@ def exercise():
                     assert window.evaluate_js(
                         'document.querySelector("#password").required') is False
                     window.evaluate_js('document.querySelector("#login-form").requestSubmit()')
+                    window.evaluate_js('''window.chartObservation=null;
+                      addEventListener('message',event=>{
+                        if(event.data?.kind==='offline-native-probe')
+                          window.chartObservation=event.data;
+                      });''')
                     time.sleep(0.8)  # 复现缓存目录先于连接/行情到达。
                     FakeApi.block.set()
                     check('document.querySelector("#chart").hidden===false')
+                    check('window.chartObservation?.original?.startsWith("SHFE.rb2701")')
                     check('document.querySelector("#status").dataset.light==="green"')
                     assert "正在连接" not in window.evaluate_js(
                         'document.querySelector("#notice").textContent')
@@ -92,6 +98,7 @@ def exercise():
                     window.evaluate_js('document.querySelector("#market-rows tr").click()')
                     check('document.querySelector("#chart-title").textContent.includes("豆粕")')
                     check('document.querySelector("#chart").hidden===false')
+                    check('window.chartObservation?.original?.startsWith("DCE.m2701")')
                     detail = window.evaluate_js(
                         'document.querySelector("#chart-detail").textContent')
                     assert "2027年1月合约" in detail and "KQ.m@" not in detail, detail
@@ -103,7 +110,7 @@ def exercise():
                     assert "手" in window.evaluate_js(
                         'document.querySelector("#market-rows td:nth-child(6)").textContent')
                     address_before = window.evaluate_js('document.querySelector("#chart").src')
-                    window.evaluate_js('document.querySelector("#open-chart").click()')
+                    window.evaluate_js('document.querySelector("#expand-chart").click()')
                     check('document.querySelector("#chart-card").classList.contains("expanded")')
                     assert window.evaluate_js(
                         'document.querySelector("#chart").src') == address_before

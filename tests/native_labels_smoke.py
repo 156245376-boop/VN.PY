@@ -31,7 +31,9 @@ def exercise():
     result, errors = {}, []
     with tempfile.TemporaryDirectory() as temp:
         page = Path(temp) / "index.html"
-        page.write_text('''<html><body><iframe id="chart"></iframe><script>
+        page.write_text('''<html><head><style>
+          body{margin:0}iframe{width:100%;height:560px;border:0;display:block}
+          </style></head><body><iframe id="chart"></iframe><script>
           const catalog=CATALOG, address=ADDRESS;
           let observation=null;
           addEventListener('message',event=>{
@@ -72,6 +74,9 @@ def exercise():
                     assert observed["bridge"] is False, observed
                     assert observed["selected"].startswith("螺纹钢"), observed
                     assert observed["original"].startswith("SHFE.rb2701"), observed
+                    layout = observed["layout"]
+                    assert all(bottom <= layout["chartTop"] + 1
+                               for bottom in layout["bottoms"]), layout
                     window.evaluate_js('document.querySelector("#chart").contentWindow'
                                        '.postMessage({kind:"offline-native-click"},"*")')
                     deadline = time.monotonic() + 3
@@ -92,6 +97,16 @@ def exercise():
                         time.sleep(0.1)
                     assert "30m" in observed["original"], observed
                     assert "30分钟" in observed["selected"], observed
+                    window.resize(980, 720)
+                    deadline = time.monotonic() + 3
+                    while time.monotonic() < deadline:
+                        observed = window.evaluate_js('observation')
+                        if observed["layout"]["width"] <= 980:
+                            break
+                        time.sleep(0.1)
+                    layout = observed["layout"]
+                    assert all(bottom <= layout["chartTop"] + 1
+                               for bottom in layout["bottoms"]), layout
                     result.update(chinese=True, no_bridge=True, clicked=True, period=True)
                 except Exception as exc:
                     errors.append(str(exc))

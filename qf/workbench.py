@@ -1,5 +1,6 @@
 """可信桌面页面的最小业务桥接；不向网页暴露文件或命令执行接口。"""
 
+import re
 import subprocess
 import threading
 import webbrowser
@@ -7,6 +8,7 @@ from pathlib import Path
 
 from qf.credentials import SavedLogin
 from qf.desktop import allowed_chart_url
+from qf.history import HISTORY_ISSUES
 from qf.market import catalog_rows
 from qf.market_session import MarketSession
 from qf.market_units import price_unit
@@ -27,6 +29,22 @@ LOAD_PHASES = {"idle", "connecting", "catalog", "bars", "chart", "ready", "faile
 ROW_FIELDS = ("continuous", "name", "exchange", "product", "underlying", "last_price",
               "change_percent", "volume", "open_interest", "quote_time", "data_state",
               "price_unit", "data_note")
+
+
+def _history_summary(raw):
+    if not isinstance(raw, dict):
+        return None
+    count = raw.get("valid_count")
+    dates = {key: value if isinstance(value := raw.get(key), str)
+             and re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", value) else None
+             for key in ("first", "last")}
+    years, issues = raw.get("years"), raw.get("issues")
+    return {"valid_count": count if type(count) is int and count >= 0 else 0, **dates,
+            "years": {key: value for key, value in years.items()
+                      if isinstance(key, str) and re.fullmatch(r"\d{4}", key)
+                      and type(value) is int and value > 0} if isinstance(years, dict) else {},
+            "issues": [value for value in issues if isinstance(value, str)
+                       and value in HISTORY_ISSUES] if isinstance(issues, list) else []}
 
 
 class WorkbenchBridge:
@@ -108,9 +126,13 @@ class WorkbenchBridge:
             if not isinstance(chart_symbol, str) or (chart_symbol != self._selected
                     and chart_symbol not in {row.get("underlying") for row in rows}):
                 chart_symbol = None
+            revision = raw.get("chart_revision")
             return {"status": status, "catalog": display_catalog, "rows": rows,
                     "loading": progress, "chart_mode": self._chart_mode,
                     "chart_symbol": chart_symbol,
+                    "chart_revision": revision if matching and type(revision) is int
+                    and revision > 0 else 0,
+                    "history": _history_summary(raw.get("history")) if matching else None,
                     "connected": connected,
                     "chart_status": chart_status if chart_status in
                     {"idle", "loading", "ready", "unavailable"} else "idle",

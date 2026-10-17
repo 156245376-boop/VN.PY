@@ -8,6 +8,8 @@ const favoriteQueue=[];
 let favoriteSaving=false, favoriteVersion=0;
 let nativeLabelsReady=false;
 let chartMode='actual',chartFrameReady=false,loadStarted=0;
+let chartState=null,chartProblem='',currentChartRevision=0;
+const historyIssues={empty:'没有有效 K 线',invalid_bar:'存在无效 K 线',id_sequence:'K 线编号不连续',time_order:'时间重复或倒序',long_gap:'历史日期存在超过一个月的间隔，需要核实'};
 const labels=window.QfLabels;
 let savedLogin={user:'',saved:false},loginStatus='';
 const text = (tag,value,cls) => {const e=document.createElement(tag); e.textContent=value; if(cls)e.className=cls;return e};
@@ -29,23 +31,41 @@ async function sendView(symbols){if(exiting)return;const key=JSON.stringify([sym
   lastView=key;pending={symbols,selected,chartMode};if(sending)return;sending=true;
   try{while(pending){const request=pending;pending=null;const result=await api.set_view(request.symbols,request.selected,request.chartMode);if(!result.ok)notice(result.reason)}}
   catch(_){notice('品种切换未完成，请检查连接。');lastView=''}finally{sending=false}}
-function choose(symbol){selected=symbol;currentChart='';chartFrameReady=false;loadStarted=performance.now();$('chart').hidden=true;$('chart').src='about:blank';
+function choose(symbol){selected=symbol;currentChart='';chartFrameReady=false;chartState=null;chartProblem='';loadStarted=performance.now();$('chart').hidden=true;$('chart').src='about:blank';
   render();}
 function renderLoading(){const phase=state.status==='disconnected'?'connecting':state.loading?.phase||'connecting';
   const active=!['idle','stopped','failed','stopping'].includes(state.status)&&
-    state.chart_status!=='unavailable'&&(!currentChart||!chartFrameReady);
+    state.chart_status!=='unavailable'&&!chartProblem&&(!currentChart||!chartFrameReady);
   $('chart-loading').hidden=!active;
   if(!active){loadStarted=0;return}
   if(!loadStarted)loadStarted=performance.now();
   const stages={connecting:[1,'连接行情服务'],catalog:[2,'读取品种目录'],bars:[3,'核实合约并读取 K 线'],chart:[4,'打开图表窗口'],ready:[4,'打开图表窗口']};
   const [step,title]=stages[phase]||[3,'等待行情数据'];
   const progress=state.loading||{},measured=phase==='catalog'&&Number.isInteger(progress.total)&&progress.total>0;
-  $('loading-stage').textContent='第 '+step+' / 4 步：'+title+(measured?'（'+(progress.done||0)+' / '+progress.total+'）':'');
+  $('loading-stage').textContent='第 '+step+' / 4 步：'+(step===4?'等待所选品种图表的数据和绘制':title)+(measured?'（'+(progress.done||0)+' / '+progress.total+'）':'');
   const bar=$('chart-progress');
   if(measured){bar.max=progress.total;bar.value=Math.min(progress.done||0,progress.total)}else bar.removeAttribute('value');
   bar.setAttribute('aria-valuetext',$('loading-stage').textContent);
   $('loading-time').textContent='已等待 '+Math.floor((performance.now()-loadStarted)/1000)+
     ' 秒 · 剩余时间暂无法准确估计，请以实际加载阶段为准。';
+}
+function renderHistory(){
+  const history=chartState?.history,yearSelect=$('history-year');
+  const years=Object.keys(history?.years||{}).filter(year=>/^\d{4}$/.test(year)&&Number.isSafeInteger(history.years[year])&&history.years[year]>0).sort();
+  const daily=chartState?.duration===86400000000000;
+  const key=JSON.stringify(years.map(year=>[year,history.years[year]]));
+  if(yearSelect.dataset.options!==key){yearSelect.dataset.options=key;yearSelect.replaceChildren(new Option('选择年份',''));
+    for(const year of years)yearSelect.add(new Option(year+' 年（'+number(history.years[year])+' 根）',year));}
+  $('history-controls').hidden=!daily||!chartFrameReady;
+  $('history-summary').dataset.error=String(!!chartProblem||!!state.history?.issues?.length);
+  const backendIssue=state.history?.issues?.map(code=>historyIssues[code]).filter(Boolean).join('；');
+  if(chartProblem){$('history-summary').textContent=chartProblem;return}
+  if(state.chart_status==='unavailable'&&backendIssue){$('history-summary').textContent='历史数据需核实：'+backendIssue+'。已暂停显示。';return}
+  if(!history?.valid_count){$('history-summary').textContent='';return}
+  const visible=chartState.visible||{},date=value=>typeof value==='string'?value.slice(0,daily?10:19):'待确认';
+  $('history-summary').textContent='图中已加载：'+date(history.first)+' 至 '+date(history.last)+'，'+number(history.valid_count)+
+    ' 根'+(daily?'日线':' K 线')+'；当前可见：'+date(visible.first)+' 至 '+date(visible.last)+
+    '（北京时间）。'+(daily?'最后一根可能尚未收盘；夜盘日线归入下一交易日。':'');
 }
 async function toggleFavorite(symbol){favoriteQueue.push(symbol);if(favoriteSaving)return;
   favoriteSaving=true;favoriteVersion++;
@@ -97,11 +117,14 @@ function render(){if(exiting)return;const all=filtered(),pages=Math.max(1,Math.c
   $('history-note').textContent=chartMode==='continuous'?'主力连续历史：默认打开日线，向左拖动查看更多历史；跨主力合约拼接，切换主力时可能出现价格跳变，可用范围以服务返回为准。':
     '当前主力合约：历史范围取决于该月份合约的上市时间。跨年份走势可切换“主力连续历史”。';
   const address=nativeLabelsReady&&state.selected===selected&&state.chart_mode===chartMode&&/^http:\/\/127\.0\.0\.1:\d{1,5}\/?$/.test(state.chart_url||'')?state.chart_url:'';
-  if(address!==currentChart){currentChart=address;chartFrameReady=false;$('chart').src=address||'about:blank'}
-  $('chart').hidden=!address;$('chart-placeholder').hidden=!!address;
-  $('chart-placeholder').textContent=state.chart_status==='unavailable'?'当前合约K线未返回或读取失败，可切换其他品种；连接状态请看顶部指示灯。':
-    state.connected===true?'正在载入所选品种的 K 线，请稍候。':'连接后将自动选择品种并载入 K 线。';
-  $('expand-chart').disabled=!address;
+  const revision=address?state.chart_revision:0;
+  if(address!==currentChart||revision!==currentChartRevision){currentChart=address;currentChartRevision=revision;
+    chartFrameReady=false;chartState=null;chartProblem='';$('chart').src=address||'about:blank'}
+  $('chart').hidden=!address||!!chartProblem;$('chart-placeholder').hidden=!!address&&!chartProblem;
+  $('chart-placeholder').textContent=chartProblem|| (state.chart_status==='unavailable'?'当前合约K线未返回或读取失败，可切换其他品种；连接状态请看顶部指示灯。':
+    state.connected===true?'正在载入所选品种的 K 线，请稍候。':'连接后将自动选择品种并载入 K 线。');
+  $('expand-chart').disabled=!address||!chartFrameReady;
+  renderHistory();
   renderLoading();
   if(!$('chart-loading').hidden)$('chart-placeholder').hidden=true;
   if(api&&state.catalog.length&&['ready','waiting_data','disconnected'].includes(state.status))sendView(visible.map(r=>r.continuous));
@@ -146,11 +169,32 @@ for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>
   $('page-title').textContent={home:'研究工作台',market:'行情与品种',research:'策略研究与模拟',news:'新闻与事件',settings:'设置与资源'}[view]};
 function sendChartLabels(){if(!currentChart)return;
   const symbol=state.chart_symbol||state.rows.find(row=>row.continuous===selected)?.underlying||'';
-  $('chart').contentWindow.postMessage({kind:'qf-chart-labels',catalog:state.catalog,symbol,period:chartMode==='continuous'?'1d':'1m'},new URL(currentChart).origin)}
+  $('chart').contentWindow.postMessage({kind:'qf-chart-labels',catalog:state.catalog,symbol,
+    revision:state.chart_revision,period:chartMode==='continuous'?'1d':'1m'},new URL(currentChart).origin)}
 $('chart').addEventListener('load',sendChartLabels);
-addEventListener('message',event=>{if(currentChart&&event.source===$('chart').contentWindow&&
-  event.origin===new URL(currentChart).origin&&event.data?.kind==='qf-chart-ready'){
-    chartFrameReady=true;sendChartLabels();renderLoading();}});
+addEventListener('message',event=>{
+  if(!currentChart||event.source!==$('chart').contentWindow||event.origin!==new URL(currentChart).origin)return;
+  const data=event.data||{};
+  if(data.kind==='qf-chart-ready'){sendChartLabels();return}
+  if(data.revision!==state.chart_revision)return;
+  if(data.kind==='qf-chart-selection'&&state.catalog.some(row=>row.continuous===data.continuous)){
+    if(['actual','continuous'].includes(data.mode)){chartMode=data.mode;$('chart-source').value=chartMode}
+    choose(data.continuous);return;
+  }
+  if(data.kind==='qf-chart-command-failed'){notice('所选年份尚未收到有效数据，请等待加载或重新连接。');return}
+  if(data.kind!=='qf-chart-state'||!['ready','loading','invalid','unsupported'].includes(data.status))return;
+  if(data.status!=='unsupported'&&data.symbol!==state.chart_symbol)return;
+  chartState=data;chartFrameReady=data.status==='ready'&&Number.isSafeInteger(data.history?.valid_count)&&data.history.valid_count>0;
+  chartProblem=data.status==='unsupported'?(data.reason==='single_bar_renderer'?
+    '当前周期仅有 1 根有效 K 线，天勤原生图暂不能绘制；请切换品种或图表来源。':
+    '图表适配未完成，已暂停显示，请重新打开工作台。'):data.status==='invalid'?
+    '图表历史数据需核实：'+(data.history?.issues||[]).map(code=>historyIssues[code]).filter(Boolean).join('；')+'。已暂停显示，请重连或切换品种。':'';
+  render();
+});
+function chartCommand(command,year){if(!currentChart||!chartFrameReady)return;
+  $('chart').contentWindow.postMessage({kind:'qf-chart-command',revision:state.chart_revision,command,year},new URL(currentChart).origin)}
+$('history-year').onchange=()=>{if($('history-year').value)chartCommand('year',$('history-year').value)};
+$('history-latest').onclick=()=>{chartCommand('latest');$('history-year').value=''};
 addEventListener('qf-native-labels-ready',()=>{nativeLabelsReady=true;if(api)render()});
 addEventListener('qf-native-labels-error',()=>notice('图表中文说明未能准备完成，请重新打开工作台。'));
 window.qfPrepareExit=()=>{exiting=true;clearInterval(pollTimer);pending=null;currentChart='';

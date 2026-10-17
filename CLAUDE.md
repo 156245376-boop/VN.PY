@@ -33,3 +33,4 @@
 官方组件与权限边界按需查 `docs/tqsdk-native-kit.md`，不必为日常开发加载全部示例。
 桌面工作台已核对本机目录/末次报价/K线显示与放大，开盘实时更新仍待验收。后续目标见需求末节。
 连接灯、缺数据说明与报价单位按需查 `docs/market-data-display.md`。
+历史覆盖、年份定位与数据异常保护按需查 `docs/history-integrity.md`。

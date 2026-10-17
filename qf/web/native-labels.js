@@ -2,7 +2,7 @@
 (() => {
   if(window.__qfChartLabels)return;
   window.__qfChartLabels=true;
-  let catalog=[],scheduled=false,requestedSymbol='',pendingSymbol='',requestedPeriod='1m';
+  let catalog=[],scheduled=false,requestedSymbol='',pendingSymbol='',requestedPeriod='1m',revision=0;
   const originals=new WeakMap();
   const observer=new MutationObserver(()=>{
     if(scheduled)return;scheduled=true;queueMicrotask(refresh);
@@ -11,9 +11,10 @@
     scheduled=false;
     if(!document.body)return;
     observer.disconnect();
+    try{
     const title=document.querySelector('.tq-top-view .title');
     const previousTitle=originals.get(title?.firstChild);
-    const rawTitle=previousTitle?.rendered===title?.textContent?previousTitle.raw:title?.textContent||'';
+    const rawTitle=previousTitle&&previousTitle.rendered===title?.textContent?previousTitle.raw:title?.textContent||'';
     const symbol=rawTitle.trim().split(/\s+/)[0];
     const header=document.querySelector('.tq-header-view');
     if(header){let legend=document.querySelector('#qf-price-unit');
@@ -37,12 +38,22 @@
     if(pendingSymbol){const button=[...document.querySelectorAll('.subscribed-list button')]
       .find(item=>item.dataset.qfSymbol===pendingSymbol&&item.dataset.qfPeriod===requestedPeriod);
       if(button){pendingSymbol='';button.click();}}
-    observer.observe(document.body,{subtree:true,childList:true,characterData:true});
+    }finally{observer.observe(document.body,{subtree:true,childList:true,characterData:true});}
   }
   addEventListener('message',event=>{
-    if(event.source!==parent||event.origin!==qfParentOrigin||event.data?.kind!=='qf-chart-labels')return;
+    if(event.source!==parent||event.origin!==qfParentOrigin)return;
+    if(event.data?.kind==='qf-chart-command'&&event.data.revision===revision){
+      const command=event.data.command;
+      const ok=command==='year'&&/^\d{4}$/.test(event.data.year||'')?
+        window.QfNativeHistory?.jumpToYear(event.data.year):command==='latest'?
+        window.QfNativeHistory?.navigateLatest():false;
+      if(!ok)parent.postMessage({kind:'qf-chart-command-failed',revision},qfParentOrigin);
+      return;
+    }
+    if(event.data?.kind!=='qf-chart-labels')return;
     if(!Array.isArray(event.data.catalog))return;
     catalog=event.data.catalog.filter(row=>typeof row?.name==='string'&&typeof row?.product==='string'&&typeof row?.exchange==='string');
+    revision=Number.isSafeInteger(event.data.revision)?event.data.revision:0;
     const symbol=event.data.symbol;
     const period=event.data.period==='1d'?'1d':'1m';
     if(typeof symbol==='string'&&/^(?:KQ\.m@)?(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{0,4}$/.test(symbol)&&
@@ -50,6 +61,12 @@
       requestedSymbol=symbol;pendingSymbol=symbol;requestedPeriod=period;}
     refresh();
   });
+  function reportHistory(){
+    if(!requestedSymbol||!window.QfNativeHistory)return;
+    try{const result=window.QfNativeHistory.inspect();
+      parent.postMessage({kind:'qf-chart-state',revision,...result},qfParentOrigin);
+    }catch(_){parent.postMessage({kind:'qf-chart-state',revision,status:'unsupported'},qfParentOrigin);}
+  }
   addEventListener('DOMContentLoaded',()=>{
     const style=document.createElement('style');
     style.textContent=`
@@ -64,6 +81,19 @@
       #qf-price-unit{position:absolute;left:48px;top:25px;color:#657c70;font-size:10px;line-height:12px;pointer-events:none}`;
     document.head.append(style);
     refresh();
+    // 此事件仅表明标签脚本已加载；实际 K 线就绪另行核对。
     parent.postMessage({kind:'qf-chart-ready'},qfParentOrigin);
   });
+  setInterval(reportHistory,400);
+  document.addEventListener('click',event=>{
+    const button=event.target.closest?.('.subscribed-list button');
+    if(!button||!requestedSymbol||button.dataset.qfSymbol===requestedSymbol)return;
+    const symbol=button.dataset.qfSymbol;
+    const continuous=symbol?.replace(/^(?:KQ\.m@)?([A-Z]+\.[A-Za-z]+)\d*$/,'KQ.m@$1');
+    if(catalog.some(row=>row.continuous===continuous)){
+      event.preventDefault();event.stopImmediatePropagation();
+      parent.postMessage({kind:'qf-chart-selection',revision,continuous,
+        mode:symbol.startsWith('KQ.m@')?'continuous':'actual'},qfParentOrigin);
+    }
+  },true);
 })();

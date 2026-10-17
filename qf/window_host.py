@@ -21,7 +21,7 @@ def show_chart(url: str) -> str:
 
 
 def _install_chart_labels(window):
-    """只给本机子页增加显示标签，保持 SDK 安装文件与业务标识原样。"""
+    """只适配本机子页的显示与历史图形，保持 SDK 安装文件与业务标识原样。"""
     try:
         from System import Action
 
@@ -34,6 +34,7 @@ def _install_chart_labels(window):
                   "location.hostname!=='127.0.0.1')return;const qfParentOrigin="
                   + json.dumps(origin) + ";\n"
                   + (assets / "labels.js").read_text(encoding="utf-8") + "\n"
+                  + (assets / "native-history.js").read_text(encoding="utf-8") + "\n"
                   + (assets / "native-labels.js").read_text(encoding="utf-8") + "\n})();")
         tasks = []
         window.native.Invoke(Action(lambda: tasks.append(

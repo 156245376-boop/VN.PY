@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,6 +23,18 @@ from qf.window_host import run_window  # noqa: E402
 
 ready, stop = threading.Event(), threading.Event()
 address = chart_address()
+
+
+def fixture_klines(symbol, duration, *, daily=False):
+    """有完整中间年份的图形假数据，不连接任何账户。"""
+    start = datetime(2016 if daily else 2026, 1, 5, tzinfo=timezone(timedelta(hours=8)))
+    days = [start + timedelta(days=i) for i in range(3900)] if daily else []
+    stamps = ([int(t.timestamp() * 1e9) for t in days if t.weekday() < 5] if daily else
+              [int(start.timestamp() * 1e9) + i * duration for i in range(220)])
+    return {symbol: {str(duration): {"last_id": len(stamps) - 1, "data": {
+        str(i): {"datetime": value, "open": 3300, "high": 3310, "low": 3290,
+                 "close": 3305, "volume": 10, "open_oi": 20, "close_oi": 20}
+        for i, value in enumerate(stamps)}}}}
 
 
 def serve(initial_data=None, *, probe=False):
@@ -41,6 +54,48 @@ def serve(initial_data=None, *, probe=False):
             def index(request):
                 html = (Path(tqsdk.__file__).parent / "web/index.html").read_text("utf-8")
                 script = '''<script>
+                // 阻止原生前端尝试外连；离线测试只接收本机 fixture。
+                const NativeSocket=window.WebSocket;
+                window.__fixtureChartRequests={};
+                window.WebSocket=function(url,protocols){
+                  if(new URL(url,location.href).hostname==='127.0.0.1')
+                    return protocols?new NativeSocket(url,protocols):new NativeSocket(url);
+                  return Object.assign(new EventTarget(),{readyState:0,
+                    send(){},close(){this.readyState=3}});
+                };
+                Object.assign(window.WebSocket,{CONNECTING:0,OPEN:1,CLOSING:2,CLOSED:3});
+                (window.webpackJsonp=window.webpackJsonp||[]).push([['offline-chart-wire'],{
+                  'offline-chart-wire':function(module,exports,require){
+                    const proto=require('0977').a.prototype,original=proto.setChart;
+                    function capture(options){const result=original.call(this,options);
+                      const packet=this.quotesWs.charts[options.chart_id];
+                      if(packet)window.__fixtureChartRequests[packet.chart_id]={...packet};
+                      return result;
+                    }
+                    proto.setChart=proto.set_chart=capture;
+                  }},[['offline-chart-wire','chunk-vendors']]]);
+                // 模拟行情服务确认 set_chart；价格仍只来自本机测试数据。
+                setInterval(()=>{const view=document.querySelector('.tq-top-view')?.__vue__;
+                  const sdk=view?.$tqsdk;
+                  const series=sdk?.get_by_path(['klines',view.instrumentId,view.duration]);
+                  const chart=sdk?.getChart('web_chart');
+                  const request=window.__fixtureChartRequests.web_chart;
+                  const fields=['ins_list','duration','view_width','left_kline_id',
+                    'focus_datetime','focus_position','trading_day_start','trading_day_count'];
+                  const matches=chart?.state&&request&&fields.every(k=>
+                    (k in request)===(k in chart.state)&&
+                    (!(k in request)||request[k]===chart.state[k]));
+                  if(!chart||!series||series.last_id<0||request?.ins_list!==view.instrumentId||
+                    request?.duration!==view.duration||
+                    (chart.more_data===false&&matches))return;
+                  const replyState={...request};
+                  for(const key of fields)
+                    if(!(key in request)&&key in chart.state)replyState[key]=null;
+                  const last=series.data[series.last_id];
+                  sdk.dm.mergeData({charts:{web_chart:{more_data:false,left_id:0,right_id:series.last_id,
+                    state:replyState}},klines:{[view.instrumentId]:{
+                    [view.duration]:{data:{[series.last_id]:{close:last.close===3305?3306:3305}}}}}});
+                },100);
                 setInterval(()=>parent.postMessage({kind:'offline-native-probe',
                   text:document.body.innerText, bridge:!!window.pywebview?.api,
                   selected:document.querySelector('.tq-top-view .title')?.textContent,
@@ -62,7 +117,7 @@ def serve(initial_data=None, *, probe=False):
                     [...document.querySelectorAll('.ivu-radio-wrapper')]
                       .find(item=>item.textContent.trim()==='30分钟')?.click();
                 });</script>'''
-                return web.Response(text=html.replace("</body>", script + "</body>"),
+                return web.Response(text=html.replace("<head>", "<head>" + script),
                                     content_type="text/html")
 
             helper.httpserver_index_handler = index
@@ -72,8 +127,15 @@ def serve(initial_data=None, *, probe=False):
         helper._web_dir = str(Path(tqsdk.__file__).parent / "web")
         task = asyncio.create_task(helper.link_httpserver())
         try:
+            revision = -1
             while not stop.is_set():
                 await asyncio.sleep(0.05)
+                if probe and initial_data is not None:
+                    current = initial_data.get("_fixture_revision", 0)
+                    if current != revision:
+                        revision = current
+                        for channel in tuple(helper._conn_diff_chans):
+                            await channel.send({"klines": initial_data.get("klines", {})})
         finally:
             for channel in tuple(helper._conn_diff_chans):
                 await channel.close()

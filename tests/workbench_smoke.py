@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import webview  # noqa: E402
 from test_credentials import MemoryStore  # noqa: E402
 from test_market_session import FakeApi  # noqa: E402
-from window_smoke import address, ready, serve, stop  # noqa: E402
+from window_smoke import address, fixture_klines, ready, serve, stop  # noqa: E402
 
 import qf.market_session as market_module  # noqa: E402
 from qf.window_host import run_window  # noqa: E402
@@ -27,7 +27,8 @@ def exercise():
                               "file_name": "workbench_entry.py"},
                    "subscribed": [{"symbol": "DCE.m2701", "dur_nano": 60000000000},
                                   {"symbol": "SHFE.rb2701", "dur_nano": 60000000000},
-                                  {"symbol": "KQ.m@DCE.m", "dur_nano": 86400000000000}]}
+                                  {"symbol": "KQ.m@DCE.m", "dur_nano": 86400000000000}],
+                   "klines": {}}
     server = threading.Thread(target=lambda: serve(native_data, probe=True), daemon=True)
     server.start()
     assert ready.wait(5)
@@ -49,6 +50,12 @@ def exercise():
                 super().__init__(Path(temp), session, credential_store=credential_store)
                 self._save_started = threading.Event()
                 self._save_release = threading.Event()
+                self._revision_offset = 0
+
+            def get_state(self):
+                result = super().get_state()
+                result["chart_revision"] += self._revision_offset
+                return result
 
             def set_favorites(self, symbols):
                 self._save_started.set()
@@ -69,7 +76,8 @@ def exercise():
                     if window.evaluate_js(js):
                         return
                     time.sleep(0.05)
-                raise AssertionError(js)
+                details = window.evaluate_js('({chartState,chartProblem,backend:state.history})')
+                raise AssertionError(js + " " + json.dumps(details, ensure_ascii=False))
 
             def interact():
                 try:
@@ -100,6 +108,14 @@ def exercise():
                     FakeApi.catalog_block.set()
                     check('document.querySelector("#chart").hidden===false')
                     check('window.chartObservation?.original?.startsWith("SHFE.rb2701")')
+                    # DOM/工具栏出现不等于收到有效 K 线，空数据仍应保留加载提示。
+                    time.sleep(0.4)
+                    assert not window.evaluate_js('document.querySelector("#chart-loading").hidden')
+                    for symbol in ("SHFE.rb2701", "DCE.m2701"):
+                        native_data["klines"].update(fixture_klines(symbol, 60000000000))
+                    native_data["klines"].update(fixture_klines(
+                        "KQ.m@DCE.m", 86400000000000, daily=True))
+                    native_data["_fixture_revision"] = 1
                     check('document.querySelector("#chart-loading").hidden===true')
                     check('document.querySelector("#status").dataset.light==="green"')
                     assert "正在连接" not in window.evaluate_js(
@@ -119,6 +135,18 @@ def exercise():
                                        'new Event("change"))')
                     check('window.chartObservation?.original?.startsWith("KQ.m@DCE.m")')
                     check('window.chartObservation?.original?.includes("1D")')
+                    check('chartState?.status==="ready"')
+                    for year in range(2016, 2027):
+                        value = str(year)
+                        window.evaluate_js('document.querySelector("#history-year").value='
+                                           + json.dumps(value) + ';document.querySelector('
+                                           '"#history-year").dispatchEvent(new Event("change"))')
+                        check('chartState?.visible?.first?.startsWith(' + json.dumps(value) +
+                              ')&&chartState?.visible?.last?.startsWith(' + json.dumps(value) + ')')
+                    window.evaluate_js('document.querySelector("#history-latest").click()')
+                    check('chartState?.visible?.last?.startsWith("2026")')
+                    assert "图中已加载" in window.evaluate_js(
+                        'document.querySelector("#history-summary").textContent')
                     assert "1天" in window.evaluate_js('window.chartObservation.selected')
                     assert session.snapshot()["chart_mode"] == "continuous"
                     assert "跨主力合约" in window.evaluate_js(
@@ -137,6 +165,20 @@ def exercise():
                         'document.querySelector("#market-rows td:nth-child(4)").textContent')
                     assert "手" in window.evaluate_js(
                         'document.querySelector("#market-rows td:nth-child(6)").textContent')
+                    # 同一帧旧请求迟到，不能把现图改成错误状态。
+                    check('chartState?.status==="ready"')
+                    window.evaluate_js('dispatchEvent(new MessageEvent("message",{'
+                                       'source:document.querySelector("#chart").contentWindow,'
+                                       'origin:new URL(currentChart).origin,'
+                                       'data:{kind:"qf-chart-state",'
+                                       'revision:state.chart_revision-1,status:"unsupported"}}))')
+                    assert window.evaluate_js('chartProblem') == ""
+                    window.evaluate_js('window.frameLoads=0;document.querySelector("#chart")'
+                                       '.addEventListener("load",()=>window.frameLoads++)')
+                    bridge._revision_offset = 100
+                    check('state.chart_revision>=100')
+                    check('window.frameLoads>0')
+                    check('chartState?.revision===state.chart_revision&&chartState?.status==="ready"')
                     address_before = window.evaluate_js('document.querySelector("#chart").src')
                     window.evaluate_js('document.querySelector("#expand-chart").click()')
                     check('document.querySelector("#chart-card").classList.contains("expanded")')
@@ -144,6 +186,17 @@ def exercise():
                         'document.querySelector("#chart").src') == address_before
                     window.evaluate_js('dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))')
                     check('!document.querySelector("#chart-card").classList.contains("expanded")')
+                    bad = native_data["klines"]["DCE.m2701"]["60000000000"]["data"]
+                    timestamp = bad["1"]["datetime"]
+                    bad["1"]["datetime"] = bad["0"]["datetime"]
+                    native_data["_fixture_revision"] = 2
+                    check('chartState?.status==="invalid"')
+                    assert "时间重复" in window.evaluate_js(
+                        'document.querySelector("#history-summary").textContent')
+                    assert window.evaluate_js('document.querySelector("#chart").hidden')
+                    bad["1"]["datetime"] = timestamp
+                    native_data["_fixture_revision"] = 3
+                    check('chartState?.status==="ready"')
                     names = window.evaluate_js('''[
                         QfLabels.contractName('CZCE.WH701',[
                           {name:'强麦主连',exchange:'CZCE',product:'WH'}]),
@@ -210,7 +263,8 @@ def exercise():
                                   chart=True, responsive=True, disconnect=True,
                                   remembered_login=True)
                 except Exception as exc:
-                    errors.append(str(exc))
+                    line = exc.__traceback__.tb_lineno
+                    errors.append(f"{type(exc).__name__} at line {line}: {exc}")
                 finally:
                     FakeApi.catalog_block.set()
                     bridge.disconnect()

@@ -14,6 +14,14 @@ def until(predicate):
     assert predicate()
 
 
+def kline_frame(duration=86400):
+    start = pd.Timestamp("2026-10-15", tz="Asia/Shanghai").value
+    return pd.DataFrame({"id": [0., 1., 2.],
+                         "datetime": [start + i * duration * 1_000_000_000 for i in range(3)],
+                         "open": [3300.] * 3, "high": [3310.] * 3,
+                         "low": [3290.] * 3, "close": [3305.] * 3})
+
+
 class FakeApi:
     instances = []
     block = None
@@ -21,6 +29,8 @@ class FakeApi:
     mapping = "SHFE.rb2701"
     missing = set()
     fail_kline = False
+    serial_override = None
+    serial_ready = True
 
     def __init__(self, account, *, auth, debug, disable_print, web_gui):
         assert account == "local-sim" and debug is False and disable_print is True
@@ -29,6 +39,7 @@ class FakeApi:
         self.quotes = {}
         self.klines = []
         self.kline_requests = []
+        self.serials = []
         self._data = {"notify": {}}
         self.address = web_gui
         type(self).instances.append(self)
@@ -57,7 +68,13 @@ class FakeApi:
             raise RuntimeError("private-kline-permission-response")
         self.klines.append(symbol)
         self.kline_requests.append((symbol, duration, data_length))
-        return pd.DataFrame()
+        serial = (kline_frame(duration) if type(self).serial_override is None
+                  else type(self).serial_override.copy(deep=True))
+        self.serials.append(serial)
+        return serial
+
+    def is_serial_ready(self, serial):
+        return type(self).serial_ready
 
     def wait_update(self, **kwargs):
         for symbol, q in self.quotes.items():
@@ -86,6 +103,7 @@ def session():
     FakeApi.instances, FakeApi.block, FakeApi.mapping = [], None, "SHFE.rb2701"
     FakeApi.catalog_block = None
     FakeApi.missing, FakeApi.fail_kline = set(), False
+    FakeApi.serial_override, FakeApi.serial_ready = None, True
     sdk = SimpleNamespace(TqApi=FakeApi, TqSim=lambda: "local-sim",
                           TqAuth=lambda u, p: (u, p))
     item = module.MarketSession(sdk=sdk)
@@ -241,3 +259,118 @@ def test_other_connection_recovery_does_not_hide_lost_feed(session):
         "other": {"code": 2019112902, "conn_id": "metadata"},
     })
     until(lambda: session.snapshot()["status"] == "disconnected")
+
+
+def test_empty_initialized_kline_is_unavailable_without_stopping_quotes(session):
+    FakeApi.serial_override = pd.DataFrame()
+    session.start("u", "p")
+    until(lambda: session.snapshot()["chart_status"] in ("ready", "unavailable"))
+    state = session.snapshot()
+    assert state["chart_status"] == "unavailable"
+    assert state["chart_url"] is None and state["status"] == "ready"
+    assert state["history"]["valid_count"] == 0
+    assert state["history"]["issues"] == ["empty"]
+
+
+def test_kline_initialization_is_distinct_from_missing_history(session):
+    FakeApi.serial_ready = False
+    session.start("u", "p")
+    until(lambda: bool(session.snapshot()["rows"]))
+    state = session.snapshot()
+    assert state["chart_status"] == "loading" and state["chart_url"] is None
+    assert state["history"] is None
+    FakeApi.serial_ready = True
+    until(lambda: bool(session.snapshot()["chart_url"]))
+    assert session.snapshot()["history"]["valid_count"] == 3
+
+
+def test_history_quality_tracks_the_retained_live_serial(session):
+    session.start("u", "p")
+    until(lambda: bool(session.snapshot()["chart_url"]))
+    serial = FakeApi.instances[-1].serials[-1]
+    serial.loc[1, "close"] = float("nan")
+    until(lambda: session.snapshot()["chart_status"] == "unavailable")
+    state = session.snapshot()
+    assert state["chart_url"] is None
+    assert state["history"]["valid_count"] == 2
+    assert "invalid_bar" in state["history"]["issues"]
+    serial.loc[1, "close"] = 3305.
+    until(lambda: bool(session.snapshot()["chart_url"]))
+
+
+def test_chart_revision_changes_with_chart_session_and_history_is_public(session):
+    session.start("u", "p")
+    until(lambda: bool(session.snapshot()["chart_url"]))
+    first = session.snapshot()
+    assert type(first["chart_revision"]) is int and first["chart_revision"] > 0
+    assert first["history"] == {"valid_count": 3, "first": "2026-10-15 00:00:00",
+                                "last": "2026-10-15 00:02:00", "years": {"2026": 3},
+                                "issues": []}
+    session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb")
+    until(lambda: len(session.snapshot()["rows"]) == 1)
+    assert session.snapshot()["chart_revision"] == first["chart_revision"]
+    session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "continuous")
+    assert session.snapshot()["history"] is None
+    assert session.snapshot()["chart_revision"] is None
+    until(lambda: bool(session.snapshot()["chart_url"]))
+    latest = session.snapshot()
+    assert latest["chart_revision"] > first["chart_revision"]
+    assert latest["history"]["last"] == "2026-10-17 00:00:00"
+
+
+def test_stop_during_update_cannot_republish_the_chart(session):
+    ready = threading.Event()
+    ready.set()
+    session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "continuous")
+
+    class StopDuringUpdate:
+        _data = {}
+
+        def get_quote(self, symbol):
+            return {"underlying_symbol": "SHFE.rb2701", "last_price": 3300.,
+                    "datetime": "2026-10-16 15:00:00"}
+
+        def get_kline_serial(self, *args, **kwargs):
+            return kline_frame()
+
+        def is_serial_ready(self, serial):
+            return True
+
+        def wait_update(self, **kwargs):
+            session.stop()
+
+    session._serve_view(StopDuringUpdate(), [{"continuous": "KQ.m@SHFE.rb", "name": "螺纹钢",
+                                            "exchange": "SHFE", "product": "rb"}],
+                        "http://127.0.0.1:12345", ready)
+    state = session.snapshot()
+    assert state["chart_url"] is None
+    assert state["chart_status"] != "ready"
+
+
+def test_stale_history_result_is_rejected_after_a_view_change(session):
+    ready = threading.Event()
+    ready.set()
+    session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "continuous")
+
+    class SwitchDuringUpdate:
+        _data = {}
+
+        def get_quote(self, symbol):
+            return {"underlying_symbol": "SHFE.rb2701"}
+
+        def get_kline_serial(self, *args, **kwargs):
+            return kline_frame()
+
+        def is_serial_ready(self, serial):
+            return True
+
+        def wait_update(self, **kwargs):
+            session.set_view(["KQ.m@DCE.m"], "KQ.m@DCE.m", "continuous")
+
+    session._serve_view(SwitchDuringUpdate(), [
+        {"continuous": "KQ.m@SHFE.rb", "name": "螺纹钢", "exchange": "SHFE", "product": "rb"},
+        {"continuous": "KQ.m@DCE.m", "name": "豆粕", "exchange": "DCE", "product": "m"}],
+        "http://127.0.0.1:12345", ready)
+    state = session.snapshot()
+    assert state["selected"] == "KQ.m@DCE.m" and state["chart_url"] is None
+    assert state["history"] is None and state["chart_revision"] is None

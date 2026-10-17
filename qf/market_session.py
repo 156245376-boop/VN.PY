@@ -8,6 +8,7 @@ import os
 import threading
 import time
 
+from qf.history import summarize_history
 from qf.market import CONTINUOUS, catalog_rows, quote_row
 from qf.runtime import chart_address
 
@@ -45,12 +46,13 @@ class MarketSession:
         self._stop = threading.Event()
         self.thread = None
         self._view = (0, (), None, "actual")
+        self._next_chart_revision = 0
         self._started = time.monotonic()
         self._loading_started = self._started
         self._state = {"status": "idle", "catalog": [], "rows": [], "selected": None,
                        "chart_url": None, "reason": "", "heartbeat_seconds": 0,
                        "connected": False, "chart_status": "idle", "chart_mode": "actual",
-                       "chart_symbol": None,
+                       "chart_symbol": None, "chart_revision": None, "history": None,
                        "loading": {"phase": "idle", "done": 0, "total": None,
                                    "elapsed_seconds": 0}}
 
@@ -70,7 +72,8 @@ class MarketSession:
             self._view = (0, (), None, "actual")
             self._state.update(status="connecting", reason="", rows=[], chart_url=None,
                                selected=None, connected=None, chart_status="loading",
-                               chart_symbol=None, chart_mode="actual")
+                               chart_symbol=None, chart_mode="actual", chart_revision=None,
+                               history=None)
             self._set_loading("connecting")
             self.thread = threading.Thread(target=self._run, args=(user, password), daemon=False)
             self.thread.start()
@@ -91,7 +94,8 @@ class MarketSession:
             if (self._state["selected"] != selected
                     or self._state["chart_mode"] != chart_mode):
                 self._state.update(selected=selected, chart_url=None, chart_status="loading",
-                                   chart_mode=chart_mode, chart_symbol=None)
+                                   chart_mode=chart_mode, chart_symbol=None,
+                                   chart_revision=None, history=None)
                 self._set_loading("bars")
 
     def snapshot(self) -> dict:
@@ -103,7 +107,7 @@ class MarketSession:
 
     def _set_loading(self, phase, done=0, total=None, *, version=None):
         with self._lock:
-            if version is not None and version != self._view[0]:
+            if version is not None and (version != self._view[0] or self._stop.is_set()):
                 return
             if phase != self._state["loading"]["phase"]:
                 self._loading_started = time.monotonic()
@@ -114,12 +118,15 @@ class MarketSession:
     def stop(self) -> None:
         self._stop.set()
         with self._lock:
-            self._state.update(chart_url=None)
+            self._state.update(chart_url=None, chart_status="idle", chart_revision=None,
+                               history=None)
             if self.running:
                 self._state["status"] = "stopping"
 
     def _publish(self, *, version=None, **values):
         with self._lock:
+            if version is not None and self._stop.is_set():
+                return
             if version is None or version == self._view[0]:
                 self._state.update(values)
 
@@ -164,7 +171,7 @@ class MarketSession:
                     raise RuntimeError("行情会话为只读，禁止下单")
 
             self._publish(status="connecting", chart_url=None, connected=None,
-                          chart_status="loading")
+                          chart_status="loading", chart_revision=None, history=None)
             self._set_loading("connecting")
             api = ReadOnlyApi(sdk.TqSim(), auth=sdk.TqAuth(user, password), debug=False,
                               disable_print=True, web_gui=address)
@@ -209,6 +216,7 @@ class MarketSession:
         quotes, seen, subscribed = {}, set(), set()
         connections = {}
         active_selected, active_mode, chart_symbol = None, None, None
+        klines, chart_revision = None, None
         chart_failed = False
         initialized, connected = False, True
         while not self._stop.is_set():
@@ -234,7 +242,8 @@ class MarketSession:
                 target_symbol = selected if chart_mode == "continuous" else underlying
                 if target_symbol:
                     if chart_symbol and target_symbol != chart_symbol:
-                        self._publish(chart_url=None, reason="main_contract_changed")
+                        self._publish(version=version, chart_url=None,
+                                      reason="main_contract_changed")
                         return
                     if not chart_symbol and not chart_failed:
                         if len(subscribed | {target_symbol}) > 100:
@@ -242,13 +251,22 @@ class MarketSession:
                         try:
                             duration, length = ((86400, 3000) if chart_mode == "continuous"
                                                 else (60, 200))
-                            api.get_kline_serial(target_symbol, duration, data_length=length)
+                            klines = api.get_kline_serial(target_symbol, duration,
+                                                         data_length=length)
                             subscribed.add(target_symbol)
                             chart_symbol = target_symbol
+                            with self._lock:
+                                self._next_chart_revision += 1
+                                chart_revision = self._next_chart_revision
                             self._set_loading("chart", version=version)
                         except Exception:
                             chart_failed = True
             api.wait_update(deadline=time.time() + 0.2)
+            with self._lock:
+                if self._stop.is_set():
+                    return
+                if version != self._view[0]:
+                    continue
             # 映射可能在本次更新中改变；发布前再次核对，避免新合约配旧图。
             if chart_mode == "actual" and selected and chart_symbol and (
                     quotes[selected].get("underlying_symbol", "") != chart_symbol):
@@ -268,14 +286,19 @@ class MarketSession:
             rows = [quote_row(known[s], quotes[s], connected=connected) for s in requested]
             ready = any(r["data_state"] == "ready" for r in rows)
             status = "disconnected" if not connected else "ready" if ready else "waiting_data"
-            chart_url = address if connected and chart_symbol and chart_ready.is_set() else None
-            self._set_loading("failed" if chart_failed else "ready" if chart_url else
+            serial_ready = klines is not None and api.is_serial_ready(klines)
+            history = summarize_history(klines, duration) if serial_ready else None
+            data_failed = chart_failed or history is not None and bool(history["issues"])
+            chart_url = (address if connected and chart_symbol and chart_ready.is_set()
+                         and serial_ready and not data_failed else None)
+            self._set_loading("failed" if data_failed else "ready" if chart_url else
                               "chart" if chart_symbol else "bars", version=version)
             self._publish(version=version, status=status, rows=rows, selected=selected,
                           chart_mode=chart_mode, chart_symbol=chart_symbol,
+                          chart_revision=chart_revision, history=history,
                           connected=connected, chart_url=chart_url,
-                          chart_status="ready" if chart_url else "unavailable" if chart_failed
+                          chart_status="ready" if chart_url else "unavailable" if data_failed
                           else "loading" if selected else "idle",
                           reason="connection_lost" if not connected else
-                          "chart_data_unavailable" if chart_failed else "",
+                          "chart_data_unavailable" if data_failed else "",
                           heartbeat_seconds=int(time.monotonic() - self._started))

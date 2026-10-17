@@ -79,6 +79,35 @@ def test_resource_keys_do_not_execute_arbitrary_commands(bridge):
     assert not bridge.open_resource("../../secret")["ok"]
 
 
+def test_history_summary_is_whitelisted_and_bound_to_current_selection(bridge):
+    bridge._session.state.update(chart_revision=12, history={
+        "valid_count": 2, "first": "2016-01-05 00:00:00", "last": "2026-10-16 00:00:00",
+        "years": {"2016": 1, "2026": 1, "private-token": 4},
+        "issues": ["long_gap", "private-response"], "token": "private-token"})
+    result = bridge.get_state()
+    assert result["history"] == {
+        "valid_count": 2, "first": "2016-01-05 00:00:00", "last": "2026-10-16 00:00:00",
+        "years": {"2016": 1, "2026": 1}, "issues": ["long_gap"]}
+    assert result["chart_revision"] == 12
+    assert "private-" not in str(result)
+    bridge.set_view(["KQ.m@DCE.m"], "KQ.m@DCE.m")
+    bridge._session.state["selected"] = "KQ.m@SHFE.rb"
+    result = bridge.get_state()
+    assert result["history"] is None
+    assert result["chart_revision"] == 0
+
+
+def test_malformed_history_fields_do_not_escape_to_page(bridge):
+    bridge._session.state.update(chart_revision="private-token", history={
+        "valid_count": "private-token", "first": {"token": "private-token"},
+        "last": "private-token", "years": ["private-token"], "issues": "private-token"})
+    result = bridge.get_state()
+    assert result["chart_revision"] == 0
+    assert result["history"] == {
+        "valid_count": 0, "first": None, "last": None, "years": {}, "issues": []}
+    assert "private-" not in str(result)
+
+
 def test_favorites_are_validated_and_survive_restart(bridge):
     module = importlib.import_module("qf.workbench")
     bridge.get_state()

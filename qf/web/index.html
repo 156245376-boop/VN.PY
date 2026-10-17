@@ -84,12 +84,17 @@
           </select><button id="expand-chart" disabled>放大 K 线</button></div></div>
         <p id="chart-units" class="chart-units">价格单位按品种显示 · 成交量和持仓量单位为手</p>
         <p id="history-note" class="chart-units">当前主力合约：历史范围取决于该月份合约的上市时间。跨年份走势可切换“主力连续历史”。</p>
+        <div id="history-controls" class="history-controls" hidden>
+          <label for="history-year">定位年份</label><select id="history-year" aria-label="查看已加载年份"></select>
+          <button id="history-latest">回到最新</button>
+        </div>
+        <p id="history-summary" class="chart-units" role="status"></p>
         <div id="chart-loading" class="chart-loading" role="status" hidden>
           <strong id="loading-stage">正在准备行情图</strong><progress id="chart-progress" aria-label="行情图加载进度"></progress>
           <span id="loading-time"></span>
         </div>
         <div id="chart-placeholder" class="empty">连接后选择品种，天勤原生图表会显示在窗口内。</div>
-        <iframe id="chart" title="天勤原生分钟图" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer" hidden></iframe>
+        <iframe id="chart" title="天勤行情图" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer" hidden></iframe>
       </section>
     </main>
     <aside class="right-column">

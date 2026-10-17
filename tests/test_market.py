@@ -28,3 +28,22 @@ def test_missing_name_and_nonfinite_prices_are_explicit():
     assert row["data_state"] == "ready"
     offline = market.quote_row(item, row, connected=False)
     assert offline["data_state"] == "disconnected"
+
+
+def test_quote_units_follow_contract_type_and_unreturned_values_are_not_zero():
+    market = importlib.import_module("qf.market")
+    for exchange, product, expected in [
+        ("SHFE", "rb", "元/吨"), ("SHFE", "au", "元/克"),
+        ("SHFE", "ag", "元/千克"), ("INE", "sc", "元/桶"),
+        ("INE", "ec", "点"), ("CFFEX", "IM", "点"),
+        ("CFFEX", "T", "元/百元面值"), ("DCE", "jd", "元/500千克"),
+        ("DCE", "fb", "元/立方米"), ("DCE", "bb", "元/张"),
+        ("GFEX", "ps", "元/吨"), ("GFEX", "pt", "元/克"),
+    ]:
+        catalog = market.catalog_rows([{"instrument_id": f"KQ.m@{exchange}.{product}"}])[0]
+        row = market.quote_row(catalog, {}, connected=True)
+        assert row["price_unit"] == expected
+        assert row["volume"] is None and row["open_interest"] is None
+        assert row["data_note"]
+    unknown = market.catalog_rows([{"instrument_id": "KQ.m@SHFE.zz"}])[0]
+    assert market.quote_row(unknown, {}, connected=True)["price_unit"] == "单位待确认"

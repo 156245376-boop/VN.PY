@@ -21,10 +21,12 @@
   }
   function translate(value,catalog){
     return value.replace(/workbench_entry\.py/g,'主力行情 · 只读观察')
-      .replace(/py文件/g,'行情程序')
+      .replace(/py文件/g,'图表服务')
       .replace(/(?:KQ\.[mi]@)?(?:SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{0,4}\b/g,
         symbol=>contractName(symbol,catalog))
       .replace(/\b(\d+)([mhd])\b/g,(_,number,unit)=>number+{m:'分钟',h:'小时',d:'天'}[unit]);
   }
-  window.QfLabels={productName,contractName,translate,exchangeName:code=>exchanges[code]||code};
+  function quoteUnit(symbol,catalog){const match=/^(?:KQ\.[mi]@)?([A-Z]+)\.([A-Za-z]+)\d*$/.exec(symbol||'');
+    return match?catalog.find(item=>item.exchange===match[1]&&item.product.toLowerCase()===match[2].toLowerCase())?.price_unit||'单位待确认':'单位待确认'}
+  window.QfLabels={productName,contractName,translate,quoteUnit,exchangeName:code=>exchanges[code]||code};
 })();

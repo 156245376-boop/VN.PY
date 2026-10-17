@@ -42,7 +42,8 @@ def test_bridge_serializes_only_public_fields(bridge):
     bridge._session.state["reason"] = "private-error"
     result = bridge.get_state()
     assert "private-" not in str(result)
-    assert result["catalog"] == [CATALOG[1], CATALOG[0]]
+    assert result["catalog"] == [{**row, "price_unit": "元/吨"}
+                                 for row in [CATALOG[1], CATALOG[0]]]
     assert bridge.login("private-user", "private-password")["ok"]
     assert "private-" not in str(bridge.get_state())
 

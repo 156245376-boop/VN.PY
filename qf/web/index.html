@@ -23,7 +23,7 @@
 </aside>
 <div class="workspace">
   <header><div><span class="eyebrow">个人期货策略研究</span><h1 id="page-title">研究工作台</h1></div>
-    <div class="header-state"><span class="mode">只读行情</span><span id="status" role="status">正在准备窗口</span></div>
+    <div class="header-state"><span class="mode">只读行情</span><span id="status" role="status" data-light="yellow">正在准备窗口</span></div>
   </header>
   <section class="connection card">
     <form id="login-form"><label>快期账号<input id="user" autocomplete="off" placeholder="天勤注册账号" required></label>
@@ -65,19 +65,23 @@
     <main class="main-column">
       <section class="card market-card">
         <div class="section-title"><div><h2>国内期货 · 主力行情</h2><span id="catalog-note">尚无本机目录，请先连接</span></div>
-          <button id="only-favorites" class="quiet">只看自选</button></div>
+          <div class="market-actions"><button id="open-chart" disabled>放大 K 线</button>
+            <button id="only-favorites" class="quiet">只看自选</button></div></div>
         <div class="filters"><input id="search" aria-label="搜索品种" placeholder="搜索中文品种、代码或交易所…">
           <select id="exchange" aria-label="交易所"><option value="">全部交易所</option><option value="SHFE">上期所</option>
             <option value="DCE">大商所</option><option value="CZCE">郑商所</option><option value="CFFEX">中金所</option>
             <option value="INE">上期能源</option><option value="GFEX">广期所</option></select></div>
-        <div class="table-scroll"><table><thead><tr><th>自选</th><th>品种 / 代码</th><th>实际主力</th><th>最新价</th>
-          <th>涨跌幅</th><th>成交量</th><th>持仓量</th><th>行情时间</th></tr></thead><tbody id="market-rows"></tbody></table>
+        <p id="data-summary" class="data-summary">等待连接后读取报价</p>
+        <div class="table-scroll"><table><thead><tr><th>自选</th><th>品种 / 代码</th><th>实际主力</th><th>最新价 / 单位</th>
+          <th>涨跌幅</th><th>成交量（手）</th><th>持仓量（手）</th><th>报价时间（北京时间）</th><th>数据状态</th></tr></thead><tbody id="market-rows"></tbody></table>
           <div id="empty" class="empty">连接快期账号后，这里显示真实品种与行情。<br><small>本机缓存只保存目录和自选，不保存实时报价。</small></div></div>
         <footer><span id="count">0 个品种</span><div><button id="prev" class="quiet">上一页</button><span id="page">1 / 1</span>
           <button id="next" class="quiet">下一页</button></div></footer>
       </section>
-      <section class="card chart-card">
-        <div class="section-title"><div><h2 id="chart-title">选择一个品种查看行情图</h2><span id="chart-detail">选择品种后显示当前主力合约的中文名称与交割月份</span></div><span class="tag">周期可在图中切换</span></div>
+      <section id="chart-card" class="card chart-card">
+        <div class="section-title"><div><h2 id="chart-title">选择一个品种查看行情图</h2><span id="chart-detail">选择品种后显示当前主力合约的中文名称与交割月份</span></div>
+          <button id="expand-chart" disabled>放大 K 线</button></div>
+        <p id="chart-units" class="chart-units">价格单位按品种显示 · 成交量和持仓量单位为手</p>
         <div id="chart-placeholder" class="empty">连接后选择品种，天勤原生图表会显示在窗口内。</div>
         <iframe id="chart" title="天勤原生分钟图" sandbox="allow-scripts allow-same-origin allow-forms" referrerpolicy="no-referrer" hidden></iframe>
       </section>

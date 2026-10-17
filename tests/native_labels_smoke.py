@@ -18,9 +18,9 @@ from qf.window_host import run_window  # noqa: E402
 
 def exercise():
     catalog = [{"continuous": "KQ.m@SHFE.rb", "name": "螺纹钢主连",
-                "exchange": "SHFE", "product": "rb"},
+                "exchange": "SHFE", "product": "rb", "price_unit": "元/吨"},
                {"continuous": "KQ.m@DCE.m", "name": "豆粕主连",
-                "exchange": "DCE", "product": "m"}]
+                "exchange": "DCE", "product": "m", "price_unit": "元/吨"}]
     data = {"action": {"mode": "run", "accounts": {}, "user_name": "offline",
                        "file_name": "workbench_entry.py"},
             "subscribed": [{"symbol": "SHFE.rb2701", "dur_nano": 60000000000},
@@ -65,6 +65,9 @@ def exercise():
                     assert observed and "主力行情 · 只读观察" in observed["text"], observed
                     assert "螺纹钢 · 2027年1月合约" in observed["text"], observed
                     assert "1分钟" in observed["text"], observed
+                    assert "价格：元/吨" in observed["text"], observed
+                    assert "图表服务" in observed["text"], observed
+                    assert "图表行情" in observed["text"], observed
                     assert "workbench_entry.py" not in observed["text"], observed
                     assert observed["bridge"] is False, observed
                     assert observed["selected"].startswith("螺纹钢"), observed

@@ -19,6 +19,7 @@ from window_smoke import address, ready, serve, stop  # noqa: E402
 import qf.market_session as market_module  # noqa: E402
 from qf.window_host import run_window  # noqa: E402
 from qf.workbench import WorkbenchBridge  # noqa: E402
+from qf.workbench_store import WorkbenchStore  # noqa: E402
 
 
 def exercise():
@@ -33,6 +34,10 @@ def exercise():
     sdk = SimpleNamespace(TqApi=FakeApi, TqSim=lambda: "local-sim", TqAuth=lambda u, p: (u, p))
     result, errors = {}, []
     with tempfile.TemporaryDirectory() as temp:
+        WorkbenchStore(Path(temp) / "data/workbench").save([
+            {"continuous": "KQ.m@SHFE.rb", "name": "螺纹钢", "product": "rb", "exchange": "SHFE"},
+            {"continuous": "KQ.m@DCE.m", "name": "豆粕", "product": "m", "exchange": "DCE"}], [])
+        FakeApi.block = threading.Event()
         session = market_module.MarketSession(sdk=sdk)
 
         class DelayedFavorites(WorkbenchBridge):
@@ -72,6 +77,12 @@ def exercise():
                     assert window.evaluate_js(
                         'document.querySelector("#password").required') is False
                     window.evaluate_js('document.querySelector("#login-form").requestSubmit()')
+                    time.sleep(0.8)  # 复现缓存目录先于连接/行情到达。
+                    FakeApi.block.set()
+                    check('document.querySelector("#chart").hidden===false')
+                    check('document.querySelector("#status").dataset.light==="green"')
+                    assert "正在连接" not in window.evaluate_js(
+                        'document.querySelector("#notice").textContent')
                     check('document.querySelectorAll("#market-rows tr").length===2')
                     assert window.evaluate_js('document.querySelector("#password").value') == ""
                     window.evaluate_js('document.querySelector("#search").value="豆粕";'
@@ -87,6 +98,17 @@ def exercise():
                     assert window.evaluate_js(
                         'document.querySelector("#market-rows td:nth-child(3)").textContent'
                     ).startswith("豆粕")
+                    assert "元/吨" in window.evaluate_js(
+                        'document.querySelector("#market-rows td:nth-child(4)").textContent')
+                    assert "手" in window.evaluate_js(
+                        'document.querySelector("#market-rows td:nth-child(6)").textContent')
+                    address_before = window.evaluate_js('document.querySelector("#chart").src')
+                    window.evaluate_js('document.querySelector("#open-chart").click()')
+                    check('document.querySelector("#chart-card").classList.contains("expanded")')
+                    assert window.evaluate_js(
+                        'document.querySelector("#chart").src') == address_before
+                    window.evaluate_js('dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"}))')
+                    check('!document.querySelector("#chart-card").classList.contains("expanded")')
                     names = window.evaluate_js('''[
                         QfLabels.contractName('CZCE.WH701',[
                           {name:'强麦主连',exchange:'CZCE',product:'WH'}]),
@@ -126,6 +148,19 @@ def exercise():
                         stream.Dispose()
                     window.resize(980, 720)
                     check('document.body.scrollWidth<=innerWidth')
+                    FakeApi.missing = {"KQ.m@SHFE.rb", "KQ.m@DCE.m"}
+                    check('document.querySelector("#data-summary").textContent.includes("0 / 2")')
+                    assert window.evaluate_js(
+                        'document.querySelector("#status").dataset.light') == "green"
+                    assert "暂无有效报价" in window.evaluate_js(
+                        'document.querySelector("#market-rows").textContent')
+                    FakeApi.missing = set()
+                    session_api = FakeApi.instances[-1]
+                    session_api._data["notify"]["lost"] = {"code": 2019112911, "conn_id": "md"}
+                    check('document.querySelector("#status").dataset.light==="red"')
+                    session_api._data["notify"]["restored"] = {"code": 2019112902,
+                                                              "conn_id": "md"}
+                    check('document.querySelector("#status").dataset.light==="green"')
                     window.evaluate_js('document.querySelector("[data-view=news]").click()')
                     assert window.evaluate_js(
                         'document.querySelector("#news-panel").hidden') is False

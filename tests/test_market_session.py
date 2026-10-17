@@ -18,6 +18,8 @@ class FakeApi:
     instances = []
     block = None
     mapping = "SHFE.rb2701"
+    missing = set()
+    fail_kline = False
 
     def __init__(self, account, *, auth, debug, disable_print, web_gui):
         assert account == "local-sim" and debug is False and disable_print is True
@@ -47,6 +49,8 @@ class FakeApi:
 
     def get_kline_serial(self, symbol, duration, data_length):
         assert duration == 60 and data_length == 200
+        if type(self).fail_kline:
+            raise RuntimeError("private-kline-permission-response")
         self.klines.append(symbol)
         return pd.DataFrame()
 
@@ -55,6 +59,8 @@ class FakeApi:
             q.update(last_price=3300, pre_settlement=3000, volume=10, open_interest=20,
                      datetime="2026-10-16 14:59:59.000000",
                      underlying_symbol=type(self).mapping if "rb" in symbol else "DCE.m2701")
+            if symbol in type(self).missing:
+                q.update(last_price=float("nan"), datetime="", volume=0, open_interest=0)
         self._print(f"您可以访问 {self.address} 查看策略绘制出的 K 线图形。")
         time.sleep(0.01)
 
@@ -73,6 +79,7 @@ class FakeApi:
 def session():
     module = importlib.import_module("qf.market_session")
     FakeApi.instances, FakeApi.block, FakeApi.mapping = [], None, "SHFE.rb2701"
+    FakeApi.missing, FakeApi.fail_kline = set(), False
     sdk = SimpleNamespace(TqApi=FakeApi, TqSim=lambda: "local-sim",
                           TqAuth=lambda u, p: (u, p))
     item = module.MarketSession(sdk=sdk)
@@ -145,6 +152,39 @@ def test_stop_during_connect_closes_returned_api_and_masks_error(session):
     until(lambda: not session.running)
     assert FakeApi.instances[0].closed
     assert session.snapshot()["status"] == "stopped"
+
+
+def test_cached_view_without_selection_still_receives_default_chart(session):
+    FakeApi.block = threading.Event()
+    session.start("u", "p")
+    until(lambda: bool(FakeApi.instances))
+    session.set_view(["KQ.m@DCE.m", "KQ.m@SHFE.rb"], None)
+    FakeApi.block.set()
+    until(lambda: session.snapshot()["selected"] == "KQ.m@SHFE.rb"
+          and bool(session.snapshot()["chart_url"]))
+
+
+def test_connection_indicator_is_independent_of_missing_quotes(session):
+    FakeApi.missing = {"KQ.m@SHFE.rb", "KQ.m@DCE.m"}
+    session.start("u", "p")
+    until(lambda: bool(session.snapshot()["rows"]))
+    assert session.snapshot()["status"] == "waiting_data"
+    assert session.snapshot()["connected"] is True
+    assert all(r["data_state"] == "waiting" and r["volume"] is None
+               for r in session.snapshot()["rows"])
+    session.stop()
+    until(lambda: not session.running)
+    assert session.snapshot()["connected"] is False
+
+
+def test_kline_read_failure_does_not_stop_other_quotes_or_leak_error(session):
+    FakeApi.fail_kline = True
+    session.start("u", "p")
+    until(lambda: session.snapshot()["chart_status"] == "unavailable")
+    state = session.snapshot()
+    assert state["status"] == "ready" and state["connected"] is True
+    assert state["rows"] and state["chart_url"] is None
+    assert state["reason"] == "chart_data_unavailable" and "private-" not in str(state)
 
 
 def test_heartbeat_does_not_replace_quote_timestamp(session):

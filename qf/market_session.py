@@ -20,7 +20,8 @@ class MarketSession:
         self._view = (0, (), None)
         self._started = time.monotonic()
         self._state = {"status": "idle", "catalog": [], "rows": [], "selected": None,
-                       "chart_url": None, "reason": "", "heartbeat_seconds": 0}
+                       "chart_url": None, "reason": "", "heartbeat_seconds": 0,
+                       "connected": False, "chart_status": "idle"}
 
     @property
     def running(self):
@@ -37,7 +38,7 @@ class MarketSession:
             self._started = time.monotonic()
             self._view = (0, (), None)
             self._state.update(status="connecting", reason="", rows=[], chart_url=None,
-                               selected=None)
+                               selected=None, connected=None, chart_status="loading")
             self.thread = threading.Thread(target=self._run, args=(user, password), daemon=False)
             self.thread.start()
 
@@ -53,7 +54,7 @@ class MarketSession:
                 raise ValueError("当前列表超过订阅上限")
             self._view = (self._view[0] + 1, symbols, selected)
             if self._state["selected"] != selected:
-                self._state.update(selected=selected, chart_url=None)
+                self._state.update(selected=selected, chart_url=None, chart_status="loading")
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -82,12 +83,14 @@ class MarketSession:
                         import tqsdk as sdk
                     self._stream(sdk, user, password)
         except Exception:
-            self._publish(status="failed", reason="connection_auth_or_data_failed", chart_url=None)
+            self._publish(status="failed", reason="connection_auth_or_data_failed", chart_url=None,
+                          connected=False, chart_status="unavailable")
         finally:
             user = password = None
             logging.disable(previous)
             if self._stop.is_set() and self.snapshot()["status"] != "failed":
-                self._publish(status="stopped", chart_url=None, reason="")
+                self._publish(status="stopped", chart_url=None, reason="", connected=False,
+                              chart_status="idle")
 
     def _stream(self, sdk, user, password):
         catalog = []
@@ -107,12 +110,14 @@ class MarketSession:
                 def insert_order(self, *args, **kwargs):
                     raise RuntimeError("行情会话为只读，禁止下单")
 
-            self._publish(status="connecting", chart_url=None)
+            self._publish(status="connecting", chart_url=None, connected=None,
+                          chart_status="loading")
             api = ReadOnlyApi(sdk.TqSim(), auth=sdk.TqAuth(user, password), debug=False,
                               disable_print=True, web_gui=address)
             try:
                 if self._stop.is_set():
                     break
+                self._publish(status="waiting_data", connected=True, reason="catalog_loading")
                 if not catalog:
                     symbols = list(api.query_quotes(ins_class="CONT"))
                     symbols = [s for s in symbols if CONTINUOUS.fullmatch(s)]
@@ -129,12 +134,14 @@ class MarketSession:
                     catalog = catalog_rows(raw)
                     if not catalog:
                         raise ValueError("目录元数据未就绪")
-                    self._publish(catalog=catalog)
+                    self._publish(catalog=catalog, reason="")
                     with self._lock:
-                        if self._view[0] == 0:
+                        if self._view[2] is None:
                             default = next((r["continuous"] for r in catalog
                                             if r["product"] == "rb"), catalog[0]["continuous"])
-                            self.set_view([r["continuous"] for r in catalog[:40]], default)
+                            requested = list(self._view[1])[:97] or [
+                                r["continuous"] for r in catalog[:40]]
+                            self.set_view(requested, default)
                 self._serve_view(api, catalog, address, chart_ready)
             finally:
                 api.close()
@@ -144,6 +151,7 @@ class MarketSession:
         quotes, seen, subscribed = {}, set(), set()
         connections = {}
         active_selected, chart_symbol = None, None
+        chart_failed = False
         initialized, connected = False, True
         while not self._stop.is_set():
             with self._lock:
@@ -169,12 +177,15 @@ class MarketSession:
                     if chart_symbol and underlying != chart_symbol:
                         self._publish(chart_url=None, reason="main_contract_changed")
                         return
-                    if not chart_symbol:
+                    if not chart_symbol and not chart_failed:
                         if len(subscribed | {underlying}) > 100:
                             return
-                        api.get_kline_serial(underlying, 60, data_length=200)
-                        subscribed.add(underlying)
-                        chart_symbol = underlying
+                        try:
+                            api.get_kline_serial(underlying, 60, data_length=200)
+                            subscribed.add(underlying)
+                            chart_symbol = underlying
+                        except Exception:
+                            chart_failed = True
             api.wait_update(deadline=time.time() + 0.2)
             # 映射可能在本次更新中改变；发布前再次核对，避免新合约配旧图。
             if selected and chart_symbol and (
@@ -195,7 +206,11 @@ class MarketSession:
             rows = [quote_row(known[s], quotes[s], connected=connected) for s in requested]
             ready = any(r["data_state"] == "ready" for r in rows)
             status = "disconnected" if not connected else "ready" if ready else "waiting_data"
+            chart_url = address if connected and chart_symbol and chart_ready.is_set() else None
             self._publish(version=version, status=status, rows=rows, selected=selected,
-                          chart_url=address if connected and chart_symbol and chart_ready.is_set()
-                          else None, reason="" if connected else "connection_lost",
+                          connected=connected, chart_url=chart_url,
+                          chart_status="ready" if chart_url else "unavailable" if chart_failed
+                          else "loading" if selected else "idle",
+                          reason="connection_lost" if not connected else
+                          "chart_data_unavailable" if chart_failed else "",
                           heartbeat_seconds=int(time.monotonic() - self._started))

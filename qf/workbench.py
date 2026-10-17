@@ -9,6 +9,7 @@ from qf.credentials import SavedLogin
 from qf.desktop import allowed_chart_url
 from qf.market import catalog_rows
 from qf.market_session import MarketSession
+from qf.market_units import price_unit
 from qf.window_host import run_window
 from qf.workbench_store import WorkbenchStore
 
@@ -17,11 +18,14 @@ REASONS = {
     "connection_lost": "行情连接中断，当前显示最后收到的数据。",
     "main_contract_changed": "主力合约发生变化，正在重新核实图表。",
     "unknown_selection": "所选品种不在当前市场目录中。",
+    "catalog_loading": "行情服务已连接，正在读取品种目录。",
+    "chart_data_unavailable": "当前合约K线未返回或读取失败，其他行情仍可查看。",
 }
 STATUSES = {"idle", "connecting", "ready", "waiting_data", "disconnected", "stopping",
             "stopped", "failed"}
 ROW_FIELDS = ("continuous", "name", "exchange", "product", "underlying", "last_price",
-              "change_percent", "volume", "open_interest", "quote_time", "data_state")
+              "change_percent", "volume", "open_interest", "quote_time", "data_state",
+              "price_unit", "data_note")
 
 
 class WorkbenchBridge:
@@ -81,7 +85,17 @@ class WorkbenchBridge:
             address = address if matching and allowed_chart_url(address) else None
             rows = [{k: row.get(k) for k in ROW_FIELDS} for row in raw.get("rows", [])]
             heartbeat = raw.get("heartbeat_seconds", 0)
-            return {"status": status, "catalog": self._catalog, "rows": rows,
+            display_catalog = [{**row, "price_unit": price_unit(row["exchange"], row["product"])}
+                               for row in self._catalog]
+            connected = raw.get("connected")
+            connected = (connected if type(connected) is bool else
+                         None if status in ("connecting", "stopping") else
+                         status in ("ready", "waiting_data"))
+            chart_status = raw.get("chart_status")
+            return {"status": status, "catalog": display_catalog, "rows": rows,
+                    "connected": connected,
+                    "chart_status": chart_status if chart_status in
+                    {"idle", "loading", "ready", "unavailable"} else "idle",
                     "selected": self._selected, "chart_url": address,
                     "reason": REASONS.get(raw.get("reason"), ""),
                     "heartbeat_seconds": heartbeat if type(heartbeat) is int else 0,

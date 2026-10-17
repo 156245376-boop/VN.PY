@@ -3,6 +3,8 @@
 import math
 import re
 
+from qf.market_units import price_unit
+
 CONTINUOUS = re.compile(r"KQ\.m@(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.([A-Za-z]+)\Z")
 
 
@@ -35,13 +37,16 @@ def quote_row(catalog: dict, quote: dict, *, connected: bool) -> dict:
     underlying = quote.get("underlying_symbol", "")
     underlying = underlying if isinstance(underlying, str) and len(underlying) < 50 else ""
     state = "disconnected" if not connected else "ready" if price and stamp else "waiting"
+    note = ("行情连接中断，显示最后收到的数据" if not connected
+            else "服务尚未返回有效报价" if state == "waiting" else "")
     change = (price - settlement) / settlement * 100 if price and settlement else None
     return {**{key: catalog[key] for key in ("continuous", "name", "exchange", "product")},
             "underlying": underlying, "last_price": price,
+            "price_unit": price_unit(catalog["exchange"], catalog["product"]),
             "change_percent": change,
-            "volume": finite_number(quote.get("volume")),
-            "open_interest": finite_number(quote.get("open_interest")),
-            "quote_time": stamp, "data_state": state}
+            "volume": finite_number(quote.get("volume")) if stamp else None,
+            "open_interest": finite_number(quote.get("open_interest")) if stamp else None,
+            "quote_time": stamp, "data_state": state, "data_note": note}
 
 
 def filter_catalog(rows: list[dict], text: str, exchange: str | None) -> list[dict]:

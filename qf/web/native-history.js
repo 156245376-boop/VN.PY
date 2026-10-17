@@ -4,6 +4,7 @@
   if (window.QfNativeHistory) return;
   const DAY = 86400000000000, MINUTE = 60000000000;
   const records = new WeakMap(), axes = new WeakSet(), controls = new WeakSet();
+  const gestures = new WeakSet();
   const requests = new WeakMap(), responses = new WeakMap(), recovered = new WeakMap();
   const sockets = new WeakMap();
   const requestFields = ['ins_list', 'duration', 'left_kline_id', 'view_width',
@@ -124,6 +125,31 @@
     return requestAcknowledged(sdk, response, request) ? '' : 'response_epoch_pending';
   }
   function responseMatches(sdk, response, chart) { return responseReason(sdk, response, chart) === ''; }
+  function patchGestures(chart) {
+    const table = chart.tableContainer, root = table?.root;
+    if (!root || gestures.has(table) || typeof root.addEventListener !== 'function' ||
+        typeof root.dispatchEvent !== 'function') return;
+    gestures.add(table);
+    let finishing = false;
+    function finish(event) {
+      if (finishing) return;
+      if (table.dragTimeout != null) { clearTimeout(table.dragTimeout); table.dragTimeout = null; }
+      table.isClick = false;
+      if (!table.isDraging) return;
+      // 由原生mouseup闭包结束拖拽、发送dragend并移除动态监听；不提前改状态。
+      finishing = true;
+      try {
+        root.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true,
+          button: 0, buttons: 0, clientX: event?.clientX ?? 0, clientY: event?.clientY ?? 0}));
+      } finally { finishing = false; }
+    }
+    root.addEventListener('mousedown', finish, true);
+    root.addEventListener('mouseleave', event => { if (event.target === root) finish(event); }, true);
+    root.addEventListener('mousemove', event => { if ((event.buttons & 1) === 0) finish(event); }, true);
+    window.addEventListener('mouseup', finish);
+    window.addEventListener('blur', finish);
+    document.addEventListener('visibilitychange', event => { if (document.hidden) finish(event); });
+  }
   function patchAxis(chart) {
     const axis = chart.timeAxis;
     if (!axis || axes.has(axis)) return;
@@ -165,6 +191,7 @@
         const draw = chartProto.draw;
         chartProto.draw = function (...args) {
           current = this;
+          patchGestures(this);
           patchAxis(this);
           delete this.__qfHistoryDrawing;
           try {

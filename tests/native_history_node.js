@@ -89,6 +89,132 @@ function test(name, run) {
   run(); console.log('PASS ' + name);
 }
 
+function dragFixture() {
+  const f = fixture();
+  let now = 0, next = 0;
+  const timers = new Map();
+  f.context.setTimeout = (fn, delay) => { timers.set(++next, {fn, at: now + delay}); return next; };
+  f.context.clearTimeout = id => timers.delete(id);
+  class Target {
+    constructor() { this.listeners = new Map(); }
+    addEventListener(type, fn, capture = false) {
+      const list = this.listeners.get(type) || [];
+      if (!list.some(item => item.fn === fn && item.capture === !!capture)) list.push({fn, capture: !!capture});
+      this.listeners.set(type, list);
+    }
+    removeEventListener(type, fn, capture = false) {
+      this.listeners.set(type, (this.listeners.get(type) || []).filter(item => item.fn !== fn || item.capture !== !!capture));
+    }
+    dispatchEvent(event) {
+      if (!event.target) event.target = this;
+      const list = [...(this.listeners.get(event.type) || [])].sort((a, b) => Number(b.capture) - Number(a.capture));
+      for (const item of list) {
+        if (event.target === this || event.bubbles || item.capture) item.fn(event);
+      }
+      return true;
+    }
+    count(type) { return (this.listeners.get(type) || []).length; }
+  }
+  class Mouse {
+    constructor(type, options = {}) { Object.assign(this, {type, bubbles: false, buttons: 0, button: 0, target: null}, options); }
+    preventDefault() {}
+    stopPropagation() { this.stopped = true; }
+  }
+  const root = new Target(), win = new Target(), doc = new Target();
+  doc.hidden = false;
+  f.context.MouseEvent = Mouse;
+  f.context.window.addEventListener = win.addEventListener.bind(win);
+  f.context.document.addEventListener = doc.addEventListener.bind(doc);
+  Object.defineProperty(f.context.document, 'hidden', {get: () => doc.hidden});
+  // 只在测试内存中导出锁定 SDK 的私有类；产品和安装包均保持原样。
+  const factory = f.context.window.webpackJsonp.find(chunk => chunk[1]?.['6029'])[1]['6029'];
+  const source = factory.toString().replace('e["a"]=class extends Lr',
+    'e.Br=Br;e.Zr=Zr;e.Kr=Kr;e["a"]=class extends Lr');
+  const module = {exports: {}};
+  vm.runInContext('(' + source + ')', f.context)(module, module.exports, () => {});
+  const {Br, Zr, Kr} = module.exports;
+  const table = new Br();
+  Object.assign(table, {root, isDraging: false, isClick: true, dragTimeout: null});
+  table._initEventListeners();
+  f.data({0: bar('2016-01-04T01:00:00Z'), 2617: bar('2026-10-16T01:00:00Z')});
+  Object.assign(f.chart, {width: 652, margin: {left: 50, right: 50}, bar: new Kr(552),
+    boards: {}, tableContainer: table});
+  table.chart = f.chart;
+  f.chart.timeAxis.showXAnnotation = () => {};
+  f.chart.chartCtrl = new Zr(f.chart);
+  f.chart.chartCtrl.init();
+  f.context.window.NativeChart.prototype._initEventListenners.call(f.chart);
+  let ended = 0;
+  table.addListener('dragend', () => ended++);
+  f.chart.draw();
+  const canvas = {nodeName: 'CANVAS', getAttribute: () => 'plot-top-canvas', dataset: {boardId: 'main'}};
+  function fire(type, values = {}) {
+    root.dispatchEvent(new Mouse(type, {target: canvas, bubbles: type !== 'mouseleave', ...values}));
+  }
+  function advance(milliseconds) {
+    now += milliseconds;
+    for (const [id, timer] of [...timers]) if (timer.at <= now) { timers.delete(id); timer.fn(); }
+  }
+  return {...f, table, root, win, doc, fire, advance, Mouse, ended: () => ended};
+}
+
+test('[ghost_drag] 快速离开后在外松开不能留下100ms定时器或悬停拖图', () => {
+  const f = dragFixture(), before = f.chart.chartCtrl.range.leftId;
+  f.fire('mousedown', {buttons: 1});
+  f.advance(30);
+  f.fire('mouseleave', {target: f.root, buttons: 1});
+  f.win.dispatchEvent(new f.Mouse('mouseup', {buttons: 0}));
+  f.advance(150);
+  assert.equal(f.table.isDraging, false, '图外释放不能在100ms后启动拖拽');
+  assert.equal(f.table.dragTimeout, null);
+  f.fire('mousemove', {buttons: 0, movementX: 400});
+  assert.equal(f.chart.chartCtrl.range.leftId, before);
+  assert.equal(f.root.count('mouseup'), 1, '只保留原生常驻mouseup监听');
+});
+
+test('[drag_lifecycle] 正常按钮拖动与原生dragend和动态mouseup清理保持正常', () => {
+  for (const finish of ['mouseup', 'mouseleave', 'blur', 'visibilitychange', 'hover']) {
+    const f = dragFixture(), before = f.chart.chartCtrl.range.leftId;
+    f.fire('mousedown', {buttons: 1}); f.advance(150);
+    assert.equal(f.table.isDraging, true);
+    assert.equal(f.root.count('mouseup'), 2);
+    f.fire('mousemove', {buttons: 1, movementX: 400});
+    assert.equal(f.chart.chartCtrl.range.leftId, before - 50);
+    if (finish === 'blur') f.win.dispatchEvent(new f.Mouse('blur'));
+    else if (finish === 'visibilitychange') { f.doc.hidden = true; f.doc.dispatchEvent(new f.Mouse('visibilitychange')); }
+    else if (finish === 'hover') f.fire('mousemove', {buttons: 0, movementX: 400});
+    else f.fire(finish, {buttons: 0, ...(finish === 'mouseleave' ? {target: f.root} : {})});
+    assert.equal(f.table.isDraging, false, finish);
+    assert.equal(f.table.dragTimeout, null, finish);
+    assert.equal(f.ended(), 1, '原生dragend应恰好一次：' + finish);
+    assert.equal(f.root.count('mouseup'), 1, '移除原生动态mouseup监听：' + finish);
+    f.fire('mousemove', {buttons: 0, movementX: 400});
+    assert.equal(f.chart.chartCtrl.range.leftId, before - 50);
+  }
+});
+
+test('[drag_children] 左键跨主图子canvas和坐标轴不能被非冒泡mouseleave提前终止', () => {
+  for (const elapsed of [30, 150]) {
+    const f = dragFixture(), before = f.chart.chartCtrl.range.leftId;
+    f.fire('mousedown', {buttons: 1}); f.advance(elapsed);
+    // 子canvas非冒泡mouseleave仍经过root捕获阶段，原生root监听不应接收。
+    f.fire('mouseleave', {buttons: 1});
+    f.advance(150);
+    assert.equal(f.table.isDraging, true, '跨子节点不能取消计时器或已开始的拖拽');
+    const axis = {nodeName: 'SVG'};
+    f.fire('mousemove', {target: axis, buttons: 1, movementX: 0});
+    const volume = {nodeName: 'CANVAS', getAttribute: () => 'plot-top-canvas', dataset: {boardId: 'sub'}};
+    f.fire('mousemove', {target: volume, buttons: 1, movementX: 120});
+    assert.equal(f.chart.chartCtrl.range.leftId, before - 15);
+    assert.equal(f.ended(), 0);
+    assert.equal(f.root.count('mouseup'), 2);
+    f.fire('mouseleave', {target: f.root, buttons: 1});
+    assert.equal(f.table.isDraging, false);
+    assert.equal(f.ended(), 1);
+    assert.equal(f.root.count('mouseup'), 1);
+  }
+});
+
 test('[request_generation] 新请求收到完整对应确认之前不能用旧回应报断档', () => {
   const f = fixture();
   f.data({0: bar('2016-01-04T01:00:00Z'), 1: bar('2016-01-05T01:00:00Z'),

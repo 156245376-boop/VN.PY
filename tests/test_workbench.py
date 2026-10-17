@@ -24,8 +24,9 @@ class Session:
     def snapshot(self):
         return copy.deepcopy(self.state)
 
-    def set_view(self, symbols, selected):
+    def set_view(self, symbols, selected, chart_mode="actual"):
         self.state["selected"] = selected
+        self.state["chart_mode"] = chart_mode
         self.state["chart_url"] = None
 
     def stop(self):
@@ -54,6 +55,22 @@ def test_stale_selection_cannot_replace_current_chart(bridge):
     bridge._session.state.update(selected="KQ.m@SHFE.rb", chart_url="http://127.0.0.1:12345")
     state = bridge.get_state()
     assert state["selected"] == "KQ.m@DCE.m" and state["chart_url"] is None
+
+
+def test_chart_mode_and_loading_are_validated_without_exposing_raw_objects(bridge):
+    bridge.get_state()
+    assert not bridge.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "unknown")["ok"]
+    assert bridge.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "continuous")["ok"]
+    bridge._session.state.update(chart_mode="actual", chart_url="http://127.0.0.1:12345",
+                                 chart_symbol={"token": "private-token"},
+                                 loading={"phase": "private-response", "done": "private-token",
+                                          "total": 88, "elapsed_seconds": 4})
+    result = bridge.get_state()
+    assert result["chart_url"] is None
+    assert result["chart_symbol"] is None
+    assert result["loading"] == {"phase": "idle", "done": None, "total": 88,
+                                 "elapsed_seconds": 4}
+    assert "private-" not in str(result)
 
 
 def test_resource_keys_do_not_execute_arbitrary_commands(bridge):

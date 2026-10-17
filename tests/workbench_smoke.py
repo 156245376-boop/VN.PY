@@ -26,7 +26,8 @@ def exercise():
     native_data = {"action": {"mode": "run", "accounts": {}, "user_name": "offline",
                               "file_name": "workbench_entry.py"},
                    "subscribed": [{"symbol": "DCE.m2701", "dur_nano": 60000000000},
-                                  {"symbol": "SHFE.rb2701", "dur_nano": 60000000000}]}
+                                  {"symbol": "SHFE.rb2701", "dur_nano": 60000000000},
+                                  {"symbol": "KQ.m@DCE.m", "dur_nano": 86400000000000}]}
     server = threading.Thread(target=lambda: serve(native_data, probe=True), daemon=True)
     server.start()
     assert ready.wait(5)
@@ -38,6 +39,7 @@ def exercise():
             {"continuous": "KQ.m@SHFE.rb", "name": "螺纹钢", "product": "rb", "exchange": "SHFE"},
             {"continuous": "KQ.m@DCE.m", "name": "豆粕", "product": "m", "exchange": "DCE"}], [])
         FakeApi.block = threading.Event()
+        FakeApi.catalog_block = threading.Event()
         session = market_module.MarketSession(sdk=sdk)
 
         class DelayedFavorites(WorkbenchBridge):
@@ -84,9 +86,21 @@ def exercise():
                           window.chartObservation=event.data;
                       });''')
                     time.sleep(0.8)  # 复现缓存目录先于连接/行情到达。
+                    check('document.querySelector("#chart-loading").hidden===false')
+                    assert "已等待" in window.evaluate_js(
+                        'document.querySelector("#loading-time").textContent')
+                    assert window.evaluate_js(
+                        'document.querySelector("#chart-progress").hasAttribute("value")') is False
                     FakeApi.block.set()
+                    check('document.querySelector("#loading-stage").textContent.includes("读取品种目录")')
+                    assert window.evaluate_js(
+                        'document.querySelector("#chart-progress").max') == 2
+                    assert window.evaluate_js(
+                        'document.querySelector("#chart-progress").value') == 0
+                    FakeApi.catalog_block.set()
                     check('document.querySelector("#chart").hidden===false')
                     check('window.chartObservation?.original?.startsWith("SHFE.rb2701")')
+                    check('document.querySelector("#chart-loading").hidden===true')
                     check('document.querySelector("#status").dataset.light==="green"')
                     assert "正在连接" not in window.evaluate_js(
                         'document.querySelector("#notice").textContent')
@@ -99,6 +113,19 @@ def exercise():
                     window.evaluate_js('document.querySelector("#market-rows tr").click()')
                     check('document.querySelector("#chart-title").textContent.includes("豆粕")')
                     check('document.querySelector("#chart").hidden===false')
+                    check('window.chartObservation?.original?.startsWith("DCE.m2701")')
+                    window.evaluate_js('document.querySelector("#chart-source").value="continuous";'
+                                       'document.querySelector("#chart-source").dispatchEvent('
+                                       'new Event("change"))')
+                    check('window.chartObservation?.original?.startsWith("KQ.m@DCE.m")')
+                    check('window.chartObservation?.original?.includes("1D")')
+                    assert "1天" in window.evaluate_js('window.chartObservation.selected')
+                    assert session.snapshot()["chart_mode"] == "continuous"
+                    assert "跨主力合约" in window.evaluate_js(
+                        'document.querySelector("#history-note").textContent')
+                    window.evaluate_js('document.querySelector("#chart-source").value="actual";'
+                                       'document.querySelector("#chart-source").dispatchEvent('
+                                       'new Event("change"))')
                     check('window.chartObservation?.original?.startsWith("DCE.m2701")')
                     detail = window.evaluate_js(
                         'document.querySelector("#chart-detail").textContent')
@@ -185,6 +212,7 @@ def exercise():
                 except Exception as exc:
                     errors.append(str(exc))
                 finally:
+                    FakeApi.catalog_block.set()
                     bridge.disconnect()
                     window.destroy()
 

@@ -2,7 +2,7 @@
 (() => {
   if(window.__qfChartLabels)return;
   window.__qfChartLabels=true;
-  let catalog=[],scheduled=false,requestedSymbol='',pendingSymbol='';
+  let catalog=[],scheduled=false,requestedSymbol='',pendingSymbol='',requestedPeriod='1m';
   const originals=new WeakMap();
   const observer=new MutationObserver(()=>{
     if(scheduled)return;scheduled=true;queueMicrotask(refresh);
@@ -12,7 +12,8 @@
     if(!document.body)return;
     observer.disconnect();
     const title=document.querySelector('.tq-top-view .title');
-    const rawTitle=originals.get(title?.firstChild)?.raw||title?.textContent||'';
+    const previousTitle=originals.get(title?.firstChild);
+    const rawTitle=previousTitle?.rendered===title?.textContent?previousTitle.raw:title?.textContent||'';
     const symbol=rawTitle.trim().split(/\s+/)[0];
     const header=document.querySelector('.tq-header-view');
     if(header){let legend=document.querySelector('#qf-price-unit');
@@ -26,15 +27,15 @@
       const raw=previous?.rendered===node.nodeValue?previous.raw:node.nodeValue;
       const button=parent.closest('.subscribed-list button');
       if(button){const parts=raw.trim().split(/\s+/);
-        if(/^(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{3,4}$/.test(parts[0])){
-          button.dataset.qfSymbol=parts[0];button.dataset.qfPeriod=parts[1]||'';}}
+        if(/^(?:KQ\.m@)?(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{0,4}$/.test(parts[0])){
+          button.dataset.qfSymbol=parts[0];button.dataset.qfPeriod=(parts[1]||'').toLowerCase();}}
       const rendered=parent.matches('.ivu-badge-status-text')&&raw.trim()==='行情'?
         raw.replace('行情','图表行情'):window.QfLabels.translate(raw,catalog);
       if(rendered!==node.nodeValue){node.nodeValue=rendered;parent.title=raw.trim()}
       originals.set(node,{raw,rendered});
     }
     if(pendingSymbol){const button=[...document.querySelectorAll('.subscribed-list button')]
-      .find(item=>item.dataset.qfSymbol===pendingSymbol&&item.dataset.qfPeriod==='1m');
+      .find(item=>item.dataset.qfSymbol===pendingSymbol&&item.dataset.qfPeriod===requestedPeriod);
       if(button){pendingSymbol='';button.click();}}
     observer.observe(document.body,{subtree:true,childList:true,characterData:true});
   }
@@ -43,8 +44,10 @@
     if(!Array.isArray(event.data.catalog))return;
     catalog=event.data.catalog.filter(row=>typeof row?.name==='string'&&typeof row?.product==='string'&&typeof row?.exchange==='string');
     const symbol=event.data.symbol;
-    if(typeof symbol==='string'&&/^(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{3,4}$/.test(symbol)&&symbol!==requestedSymbol){
-      requestedSymbol=symbol;pendingSymbol=symbol;}
+    const period=event.data.period==='1d'?'1d':'1m';
+    if(typeof symbol==='string'&&/^(?:KQ\.m@)?(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{0,4}$/.test(symbol)&&
+      (symbol!==requestedSymbol||period!==requestedPeriod)){
+      requestedSymbol=symbol;pendingSymbol=symbol;requestedPeriod=period;}
     refresh();
   });
   addEventListener('DOMContentLoaded',()=>{

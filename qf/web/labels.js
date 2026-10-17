@@ -24,7 +24,7 @@
       .replace(/py文件/g,'图表服务')
       .replace(/(?:KQ\.[mi]@)?(?:SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{0,4}\b/g,
         symbol=>contractName(symbol,catalog))
-      .replace(/\b(\d+)([mhd])\b/g,(_,number,unit)=>number+{m:'分钟',h:'小时',d:'天'}[unit]);
+      .replace(/\b(\d+)([mhdD])\b/g,(_,number,unit)=>number+{m:'分钟',h:'小时',d:'天',D:'天'}[unit]);
   }
   function quoteUnit(symbol,catalog){const match=/^(?:KQ\.[mi]@)?([A-Z]+)\.([A-Za-z]+)\d*$/.exec(symbol||'');
     return match?catalog.find(item=>item.exchange===match[1]&&item.product.toLowerCase()===match[2].toLowerCase())?.price_unit||'单位待确认':'单位待确认'}

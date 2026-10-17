@@ -23,6 +23,7 @@ REASONS = {
 }
 STATUSES = {"idle", "connecting", "ready", "waiting_data", "disconnected", "stopping",
             "stopped", "failed"}
+LOAD_PHASES = {"idle", "connecting", "catalog", "bars", "chart", "ready", "failed", "stopped"}
 ROW_FIELDS = ("continuous", "name", "exchange", "product", "underlying", "last_price",
               "change_percent", "volume", "open_interest", "quote_time", "data_state",
               "price_unit", "data_note")
@@ -37,6 +38,7 @@ class WorkbenchBridge:
         self._catalog, self._favorites = cached["catalog"], cached["favorites"]
         self._issue = cached["issue"]
         self._selected = None
+        self._chart_mode = "actual"
         self._login = SavedLogin(root, store=credential_store)
 
     def get_login_state(self):
@@ -60,6 +62,7 @@ class WorkbenchBridge:
                 self._login.prepare(*credentials, remember)
                 self._session.start(*credentials)
                 self._selected = None
+                self._chart_mode = "actual"
                 return {"ok": True, "reason": "正在连接行情，请稍候。"}
             except Exception:
                 self._login.discard()
@@ -81,7 +84,8 @@ class WorkbenchBridge:
             if self._selected is None:
                 self._selected = raw.get("selected")
             address = raw.get("chart_url")
-            matching = raw.get("selected") == self._selected
+            matching = (raw.get("selected") == self._selected
+                        and raw.get("chart_mode", "actual") == self._chart_mode)
             address = address if matching and allowed_chart_url(address) else None
             rows = [{k: row.get(k) for k in ROW_FIELDS} for row in raw.get("rows", [])]
             heartbeat = raw.get("heartbeat_seconds", 0)
@@ -92,7 +96,21 @@ class WorkbenchBridge:
                          None if status in ("connecting", "stopping") else
                          status in ("ready", "waiting_data"))
             chart_status = raw.get("chart_status")
+            loading = raw.get("loading", {})
+            loading = loading if isinstance(loading, dict) else {}
+            phase = loading.get("phase")
+            progress = {"phase": phase if isinstance(phase, str) and phase in LOAD_PHASES
+                        else "idle"}
+            for field in ("done", "total", "elapsed_seconds"):
+                value = loading.get(field)
+                progress[field] = value if type(value) is int and value >= 0 else None
+            chart_symbol = raw.get("chart_symbol")
+            if not isinstance(chart_symbol, str) or (chart_symbol != self._selected
+                    and chart_symbol not in {row.get("underlying") for row in rows}):
+                chart_symbol = None
             return {"status": status, "catalog": display_catalog, "rows": rows,
+                    "loading": progress, "chart_mode": self._chart_mode,
+                    "chart_symbol": chart_symbol,
                     "connected": connected,
                     "chart_status": chart_status if chart_status in
                     {"idle", "loading", "ready", "unavailable"} else "idle",
@@ -104,18 +122,21 @@ class WorkbenchBridge:
                     "cache_state": "live" if catalog and status in ("ready", "waiting_data")
                     else "cached" if self._catalog else "empty"}
 
-    def set_view(self, symbols, selected):
+    def set_view(self, symbols, selected, chart_mode="actual"):
         with self._lock:
             known = {r["continuous"] for r in self._catalog}
             if (not isinstance(symbols, list) or len(symbols) > 98
+                    or chart_mode not in ("actual", "continuous")
                     or not all(isinstance(s, str) and s in known for s in symbols)
                     or selected is not None and
                     (not isinstance(selected, str) or selected not in known)):
                 return {"ok": False, "reason": "所选品种不可用或超过订阅上限。"}
             try:
                 favorites = [s for s in self._favorites if s in known]
-                self._session.set_view(list(dict.fromkeys([*symbols, *favorites])), selected)
+                self._session.set_view(list(dict.fromkeys([*symbols, *favorites])), selected,
+                                       chart_mode)
                 self._selected = selected
+                self._chart_mode = chart_mode
                 return {"ok": True, "reason": ""}
             except ValueError:
                 return {"ok": False, "reason": "当前行情订阅已达到上限，请减少自选。"}

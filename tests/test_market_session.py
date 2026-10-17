@@ -17,6 +17,7 @@ def until(predicate):
 class FakeApi:
     instances = []
     block = None
+    catalog_block = None
     mapping = "SHFE.rb2701"
     missing = set()
     fail_kline = False
@@ -27,6 +28,7 @@ class FakeApi:
         self.closed = False
         self.quotes = {}
         self.klines = []
+        self.kline_requests = []
         self._data = {"notify": {}}
         self.address = web_gui
         type(self).instances.append(self)
@@ -39,6 +41,8 @@ class FakeApi:
         return ["KQ.m@SHFE.rb", "KQ.m@DCE.m"]
 
     def query_symbol_info(self, symbols):
+        if type(self).catalog_block:
+            type(self).catalog_block.wait(8)
         return pd.DataFrame([{"instrument_id": s, "instrument_name":
                               "螺纹钢" if "rb" in s else "豆粕"} for s in symbols])
 
@@ -48,10 +52,11 @@ class FakeApi:
         return self.quotes[symbol]
 
     def get_kline_serial(self, symbol, duration, data_length):
-        assert duration == 60 and data_length == 200
+        assert (duration, data_length) in ((60, 200), (86400, 3000))
         if type(self).fail_kline:
             raise RuntimeError("private-kline-permission-response")
         self.klines.append(symbol)
+        self.kline_requests.append((symbol, duration, data_length))
         return pd.DataFrame()
 
     def wait_update(self, **kwargs):
@@ -79,6 +84,7 @@ class FakeApi:
 def session():
     module = importlib.import_module("qf.market_session")
     FakeApi.instances, FakeApi.block, FakeApi.mapping = [], None, "SHFE.rb2701"
+    FakeApi.catalog_block = None
     FakeApi.missing, FakeApi.fail_kline = set(), False
     sdk = SimpleNamespace(TqApi=FakeApi, TqSim=lambda: "local-sim",
                           TqAuth=lambda u, p: (u, p))
@@ -162,6 +168,35 @@ def test_cached_view_without_selection_still_receives_default_chart(session):
     FakeApi.block.set()
     until(lambda: session.snapshot()["selected"] == "KQ.m@SHFE.rb"
           and bool(session.snapshot()["chart_url"]))
+
+
+def test_continuous_history_selection_does_not_reuse_actual_contract_chart(session):
+    session.start("u", "p")
+    until(lambda: bool(session.snapshot()["chart_url"]))
+    session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "continuous")
+    until(lambda: session.snapshot().get("chart_mode") == "continuous"
+          and bool(session.snapshot()["chart_url"]))
+    assert FakeApi.instances[-1].klines[-1] == "KQ.m@SHFE.rb"
+    assert FakeApi.instances[-1].kline_requests[-1] == ("KQ.m@SHFE.rb", 86400, 3000)
+    assert session.snapshot()["chart_symbol"] == "KQ.m@SHFE.rb"
+    session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "actual")
+    until(lambda: session.snapshot().get("chart_mode") == "actual"
+          and bool(session.snapshot()["chart_url"]))
+    assert FakeApi.instances[-1].klines[-1] == "SHFE.rb2701"
+    with pytest.raises(ValueError):
+        session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "unknown")
+
+
+def test_loading_stage_tracks_connect_and_completion_without_guessing_eta(session):
+    FakeApi.block = threading.Event()
+    session.start("u", "p")
+    until(lambda: bool(FakeApi.instances))
+    loading = session.snapshot()["loading"]
+    assert loading["phase"] == "connecting"
+    assert loading["total"] is None and loading["elapsed_seconds"] >= 0
+    FakeApi.block.set()
+    until(lambda: bool(session.snapshot()["chart_url"]))
+    assert session.snapshot()["loading"]["phase"] == "ready"
 
 
 def test_connection_indicator_is_independent_of_missing_quotes(session):

@@ -76,12 +76,13 @@ def exercise():
                     if window.evaluate_js(js):
                         return
                     time.sleep(0.05)
-                details = window.evaluate_js('({chartState,chartProblem,backend:state.history})')
+                details = window.evaluate_js('workspace.inspect()')
                 raise AssertionError(js + " " + json.dumps(details, ensure_ascii=False))
 
             def interact():
                 try:
                     check('document.querySelector("#login").disabled===false')
+                    assert window.evaluate_js('!!document.querySelector("#chart-layout")')
                     assert window.evaluate_js(
                         'document.querySelector("#user").value') == "offline-user"
                     assert window.evaluate_js('document.querySelector("#password").value') == ""
@@ -112,7 +113,10 @@ def exercise():
                     time.sleep(0.4)
                     assert not window.evaluate_js('document.querySelector("#chart-loading").hidden')
                     for symbol in ("SHFE.rb2701", "DCE.m2701"):
-                        native_data["klines"].update(fixture_klines(symbol, 60000000000))
+                        for duration in (60000000000, 300000000000, 900000000000,
+                                         1800000000000, 3600000000000, 86400000000000):
+                            value = fixture_klines(symbol, duration)
+                            native_data["klines"].setdefault(symbol, {}).update(value[symbol])
                     native_data["klines"].update(fixture_klines(
                         "KQ.m@DCE.m", 86400000000000, daily=True))
                     native_data["_fixture_revision"] = 1
@@ -149,16 +153,16 @@ def exercise():
                                        'new Event("change"))')
                     check('window.chartObservation?.original?.startsWith("KQ.m@DCE.m")')
                     check('window.chartObservation?.original?.includes("1D")')
-                    check('chartState?.status==="ready"')
+                    check('workspace.inspect().panes["pane-1"].state?.status==="ready"')
                     for year in range(2016, 2027):
                         value = str(year)
                         window.evaluate_js('document.querySelector("#history-year").value='
                                            + json.dumps(value) + ';document.querySelector('
                                            '"#history-year").dispatchEvent(new Event("change"))')
-                        check('chartState?.visible?.first?.startsWith(' + json.dumps(value) +
-                              ')&&chartState?.visible?.last?.startsWith(' + json.dumps(value) + ')')
+                        check('workspace.inspect().panes["pane-1"].state?.visible?.first?.startsWith(' + json.dumps(value) +
+                              ')&&workspace.inspect().panes["pane-1"].state?.visible?.last?.startsWith(' + json.dumps(value) + ')')
                     window.evaluate_js('document.querySelector("#history-latest").click()')
-                    check('chartState?.visible?.last?.startsWith("2026")')
+                    check('workspace.inspect().panes["pane-1"].state?.visible?.last?.startsWith("2026")')
                     assert "图中已加载" in window.evaluate_js(
                         'document.querySelector("#history-summary").textContent')
                     assert "1天" in window.evaluate_js('window.chartObservation.selected')
@@ -180,19 +184,13 @@ def exercise():
                     assert "手" in window.evaluate_js(
                         'document.querySelector("#market-rows td:nth-child(6)").textContent')
                     # 同一帧旧请求迟到，不能把现图改成错误状态。
-                    check('chartState?.status==="ready"')
+                    check('workspace.inspect().panes["pane-1"].state?.status==="ready"')
                     window.evaluate_js('dispatchEvent(new MessageEvent("message",{'
                                        'source:document.querySelector("#chart").contentWindow,'
-                                       'origin:new URL(currentChart).origin,'
+                                       'origin:new URL(workspace.inspect().panes["pane-1"].url).origin,'
                                        'data:{kind:"qf-chart-state",'
-                                       'revision:state.chart_revision-1,status:"unsupported"}}))')
-                    assert window.evaluate_js('chartProblem') == ""
-                    window.evaluate_js('window.frameLoads=0;document.querySelector("#chart")'
-                                       '.addEventListener("load",()=>window.frameLoads++)')
-                    bridge._revision_offset = 100
-                    check('state.chart_revision>=100')
-                    check('window.frameLoads>0')
-                    check('chartState?.revision===state.chart_revision&&chartState?.status==="ready"')
+                                       'pane_id:"pane-1",generation:state.generation,revision:state.chart_revision-1,status:"unsupported"}}))')
+                    assert window.evaluate_js('workspace.inspect().panes["pane-1"].problem') == ""
                     address_before = window.evaluate_js('document.querySelector("#chart").src')
                     window.evaluate_js('document.querySelector("#expand-chart").click()')
                     check('document.querySelector("#chart-card").classList.contains("expanded")')
@@ -204,13 +202,13 @@ def exercise():
                     timestamp = bad["1"]["datetime"]
                     bad["1"]["datetime"] = bad["0"]["datetime"]
                     native_data["_fixture_revision"] = 2
-                    check('chartState?.status==="invalid"')
+                    check('workspace.inspect().panes["pane-1"].state?.status==="invalid"')
                     assert "时间重复" in window.evaluate_js(
                         'document.querySelector("#history-summary").textContent')
-                    assert window.evaluate_js('document.querySelector("#chart").hidden')
+                    assert window.evaluate_js('document.querySelector("#chart").style.visibility==="hidden"')
                     bad["1"]["datetime"] = timestamp
                     native_data["_fixture_revision"] = 3
-                    check('chartState?.status==="ready"')
+                    check('workspace.inspect().panes["pane-1"].state?.status==="ready"')
                     names = window.evaluate_js('''[
                         QfLabels.contractName('CZCE.WH701',[
                           {name:'强麦主连',exchange:'CZCE',product:'WH'}]),
@@ -254,6 +252,29 @@ def exercise():
                     assert bridge.get_state()["favorites"] == ["KQ.m@DCE.m"]
                     assert window.evaluate_js(
                         'document.querySelector("#chart").src') == frame_before
+                    window.evaluate_js("document.querySelector('#chart-layout').value='quad';"
+                                       "document.querySelector('#chart-layout').dispatchEvent(new Event('change'))")
+                    check('Object.keys(workspace.inspect().panes).length===4')
+                    check('Object.values(workspace.inspect().panes).every(p=>p.state?.status==="ready")')
+                    before_first = window.evaluate_js('document.querySelector("#chart").src')
+                    window.evaluate_js("document.querySelector('#period-pane-2').value='1h';"
+                                       "document.querySelector('#period-pane-2').dispatchEvent(new Event('change'))")
+                    check('workspace.inspect().panes["pane-2"].state?.duration===3600000000000')
+                    assert window.evaluate_js('document.querySelector("#chart").src') == before_first
+                    assert len(FakeApi.instances) == 1
+                    window.evaluate_js("for(let i=0;i<20;i++)document.querySelector('.split-column').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))")
+                    gap = window.evaluate_js('''(()=>{const bar=document.querySelector('.split-column').getBoundingClientRect();
+                      const first=document.querySelector('[data-pane="pane-1"]').getBoundingClientRect();
+                      return Math.abs((bar.left+bar.right)/2-first.right-6)})()''')
+                    assert gap < 2, gap
+                    window.evaluate_js("document.querySelector('#chart-layout').value='single';"
+                                       "document.querySelector('#chart-layout').dispatchEvent(new Event('change'))")
+                    # 后续检查回到固定的 pane-1。
+                    window.evaluate_js("document.querySelector('#chart-layout').value='quad';"
+                                       "document.querySelector('#chart-layout').dispatchEvent(new Event('change'))")
+                    window.evaluate_js("document.querySelector('[data-pane=\"pane-1\"] .section-title').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));"
+                                       "document.querySelector('#chart-layout').value='single';"
+                                       "document.querySelector('#chart-layout').dispatchEvent(new Event('change'))")
                     if len(sys.argv) > 1:
                         from Microsoft.Web.WebView2.Core import (
                             CoreWebView2CapturePreviewImageFormat,
@@ -305,6 +326,7 @@ def exercise():
                     errors.append(f"{type(exc).__name__} at line {line}: {exc}")
                 finally:
                     FakeApi.catalog_block.set()
+                    window.evaluate_js('window.qfPrepareExit?.()')
                     bridge.disconnect()
                     window.destroy()
 

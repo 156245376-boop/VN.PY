@@ -31,6 +31,7 @@ class FakeApi:
     fail_kline = False
     serial_override = None
     serial_ready = True
+    fail_keys = set()
 
     def __init__(self, account, *, auth, debug, disable_print, web_gui):
         assert account == "local-sim" and debug is False and disable_print is True
@@ -63,8 +64,9 @@ class FakeApi:
         return self.quotes[symbol]
 
     def get_kline_serial(self, symbol, duration, data_length):
-        assert (duration, data_length) in ((60, 200), (86400, 3000))
-        if type(self).fail_kline:
+        assert (duration, data_length) in ((60, 200), (300, 200), (900, 200),
+                                         (1800, 200), (3600, 200), (86400, 3000))
+        if type(self).fail_kline or (symbol, duration) in type(self).fail_keys:
             raise RuntimeError("private-kline-permission-response")
         self.klines.append(symbol)
         self.kline_requests.append((symbol, duration, data_length))
@@ -104,6 +106,7 @@ def session():
     FakeApi.catalog_block = None
     FakeApi.missing, FakeApi.fail_kline = set(), False
     FakeApi.serial_override, FakeApi.serial_ready = None, True
+    FakeApi.fail_keys = set()
     sdk = SimpleNamespace(TqApi=FakeApi, TqSim=lambda: "local-sim",
                           TqAuth=lambda u, p: (u, p))
     item = module.MarketSession(sdk=sdk)
@@ -126,6 +129,52 @@ def test_readonly_session_never_inserts_orders(session, capsys):
     until(lambda: not session.running)
     assert all(api.closed for api in FakeApi.instances)
     assert session.snapshot()["chart_url"] is None
+
+
+def test_four_panes_share_one_api_and_change_independently(session):
+    session.start('u', 'p')
+    until(lambda: bool(session.snapshot()['chart_url']))
+    panes = [{"id": f"pane-{i}", "continuous": "KQ.m@SHFE.rb", "mode": "actual",
+              "period": period, "revision": 10 + i}
+             for i, period in enumerate(('1m', '5m', '1h', '1d'), 1)]
+    session.set_workspace(['KQ.m@SHFE.rb'], panes)
+    until(lambda: len(session.snapshot().get('panes', [])) == 4 and
+          all(p['status'] == 'ready' for p in session.snapshot()['panes']))
+    before = session.snapshot()
+    panes[1] = panes[1] | {'continuous': 'KQ.m@DCE.m', 'revision': 20}
+    session.set_workspace(['KQ.m@SHFE.rb'], panes)
+    until(lambda: session.snapshot()['panes'][1]['symbol'] == 'DCE.m2701')
+    after = session.snapshot()
+    assert len(FakeApi.instances) == 1
+    assert after['chart_url'] == before['chart_url']
+    assert after['panes'][0] == before['panes'][0]
+    assert after['panes'][2:] == before['panes'][2:]
+    assert FakeApi.instances[0].kline_requests.count(('SHFE.rb2701', 60, 200)) == 1
+
+
+def test_workspace_capacity_rejection_keeps_previous_view(session):
+    session.start('u', 'p')
+    until(lambda: bool(session.snapshot()['chart_url']))
+    before = session.snapshot()['panes']
+    with pytest.raises(ValueError):
+        session.set_workspace(['KQ.m@SHFE.' + 'a' * (i + 1) for i in range(101)], [])
+    assert session.snapshot()['panes'] == before
+
+
+def test_pane_failure_and_main_mapping_are_isolated(session):
+    session.start('u', 'p')
+    until(lambda: bool(session.snapshot()['chart_url']))
+    FakeApi.fail_keys = {('KQ.m@SHFE.rb', 86400)}
+    panes = [{'id': f'pane-{i}', 'continuous': 'KQ.m@SHFE.rb', 'mode': mode,
+              'period': period, 'revision': i + 20}
+             for i, (mode, period) in enumerate((('actual', '1m'), ('continuous', '1d')), 1)]
+    session.set_workspace(['KQ.m@SHFE.rb'], panes)
+    until(lambda: session.snapshot()['panes'][1]['status'] == 'unavailable')
+    assert session.snapshot()['panes'][0]['status'] == 'ready'
+    FakeApi.mapping = 'SHFE.rb2705'
+    until(lambda: session.snapshot()['panes'][0]['symbol'] == 'SHFE.rb2705')
+    assert session.snapshot()['panes'][1]['symbol'] == 'KQ.m@SHFE.rb'
+    assert len(FakeApi.instances) == 1
 
 
 def test_latest_selection_wins_and_subscription_budget_is_bounded(session):
@@ -200,7 +249,8 @@ def test_continuous_history_selection_does_not_reuse_actual_contract_chart(sessi
     session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "actual")
     until(lambda: session.snapshot().get("chart_mode") == "actual"
           and bool(session.snapshot()["chart_url"]))
-    assert FakeApi.instances[-1].klines[-1] == "SHFE.rb2701"
+    assert session.snapshot()['chart_symbol'] == 'SHFE.rb2701'
+    assert FakeApi.instances[-1].kline_requests.count(('SHFE.rb2701', 60, 200)) == 1
     with pytest.raises(ValueError):
         session.set_view(["KQ.m@SHFE.rb"], "KQ.m@SHFE.rb", "unknown")
 
@@ -354,6 +404,7 @@ def test_stale_history_result_is_rejected_after_a_view_change(session):
 
     class SwitchDuringUpdate:
         _data = {}
+        updates = 0
 
         def get_quote(self, symbol):
             return {"underlying_symbol": "SHFE.rb2701"}
@@ -365,6 +416,10 @@ def test_stale_history_result_is_rejected_after_a_view_change(session):
             return True
 
         def wait_update(self, **kwargs):
+            self.updates += 1
+            if self.updates > 1:
+                session.stop()
+                return
             session.set_view(["KQ.m@DCE.m"], "KQ.m@DCE.m", "continuous")
 
     session._serve_view(SwitchDuringUpdate(), [

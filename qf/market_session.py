@@ -8,6 +8,7 @@ import os
 import threading
 import time
 
+from qf.chart_workspace import PERIODS, period_for, validate_panes
 from qf.history import summarize_history
 from qf.market import CONTINUOUS, catalog_rows, quote_row
 from qf.runtime import chart_address
@@ -47,10 +48,16 @@ class MarketSession:
         self.thread = None
         self._view = (0, (), None, "actual")
         self._next_chart_revision = 0
+        self._generation = 0
+        self._pane_requests = []
+        self._subscribed = set()
+        self._mappings = {}
+        self._configured = False
         self._started = time.monotonic()
         self._loading_started = self._started
         self._state = {"status": "idle", "catalog": [], "rows": [], "selected": None,
                        "chart_url": None, "reason": "", "heartbeat_seconds": 0,
+                       "generation": 0, "panes": [],
                        "connected": False, "chart_status": "idle", "chart_mode": "actual",
                        "chart_symbol": None, "chart_revision": None, "history": None,
                        "loading": {"phase": "idle", "done": 0, "total": None,
@@ -70,7 +77,13 @@ class MarketSession:
             self._stop.clear()
             self._started = time.monotonic()
             self._view = (0, (), None, "actual")
-            self._state.update(status="connecting", reason="", rows=[], chart_url=None,
+            self._pane_requests = []
+            self._subscribed = set()
+            self._mappings = {}
+            self._configured = False
+            self._generation += 1
+            self._state.update(generation=self._generation, panes=[], status="connecting", reason="",
+                               rows=[], chart_url=None,
                                selected=None, connected=None, chart_status="loading",
                                chart_symbol=None, chart_mode="actual", chart_revision=None,
                                history=None)
@@ -80,22 +93,58 @@ class MarketSession:
 
     def set_view(self, continuous: list[str], selected: str | None,
                  chart_mode: str = "actual") -> None:
-        if (not isinstance(continuous, list) or len(continuous) > 98
-                or chart_mode not in ("actual", "continuous")
-                or not all(isinstance(s, str) and CONTINUOUS.fullmatch(s) for s in continuous)
-                or selected is not None and
-                (not isinstance(selected, str) or not CONTINUOUS.fullmatch(selected))):
+        with self._lock:
+            old = next((p for p in self._pane_requests if p["id"] == "pane-1"), None)
+            same = old and (old["continuous"], old["mode"]) == (selected, chart_mode)
+            if not same:
+                self._next_chart_revision += 1
+            revision = old["revision"] if same else self._next_chart_revision
+            self.set_workspace(continuous, [{"id": "pane-1", "continuous": selected,
+                                "mode": chart_mode, "period": None, "revision": revision}])
+
+    def set_workspace(self, symbols: list[str], panes: list[dict]) -> None:
+        requests = validate_panes(panes, requests=True)
+        if (not isinstance(symbols, list) or len(symbols) > 100
+                or any(not isinstance(s, str) or not CONTINUOUS.fullmatch(s) for s in symbols)):
             raise ValueError("品种选择无效或超过订阅上限")
         with self._lock:
-            symbols = tuple(dict.fromkeys([*continuous, *([selected] if selected else [])]))
-            if len(symbols) > 98:
-                raise ValueError("当前列表超过订阅上限")
-            self._view = (self._view[0] + 1, symbols, selected, chart_mode)
-            if (self._state["selected"] != selected
-                    or self._state["chart_mode"] != chart_mode):
-                self._state.update(selected=selected, chart_url=None, chart_status="loading",
-                                   chart_mode=chart_mode, chart_symbol=None,
-                                   chart_revision=None, history=None)
+            desired = set(symbols) | {p["continuous"] for p in requests if p["continuous"]}
+            known = {r["continuous"] for r in self._state["catalog"]}
+            if known and not desired <= known:
+                raise ValueError("所选品种不在目录中")
+            actual = {self._mappings.get(p["continuous"]) for p in requests
+                      if p["mode"] == "actual" and p["continuous"]}
+            if len(self._subscribed | desired | (actual - {None, ""})) > 100:
+                raise ValueError("当前行情订阅已达到上限，请减少需求或重新连接")
+            requested = tuple(dict.fromkeys([*symbols, *[p["continuous"] for p in requests
+                                                        if p["continuous"]]]))
+            if requested == self._view[1] and requests == self._pane_requests:
+                return
+            first = next((p for p in requests if p["id"] == "pane-1"), None)
+            selected, mode = (first["continuous"], first["mode"]) if first else (None, "actual")
+            changed = self._pane_requests != requests
+            self._pane_requests = requests
+            self._configured = True
+            self._view = (self._view[0] + 1, requested, selected, mode)
+            if changed:
+                previous = {p['id']: p for p in self._state['panes']}
+                next_states = []
+                for p in requests:
+                    old_state = previous.get(p['id'], {})
+                    next_states.append(old_state if all(old_state.get(k) == v
+                                       for k, v in p.items()) else
+                                       {**p, 'symbol': None, 'duration': PERIODS[period_for(p)]
+                                        * 1_000_000_000, 'history': None, 'status': 'loading',
+                                        'reason': ''})
+                first_state = next((p for p in next_states if p['id'] == 'pane-1'), {})
+                self._state.update(selected=selected, chart_mode=mode, panes=next_states,
+                                   chart_status=first_state.get('status', 'idle'),
+                                   chart_symbol=first_state.get('symbol'),
+                                   chart_revision=first_state.get('revision') if
+                                   first_state.get('status') == 'ready' else None,
+                                   history=first_state.get('history'))
+                if not any(p['status'] == 'ready' for p in next_states):
+                    self._state['chart_url'] = None
                 self._set_loading("bars")
 
     def snapshot(self) -> dict:
@@ -200,7 +249,8 @@ class MarketSession:
                         raise ValueError("目录元数据未就绪")
                     self._publish(catalog=catalog, reason="")
                     with self._lock:
-                        if self._view[2] is None:
+                        if not self._configured or (self._pane_requests and
+                                all(p["continuous"] is None for p in self._pane_requests)):
                             default = next((r["continuous"] for r in catalog
                                             if r["product"] == "rb"), catalog[0]["continuous"])
                             requested = list(self._view[1])[:97] or [
@@ -213,66 +263,51 @@ class MarketSession:
 
     def _serve_view(self, api, catalog, address, chart_ready):
         known = {r["continuous"]: r for r in catalog}
-        quotes, seen, subscribed = {}, set(), set()
+        quotes, seen, serials, failures = {}, set(), {}, set()
         connections = {}
-        active_selected, active_mode, chart_symbol = None, None, None
-        klines, chart_revision = None, None
-        chart_failed = False
-        initialized, connected = False, True
         while not self._stop.is_set():
             with self._lock:
-                version, requested, selected, chart_mode = self._view
-            if selected and selected not in known or any(s not in known for s in requested):
-                self._publish(version=version, reason="unknown_selection", chart_url=None)
-                if self._stop.wait(0.1):
-                    break
-                continue
-            if initialized and (selected != active_selected or chart_mode != active_mode):
-                return
-            desired = set(requested)
-            if len(subscribed | desired) > 99:
-                return
-            for symbol in desired:
-                if symbol not in quotes:
+                version, requested, _, _ = self._view
+                panes = copy.deepcopy(self._pane_requests)
+            for symbol in requested:
+                if symbol in known and symbol not in quotes:
                     quotes[symbol] = api.get_quote(symbol)
-                    subscribed.add(symbol)
-            active_selected, active_mode, initialized = selected, chart_mode, True
-            if selected:
-                underlying = quotes[selected].get("underlying_symbol", "")
-                target_symbol = selected if chart_mode == "continuous" else underlying
-                if target_symbol:
-                    if chart_symbol and target_symbol != chart_symbol:
-                        self._publish(version=version, chart_url=None,
-                                      reason="main_contract_changed")
-                        return
-                    if not chart_symbol and not chart_failed:
-                        if len(subscribed | {target_symbol}) > 100:
-                            return
-                        try:
-                            duration, length = ((86400, 3000) if chart_mode == "continuous"
-                                                else (60, 200))
-                            klines = api.get_kline_serial(target_symbol, duration,
-                                                         data_length=length)
-                            subscribed.add(target_symbol)
-                            chart_symbol = target_symbol
-                            with self._lock:
-                                self._next_chart_revision += 1
-                                chart_revision = self._next_chart_revision
-                            self._set_loading("chart", version=version)
-                        except Exception:
-                            chart_failed = True
-            api.wait_update(deadline=time.time() + 0.2)
+                    with self._lock:
+                        self._subscribed.add(symbol)
+            prepared = []
+            for pane in panes:
+                symbol = pane["continuous"]
+                duration = PERIODS[period_for(pane)]
+                target = (symbol if pane["mode"] == "continuous" else
+                          quotes.get(symbol, {}).get("underlying_symbol")) if symbol else None
+                state = {**pane, "symbol": target, "duration": duration * 1_000_000_000,
+                         "history": None, "status": "loading" if symbol else "idle", "reason": ""}
+                key = (target, duration)
+                if target:
+                    with self._lock:
+                        capacity = len(self._subscribed | {target}) <= 100
+                    if not capacity:
+                        state.update(status="unavailable", reason="subscription_limit")
+                    else:
+                        attempt = (key, pane["revision"])
+                        if key not in serials and attempt not in failures:
+                            try:
+                                serials[key] = api.get_kline_serial(target, duration,
+                                                    data_length=3000 if duration == 86400 else 200)
+                                with self._lock:
+                                    self._subscribed.add(target)
+                            except Exception:
+                                failures.add(attempt)
+                        if attempt in failures:
+                            state.update(status="unavailable", reason="chart_data_unavailable")
+                prepared.append((state, key))
+            api.wait_update(deadline=time.time() + .2)
             with self._lock:
                 if self._stop.is_set():
                     return
                 if version != self._view[0]:
                     continue
-            # 映射可能在本次更新中改变；发布前再次核对，避免新合约配旧图。
-            if chart_mode == "actual" and selected and chart_symbol and (
-                    quotes[selected].get("underlying_symbol", "") != chart_symbol):
-                self._publish(version=version, chart_url=None, reason="main_contract_changed")
-                return
-            # SDK 3.10.2 无公开 connected；仅读取已核实的通知码，丢弃通知原文。
+                self._mappings = {s: q.get("underlying_symbol", "") for s, q in quotes.items()}
             for key, notify in list(getattr(api, "_data", {}).get("notify", {}).items()):
                 if key.startswith("_") or key in seen:
                     continue
@@ -283,22 +318,33 @@ class MarketSession:
                 elif notify.get("code") in (2019112901, 2019112902):
                     connections[connection] = True
             connected = all(connections.values())
-            rows = [quote_row(known[s], quotes[s], connected=connected) for s in requested]
-            ready = any(r["data_state"] == "ready" for r in rows)
-            status = "disconnected" if not connected else "ready" if ready else "waiting_data"
-            serial_ready = klines is not None and api.is_serial_ready(klines)
-            history = summarize_history(klines, duration) if serial_ready else None
-            data_failed = chart_failed or history is not None and bool(history["issues"])
-            chart_url = (address if connected and chart_symbol and chart_ready.is_set()
-                         and serial_ready and not data_failed else None)
-            self._set_loading("failed" if data_failed else "ready" if chart_url else
-                              "chart" if chart_symbol else "bars", version=version)
-            self._publish(version=version, status=status, rows=rows, selected=selected,
-                          chart_mode=chart_mode, chart_symbol=chart_symbol,
-                          chart_revision=chart_revision, history=history,
-                          connected=connected, chart_url=chart_url,
-                          chart_status="ready" if chart_url else "unavailable" if data_failed
-                          else "loading" if selected else "idle",
-                          reason="connection_lost" if not connected else
-                          "chart_data_unavailable" if data_failed else "",
+            rows = [quote_row(known[s], quotes[s], connected=connected)
+                    for s in requested if s in known and s in quotes]
+            published = []
+            for state, key in prepared:
+                current = (state["continuous"] if state["mode"] == "continuous" else
+                           self._mappings.get(state["continuous"]))
+                if current != state["symbol"]:
+                    state.update(symbol=None, history=None, status="loading",
+                                 reason="main_contract_changed")
+                elif key in serials and api.is_serial_ready(serials[key]):
+                    history = summarize_history(serials[key], key[1])
+                    state.update(history=history, status="unavailable" if history["issues"] else
+                                 "ready" if chart_ready.is_set() else "loading",
+                                 reason="chart_data_unavailable" if history["issues"] else "")
+                published.append(state)
+            first = next((p for p in published if p["id"] == "pane-1"), {})
+            ready = any(p["status"] == "ready" for p in published)
+            address_now = address if connected and ready else None
+            failed = any(p["status"] == "unavailable" for p in published)
+            phase = "ready" if ready else "failed" if failed else "chart"
+            self._set_loading(phase, version=version)
+            self._publish(version=version,
+                          status="disconnected" if not connected else "ready" if any(
+                              r["data_state"] == "ready" for r in rows) else "waiting_data",
+                          rows=rows, panes=published, connected=connected, chart_url=address_now,
+                          selected=first.get("continuous"), chart_mode=first.get("mode", "actual"),
+                          chart_symbol=first.get("symbol"), chart_revision=first.get("revision"),
+                          history=first.get("history"), chart_status=first.get("status", "idle"),
+                          reason="connection_lost" if not connected else first.get("reason", ""),
                           heartbeat_seconds=int(time.monotonic() - self._started))

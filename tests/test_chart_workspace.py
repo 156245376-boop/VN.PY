@@ -41,7 +41,8 @@ def test_atomic_failure_preserves_old_file(tmp_path, monkeypatch):
     store = ChartWorkspaceStore(tmp_path)
     store.save(default_workspace())
     before = store.path.read_bytes()
-    monkeypatch.setattr('qf.chart_workspace.os.replace', lambda *args: (_ for _ in ()).throw(OSError()))
+    monkeypatch.setattr('qf.chart_workspace.os.replace',
+                        lambda *args: (_ for _ in ()).throw(OSError()))
     with pytest.raises(OSError):
         store.save(default_workspace() | {'layout': 'quad'})
     assert store.path.read_bytes() == before

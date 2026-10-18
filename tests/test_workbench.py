@@ -150,6 +150,34 @@ def test_remembered_credentials_connect_without_returning_password_to_page(bridg
     assert not restored.login("offline-user", "", True)["ok"]
 
 
+def test_workspace_restore_never_connects_or_returns_credentials(bridge):
+    from qf.chart_workspace import default_workspace
+    config = default_workspace()
+    config['layout'] = 'quad'
+    assert bridge.save_workspace(config)['ok']
+    assert bridge.get_workspace()['workspace'] == config
+    assert bridge._session.running is False
+    assert 'private-' not in str(bridge.get_workspace())
+
+
+def test_workspace_requests_and_snapshot_are_whitelisted(bridge):
+    bridge.get_state()
+    requests = [{'id': 'pane-1', 'continuous': 'KQ.m@SHFE.rb', 'mode': 'actual',
+                 'period': '1m', 'revision': 10}]
+    bridge._session.set_workspace = lambda symbols, panes: None
+    assert bridge.set_workspace([], requests)['ok']
+    assert not bridge.set_workspace([], [requests[0] | {'id': 'other'}])['ok']
+    bridge._session.state.update(generation=2, panes=[requests[0] | {
+        'status': 'ready', 'symbol': 'SHFE.rb2701', 'duration': 60000000000,
+        'history': None, 'token': 'private-token'}], rows=[{'continuous': 'KQ.m@SHFE.rb',
+                                                        'underlying': 'SHFE.rb2701'}])
+    output = bridge.get_state()
+    assert output['generation'] == 2 and output['panes'][0]['revision'] == 10
+    assert 'private-' not in str(output)
+    bridge._session.state['panes'][0]['revision'] = 9
+    assert bridge.get_state()['panes'] == []
+
+
 def test_real_workbench_search_selection_favorites_chart_and_disconnect():
     result = subprocess.run(
         [sys.executable, "-I", "-B", str(Path(__file__).with_name("workbench_smoke.py"))],

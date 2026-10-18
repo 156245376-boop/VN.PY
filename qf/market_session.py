@@ -82,8 +82,8 @@ class MarketSession:
             self._mappings = {}
             self._configured = False
             self._generation += 1
-            self._state.update(generation=self._generation, panes=[], status="connecting", reason="",
-                               rows=[], chart_url=None,
+            self._state.update(generation=self._generation, panes=[], status="connecting",
+                               reason="", rows=[], chart_url=None,
                                selected=None, connected=None, chart_status="loading",
                                chart_symbol=None, chart_mode="actual", chart_revision=None,
                                history=None)

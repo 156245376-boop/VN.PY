@@ -6,6 +6,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
+from qf.chart_workspace import PERIODS, ChartWorkspaceStore, period_for, validate_panes
 from qf.credentials import SavedLogin
 from qf.desktop import allowed_chart_url
 from qf.history import HISTORY_ISSUES
@@ -58,6 +59,72 @@ class WorkbenchBridge:
         self._selected = None
         self._chart_mode = "actual"
         self._login = SavedLogin(root, store=credential_store)
+        self._workspace_store = ChartWorkspaceStore(root / 'data/workbench')
+        self._workspace_requests = None
+
+    def get_workspace(self):
+        with self._lock:
+            return self._workspace_store.load()
+
+    def save_workspace(self, workspace):
+        with self._lock:
+            try:
+                self._workspace_store.save(workspace)
+                return {'ok': True, 'reason': '布局已保存。'}
+            except (OSError, ValueError, TypeError):
+                return {'ok': False, 'reason': '布局未保存；原文件已保留，请检查本机布局文件。'}
+
+    def set_workspace(self, symbols, panes):
+        with self._lock:
+            try:
+                requests = validate_panes(panes, requests=True)
+                known = {r['continuous'] for r in self._catalog}
+                if (not isinstance(symbols, list) or len(symbols) > 100
+                        or any(not isinstance(s, str) or s not in known for s in symbols)
+                        or any(p['continuous'] is not None and p['continuous'] not in known
+                               for p in requests)):
+                    raise ValueError('unknown selection')
+                favorites = [s for s in self._favorites if s in known]
+                self._session.set_workspace(list(dict.fromkeys([*symbols, *favorites])), requests)
+                self._workspace_requests = {p['id']: p for p in requests}
+                first = next((p for p in requests if p['id'] == 'pane-1'), {})
+                self._selected = first.get('continuous')
+                self._chart_mode = first.get('mode', 'actual')
+                return {'ok': True, 'reason': ''}
+            except (ValueError, TypeError):
+                return {'ok': False,
+                        'reason': '图表设置未应用：品种无效或订阅已达上限，请减少需求或重新连接。'}
+
+    def _public_panes(self, raw, rows):
+        output = []
+        mappings = {r.get('continuous'): r.get('underlying') for r in rows}
+        for value in raw if isinstance(raw, list) else []:
+            if not isinstance(value, dict):
+                continue
+            try:
+                request = validate_panes([{k: value.get(k) for k in
+                    ('id', 'continuous', 'mode', 'period', 'revision')}], requests=True)[0]
+            except (ValueError, TypeError):
+                continue
+            if (self._workspace_requests is not None
+                    and self._workspace_requests.get(request['id']) != request):
+                continue
+            expected = (request['continuous'] if request['mode'] == 'continuous' else
+                        mappings.get(request['continuous']))
+            symbol = value.get('symbol')
+            if symbol is not None and symbol != expected:
+                continue
+            duration = PERIODS[period_for(request)] * 1_000_000_000
+            if value.get('duration') != duration:
+                continue
+            output.append({**request, 'symbol': symbol, 'duration': duration,
+                           'history': _history_summary(value.get('history')),
+                           'status': value.get('status') if value.get('status') in
+                           ('idle', 'loading', 'ready', 'unavailable') else 'unavailable',
+                           'reason': REASONS.get(value.get('reason'),
+                               '订阅容量已达上限，请减少需求或重新连接。' if
+                               value.get('reason') == 'subscription_limit' else '')})
+        return output
 
     def get_login_state(self):
         with self._lock:
@@ -81,6 +148,7 @@ class WorkbenchBridge:
                 self._session.start(*credentials)
                 self._selected = None
                 self._chart_mode = "actual"
+                self._workspace_requests = None
                 return {"ok": True, "reason": "正在连接行情，请稍候。"}
             except Exception:
                 self._login.discard()
@@ -104,7 +172,8 @@ class WorkbenchBridge:
             address = raw.get("chart_url")
             matching = (raw.get("selected") == self._selected
                         and raw.get("chart_mode", "actual") == self._chart_mode)
-            address = address if matching and allowed_chart_url(address) else None
+            address = address if (matching or self._workspace_requests is not None) and \
+                allowed_chart_url(address) else None
             rows = [{k: row.get(k) for k in ROW_FIELDS} for row in raw.get("rows", [])]
             heartbeat = raw.get("heartbeat_seconds", 0)
             display_catalog = [{**row, "price_unit": price_unit(row["exchange"], row["product"])}
@@ -127,7 +196,10 @@ class WorkbenchBridge:
                     and chart_symbol not in {row.get("underlying") for row in rows}):
                 chart_symbol = None
             revision = raw.get("chart_revision")
+            generation = raw.get('generation', 0)
             return {"status": status, "catalog": display_catalog, "rows": rows,
+                    'generation': generation if type(generation) is int and generation >= 0 else 0,
+                    'panes': self._public_panes(raw.get('panes'), rows),
                     "loading": progress, "chart_mode": self._chart_mode,
                     "chart_symbol": chart_symbol,
                     "chart_revision": revision if matching and type(revision) is int

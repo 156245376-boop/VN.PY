@@ -11,6 +11,7 @@ from qf.credentials import SavedLogin
 from qf.desktop import allowed_chart_url
 from qf.history import HISTORY_ISSUES
 from qf.market import catalog_rows
+from qf.market_account import public_account
 from qf.market_session import MarketSession
 from qf.market_units import price_unit
 from qf.window_host import run_window
@@ -200,6 +201,7 @@ class WorkbenchBridge:
             return {"status": status, "catalog": display_catalog, "rows": rows,
                     'generation': generation if type(generation) is int and generation >= 0 else 0,
                     'panes': self._public_panes(raw.get('panes'), rows),
+                    'account': public_account(raw.get('account')),
                     "loading": progress, "chart_mode": self._chart_mode,
                     "chart_symbol": chart_symbol,
                     "chart_revision": revision if matching and type(revision) is int

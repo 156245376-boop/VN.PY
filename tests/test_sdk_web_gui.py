@@ -15,6 +15,26 @@ from qf.journal import Journal
 from qf.runtime import chart_address, tracked_api
 
 
+def test_chart_address_avoids_restricted_low_browser_ports(monkeypatch):
+    ports = iter([6000, 6667, 10080, 54321])
+
+    class Candidate:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def bind(self, address):
+            pass
+
+        def getsockname(self):
+            return ('127.0.0.1', next(ports))
+
+    monkeypatch.setattr('qf.runtime.socket.socket', Candidate)
+    assert chart_address() == 'http://127.0.0.1:54321'
+
+
 @pytest.mark.filterwarnings(
     "ignore:Bare functions are deprecated, use async ones:DeprecationWarning:"
     "aiohttp.web_urldispatcher"

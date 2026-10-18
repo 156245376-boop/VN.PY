@@ -78,6 +78,19 @@ class FakeApi:
     def is_serial_ready(self, serial):
         return type(self).serial_ready
 
+    def get_account(self):
+        return {'balance': 1000000., 'available': 1000000., 'margin': 0.,
+                'float_profit': 0., 'commission': 0.}
+
+    def get_position(self):
+        return {}
+
+    def get_order(self):
+        return {}
+
+    def get_trade(self):
+        return {}
+
     def wait_update(self, **kwargs):
         for symbol, q in self.quotes.items():
             q.update(last_price=3300, pre_settlement=3000, volume=10, open_interest=20,

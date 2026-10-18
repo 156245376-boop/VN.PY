@@ -7,10 +7,13 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from qf.chart_workspace import PERIODS, period_for, validate_panes
 from qf.history import summarize_history
 from qf.market import CONTINUOUS, catalog_rows, quote_row
+from qf.market_account import account_snapshot
 from qf.runtime import chart_address
 
 
@@ -57,7 +60,7 @@ class MarketSession:
         self._loading_started = self._started
         self._state = {"status": "idle", "catalog": [], "rows": [], "selected": None,
                        "chart_url": None, "reason": "", "heartbeat_seconds": 0,
-                       "generation": 0, "panes": [],
+                       "generation": 0, "panes": [], "account": None,
                        "connected": False, "chart_status": "idle", "chart_mode": "actual",
                        "chart_symbol": None, "chart_revision": None, "history": None,
                        "loading": {"phase": "idle", "done": 0, "total": None,
@@ -83,7 +86,7 @@ class MarketSession:
             self._configured = False
             self._generation += 1
             self._state.update(generation=self._generation, panes=[], status="connecting",
-                               reason="", rows=[], chart_url=None,
+                               reason="", rows=[], chart_url=None, account=None,
                                selected=None, connected=None, chart_status="loading",
                                chart_symbol=None, chart_mode="actual", chart_revision=None,
                                history=None)
@@ -152,7 +155,10 @@ class MarketSession:
             if self._state["loading"]["phase"] in ("connecting", "catalog", "bars", "chart"):
                 self._state["loading"]["elapsed_seconds"] = int(
                     time.monotonic() - self._loading_started)
-            return copy.deepcopy(self._state)
+            snapshot = copy.deepcopy(self._state)
+            if snapshot.get('account') and snapshot.get('connected') is not True:
+                snapshot['account']['connected'] = False
+            return snapshot
 
     def _set_loading(self, phase, done=0, total=None, *, version=None):
         with self._lock:
@@ -265,6 +271,7 @@ class MarketSession:
         known = {r["continuous"]: r for r in catalog}
         quotes, seen, serials, failures = {}, set(), {}, set()
         connections = {}
+        account = None
         while not self._stop.is_set():
             with self._lock:
                 version, requested, _, _ = self._view
@@ -318,6 +325,15 @@ class MarketSession:
                 elif notify.get("code") in (2019112901, 2019112902):
                     connections[connection] = True
             connected = all(connections.values())
+            if connected and hasattr(api, 'get_account'):
+                try:
+                    account = account_snapshot(api, connected=True, observed_at=datetime.now(
+                        ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'))
+                except Exception:
+                    if account:
+                        account = {**account, 'connected': False}
+            elif account:
+                account = {**account, 'connected': False}
             rows = [quote_row(known[s], quotes[s], connected=connected)
                     for s in requested if s in known and s in quotes]
             published = []
@@ -342,7 +358,8 @@ class MarketSession:
             self._publish(version=version,
                           status="disconnected" if not connected else "ready" if any(
                               r["data_state"] == "ready" for r in rows) else "waiting_data",
-                          rows=rows, panes=published, connected=connected, chart_url=address_now,
+                          rows=rows, panes=published, account=account,
+                          connected=connected, chart_url=address_now,
                           selected=first.get("continuous"), chart_mode=first.get("mode", "actual"),
                           chart_symbol=first.get("symbol"), chart_revision=first.get("revision"),
                           history=first.get("history"), chart_status=first.get("status", "idle"),

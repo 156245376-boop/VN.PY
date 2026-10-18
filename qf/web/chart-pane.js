@@ -93,7 +93,8 @@
         reported={status:'unsupported'};problem='图表适配或当前数据不足，已暂停显示。';render();return;}
       if(d.kind!=='qf-chart-state'||!['ready','loading','invalid'].includes(d.status)||
         d.symbol!==context.runtime?.symbol||d.duration!==QfChartState.duration(QfChartState.period(context.config)))return;
-      reported={status:d.status,symbol:d.symbol,duration:d.duration,history:d.history,visible:d.visible};
+      reported={status:d.status,symbol:d.symbol,duration:d.duration,history:d.history,visible:d.visible,
+        reason:d.reason,protocol:d.protocol};
       problem=d.status==='invalid'?'历史数据需核实：'+(d.history?.issues||[]).map(k=>issues[k]).filter(Boolean).join('；'):
         d.status==='unsupported'?'图表适配或当前数据不足，已暂停显示。':'';
       options.onState?.(id,reported);render();

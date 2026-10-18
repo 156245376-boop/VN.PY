@@ -41,3 +41,9 @@
 .chart-pane.expanded .pane-frame{min-height:260px}.chart-pane.expanded iframe{height:100%;min-height:0}.chart-pane.expanded{inset:8px}
 .chart-pane .history-summary{height:34px;margin-bottom:5px}.chart-pane .history-controls{height:32px;flex-shrink:0}
 .chart-pane .history-controls[hidden]{display:flex!important;visibility:hidden}
+.account-view{border-top:1px solid #dce6df;margin:8px 12px;padding:10px 0;flex-shrink:0}
+.account-view summary{font-size:13px;font-weight:600;cursor:pointer}.account-state{font-size:10px}
+.account-metrics{display:flex;flex-wrap:wrap;gap:12px;padding:10px;background:#eaf4f6;font-size:11px}
+.account-tabs{display:flex;gap:6px;margin:8px 0}.account-tabs button{padding:5px 12px;font-size:11px}
+.account-tabs .selected{background:#e7f2ec}.account-view .table-scroll{min-height:0;max-height:180px}
+.account-empty{padding:8px}.account-view th{text-align:left}.account-view td{text-align:left}

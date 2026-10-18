@@ -122,6 +122,8 @@ def exercise():
                     native_data["_fixture_revision"] = 1
                     check('document.querySelector("#chart-loading").hidden===true')
                     check('document.querySelector("#status").dataset.light==="green"')
+                    check('document.querySelector(".account-metrics").textContent.includes("1,000,000")')
+                    assert window.evaluate_js('document.body.innerText.split("本地模拟账户 · 行情窗口").length-1') == 1
                     assert "正在连接" not in window.evaluate_js(
                         'document.querySelector("#notice").textContent')
                     check('document.querySelectorAll("#market-rows tr").length===2')
@@ -305,6 +307,10 @@ def exercise():
                     session_api = FakeApi.instances[-1]
                     session_api._data["notify"]["lost"] = {"code": 2019112911, "conn_id": "md"}
                     check('document.querySelector("#status").dataset.light==="red"')
+                    check('document.querySelector(".account-state").textContent.includes("连接中断")')
+                    stamp = bridge.get_state()['account']['observed_at']
+                    time.sleep(.3)
+                    assert bridge.get_state()['account']['observed_at'] == stamp
                     session_api._data["notify"]["restored"] = {"code": 2019112902,
                                                               "conn_id": "md"}
                     check('document.querySelector("#status").dataset.light==="green"')

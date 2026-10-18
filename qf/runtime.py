@@ -91,9 +91,17 @@ def wait_ready(api, predicate, timeout, seen):
 
 
 def chart_address():
-    with socket.socket() as candidate:
-        candidate.bind(("127.0.0.1", 0))
-        return f"http://127.0.0.1:{candidate.getsockname()[1]}"
+    # 高位端口避免系统分配到 Chromium 禁用的 6000/6667/10080 等服务端口。
+    for _ in range(64):
+        with socket.socket() as candidate:
+            try:
+                candidate.bind(("127.0.0.1", 20000 + secrets.randbelow(45000)))
+                port = candidate.getsockname()[1]
+                if port >= 20000:
+                    return f"http://127.0.0.1:{port}"
+            except OSError:
+                continue
+    raise OSError("没有可用的本机图表端口")
 
 
 def tracked_api(sdk, journal, *, web_gui=False, progress=None, **kwargs):

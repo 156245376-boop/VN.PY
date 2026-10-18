@@ -12,6 +12,8 @@
       <label><input id="link-products" type="checkbox"> 品种联动</label><button id="expand-workspace">放大工作区</button></div></div>
       <p id="workspace-save-note" class="chart-units"></p><div class="chart-grid-scroll"><div class="chart-grid"></div></div>`;
     const grid=root.querySelector('.chart-grid'),scroll=root.querySelector('.chart-grid-scroll');
+    const accountRoot=document.createElement('section');root.append(accountRoot);
+    const account=QfAccountView.create(accountRoot,{onCollapse:value=>{if(config.account_collapsed!==value)action({type:'collapse-account',value});}});
     const column=document.createElement('div'),row=document.createElement('div');
     for(const [bar,axis] of [[column,'column'],[row,'row']]){bar.className='chart-split split-'+axis;bar.tabIndex=0;bar.role='separator';
       bar.setAttribute('aria-label',axis==='column'?'调整左右分屏比例':'调整上下分屏比例');
@@ -80,6 +82,7 @@
       root.dataset.layout=config.layout;grid.dataset.layout=config.layout;
       const twoColumns=['columns','quad'].includes(config.layout),twoRows=['rows','quad'].includes(config.layout);
       root.classList.toggle('workspace-expanded',workspaceExpanded);
+      account.update(state.account,state.catalog);account.setCollapsed(config.account_collapsed);
       const width=Math.max(twoColumns?852:420,scroll.clientWidth-10),minimum=twoRows?1052:520;
       const height=workspaceExpanded?Math.max(minimum,scroll.clientHeight-10):twoRows?1100:560;
       const firstColumn=Math.max(420,Math.min(width-432,(width-12)*config.split.column));

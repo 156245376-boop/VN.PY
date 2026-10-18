@@ -431,5 +431,12 @@
     return s ? {mode: s.mode, pending: !!s.pending, selected: s.selected, editing: !!s.edit, domain: s.last?.domain,
       drawings: drawings(active, s).map(item => ({type: item.type, points: item.points.map(p => ({...p}))}))} : null;
   }
-  window.QfNativeTools = {attach, render, select, restore, undo, clear, inspect};
+  function cancelInteraction(){
+    const s=states.get(active);if(!s)return false;
+    const used=s.mode!=='pan'||!!s.edit||!!s.pending||!!s.focus||!!s.navigation;
+    stopFocus(s);s.navigation='';cancelEdit(s);s.pending=null;s.preview=null;s.mode='pan';
+    hideMenu(s);finishNative(active);render(active);return used;
+  }
+  function dispose(){cancelInteraction();const s=states.get(active);if(s){s.svg?.remove();s.menu?.remove();s.badge?.remove();}}
+  window.QfNativeTools = {attach, render, select, restore, undo, clear, inspect,cancelInteraction,dispose};
 })();

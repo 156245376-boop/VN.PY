@@ -3,6 +3,24 @@
   if(window.__qfChartLabels)return;
   window.__qfChartLabels=true;
   let catalog=[],scheduled=false,requestedSymbol='',pendingSymbol='',requestedPeriod='1m',revision=0;
+  let paneId='',generation=0,compact=false,disposed=false,lastPeriod='';
+  const periods={close:6e10,'1m':6e10,'5m':3e11,'15m':9e11,'30m':18e11,'1h':36e11,'1d':864e11};
+  const emit=data=>parent.postMessage({...data,pane_id:paneId,generation,revision},qfParentOrigin);
+  function configureView(){
+    const view=document.querySelector('.tq-top-view')?.__vue__;
+    if(!view)return;
+    if(compact){
+      document.documentElement.classList.add('qf-compact');
+      view.rightClosed=true;view.rightClosedWidth=0;view.rightOpenedWidth=0;
+      const home=document.querySelector('.tq-home')?.__vue__;
+      if(home){home.topHeight=Math.max(260,innerHeight);home.bottomHeight=0;home.bottomYOffset=innerHeight;}
+    }
+    if(pendingSymbol){
+      window.QfNativeTools?.cancelInteraction();
+      view.instrumentId=requestedSymbol;view.duration=periods[requestedPeriod];
+      view.mainType=requestedPeriod==='close'?'close':'candle';pendingSymbol='';
+    }
+  }
   const originals=new WeakMap();
   const observer=new MutationObserver(()=>{
     if(scheduled)return;scheduled=true;queueMicrotask(refresh);
@@ -35,37 +53,48 @@
       if(rendered!==node.nodeValue){node.nodeValue=rendered;parent.title=raw.trim()}
       originals.set(node,{raw,rendered});
     }
-    if(pendingSymbol){const button=[...document.querySelectorAll('.subscribed-list button')]
-      .find(item=>item.dataset.qfSymbol===pendingSymbol&&item.dataset.qfPeriod===requestedPeriod);
-      if(button){pendingSymbol='';button.click();}}
+    configureView();
     }finally{observer.observe(document.body,{subtree:true,childList:true,characterData:true});}
   }
   addEventListener('message',event=>{
     if(event.source!==parent||event.origin!==qfParentOrigin)return;
-    if(event.data?.kind==='qf-chart-command'&&event.data.revision===revision){
+    const data=event.data;
+    if(data?.kind==='qf-chart-command'&&data.revision===revision&&
+      (!paneId||(data.pane_id===paneId&&data.generation===generation))){
       const command=event.data.command;
+      if(command==='dispose'){disposed=true;clearInterval(timer);observer.disconnect();window.QfNativeTools?.dispose();return}
+      if(command==='cancel'){window.QfNativeTools?.cancelInteraction();return}
       const ok=command==='year'&&/^\d{4}$/.test(event.data.year||'')?
         window.QfNativeHistory?.jumpToYear(event.data.year):command==='latest'?
         window.QfNativeHistory?.navigateLatest():false;
-      if(!ok)parent.postMessage({kind:'qf-chart-command-failed',revision},qfParentOrigin);
+      if(!ok)emit({kind:'qf-chart-command-failed'});
       return;
     }
     if(event.data?.kind!=='qf-chart-labels')return;
+    if(disposed)return;
+    if(paneId&&(data.pane_id!==paneId||data.generation<generation||
+      data.generation===generation&&data.revision<revision))return;
     if(!Array.isArray(event.data.catalog))return;
     catalog=event.data.catalog.filter(row=>typeof row?.name==='string'&&typeof row?.product==='string'&&typeof row?.exchange==='string');
     revision=Number.isSafeInteger(event.data.revision)?event.data.revision:0;
+    if(/^pane-[1-4]$/.test(data.pane_id||'')&&Number.isSafeInteger(data.generation)){
+      paneId=data.pane_id;generation=data.generation;compact=data.compact===true;}
     const symbol=event.data.symbol;
-    const period=event.data.period==='1d'?'1d':'1m';
+    const period=Object.hasOwn(periods,event.data.period)?event.data.period:'1m';
     if(typeof symbol==='string'&&/^(?:KQ\.m@)?(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{0,4}$/.test(symbol)&&
       (symbol!==requestedSymbol||period!==requestedPeriod)){
-      requestedSymbol=symbol;pendingSymbol=symbol;requestedPeriod=period;}
+      requestedSymbol=symbol;pendingSymbol=symbol;requestedPeriod=period;lastPeriod=period;}
     refresh();
   });
   function reportHistory(){
-    if(!requestedSymbol||!window.QfNativeHistory)return;
+    if(disposed||!requestedSymbol||!window.QfNativeHistory)return;
     try{const result=window.QfNativeHistory.inspect();
-      parent.postMessage({kind:'qf-chart-state',revision,...result},qfParentOrigin);
-    }catch(_){parent.postMessage({kind:'qf-chart-state',revision,status:'unsupported'},qfParentOrigin);}
+      configureView();
+      const view=document.querySelector('.tq-top-view')?.__vue__;
+      const period=view?.mainType==='close'?'close':Object.keys(periods).find(p=>p!=='close'&&periods[p]===view?.duration);
+      if(view?.instrumentId===requestedSymbol&&period&&period!==lastPeriod){lastPeriod=period;emit({kind:'qf-chart-period',period});}
+      emit({kind:'qf-chart-state',...result});
+    }catch(_){emit({kind:'qf-chart-state',status:'unsupported'});}
   }
   addEventListener('DOMContentLoaded',()=>{
     const style=document.createElement('style');
@@ -79,12 +108,20 @@
       .subscribed-list button{height:auto;min-height:26px;white-space:normal;line-height:1.5;padding:5px 7px}
       .subscribed-list button span{white-space:normal}
       #qf-price-unit{position:absolute;left:48px;top:25px;color:#657c70;font-size:10px;line-height:12px;pointer-events:none}`;
+    style.textContent+=`.qf-compact .header-container,.qf-compact .tq-header-view,.qf-compact .bottom-container,.qf-compact .right-view{display:none!important}
+      .qf-compact .top-container{top:0!important}.qf-compact #qf-price-unit{display:none}`;
     document.head.append(style);
     refresh();
     // 此事件仅表明标签脚本已加载；实际 K 线就绪另行核对。
-    parent.postMessage({kind:'qf-chart-ready'},qfParentOrigin);
+    emit({kind:'qf-chart-ready'});
   });
-  setInterval(reportHistory,400);
+  const timer=setInterval(reportHistory,400);
+  addEventListener('resize',configureView);
+  document.addEventListener('mousedown',()=>emit({kind:'qf-chart-activate'}),true);
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'){
+    const used=window.QfNativeTools?.cancelInteraction();event.preventDefault();event.stopImmediatePropagation();
+    if(!used)emit({kind:'qf-chart-escape'});
+  }},true);
   document.addEventListener('click',event=>{
     const button=event.target.closest?.('.subscribed-list button');
     if(!button||!requestedSymbol||button.dataset.qfSymbol===requestedSymbol)return;
@@ -92,8 +129,7 @@
     const continuous=symbol?.replace(/^(?:KQ\.m@)?([A-Z]+\.[A-Za-z]+)\d*$/,'KQ.m@$1');
     if(catalog.some(row=>row.continuous===continuous)){
       event.preventDefault();event.stopImmediatePropagation();
-      parent.postMessage({kind:'qf-chart-selection',revision,continuous,
-        mode:symbol.startsWith('KQ.m@')?'continuous':'actual'},qfParentOrigin);
+      emit({kind:'qf-chart-selection',continuous,mode:symbol.startsWith('KQ.m@')?'continuous':'actual'});
     }
   },true);
 })();

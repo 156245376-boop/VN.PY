@@ -233,3 +233,11 @@ def test_mixed_period_panes_do_not_reload_when_fractional_viewport_settles():
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'WORKSPACE_STABILITY_OK' in result.stdout
+
+
+def test_native_indicator_layers_in_real_webview():
+    result = subprocess.run([sys.executable, '-I', '-B', '-X', 'utf8',
+        str(Path(__file__).with_name('native_indicators_smoke.py'))],
+        capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=40)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'NATIVE_INDICATORS_OK' in result.stdout

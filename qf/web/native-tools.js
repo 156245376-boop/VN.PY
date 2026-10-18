@@ -331,7 +331,9 @@
         const previous = s.last;
         s.domain = [previous.domain[0], previous.domain[0] + (previous.domain[1] - previous.domain[0]) * height / previous.height];
       }
-      const domain = s.domain || automatic;
+      const automaticWithIndicators=validDomain(s.indicatorExtent)?[
+        Math.min(automatic[0],s.indicatorExtent[0]),Math.max(automatic[1],s.indicatorExtent[1])]:automatic;
+      const domain = s.domain || automaticWithIndicators;
       drawRight.call(this, domain);
       if (validDomain(domain) && height > 0) { redrawAxes(chart, domain); s.last = {key, group: viewKey(chart), height, domain: [...domain]}; }
     };
@@ -465,5 +467,6 @@
     if(symbol===active.symbol)render(active);return true;
   }
   window.QfNativeTools = {attach, render, select, restore, undo, clear, inspect,cancelInteraction,dispose,intervals,
+    setIndicatorPriceExtent(chart,extent){const s=states.get(chart);if(s)s.indicatorExtent=validDomain(extent)?extent.slice():null;},
     exportDrawings,applyDrawings,configureShared(prefix){if(!sharedPrefix)sharedPrefix=prefix+'-'+Math.random().toString(36).slice(2,10);}};
 })();

@@ -71,7 +71,7 @@
       data.generation===generation&&data.chart_revision===revision&&data.symbol===requestedSymbol&&data.period===requestedPeriod){
       if(data.kind==='qf-indicator-config'){
         if(!indicatorConfig||indicatorConfig.settings_revision!==data.settings_revision)indicatorEncoded='';
-        indicatorConfig=data;indicatorRenderer?.configure(data.settings,data.enabled);
+        indicatorConfig=data;indicatorRenderer?.configure(data.settings,data.enabled,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});
       }else if(indicatorConfig?.settings_revision===data.settings_revision)indicatorRenderer?.apply(data.result,indicatorConfig.settings);
       return;
     }
@@ -131,7 +131,7 @@
       emit({kind:'qf-chart-state',...result});
       const chart=window.QfNativeHistory.getChart?.();
       if(indicatorConfig&&chart&&chart.symbol===requestedSymbol&&indicatorConfig.enabled){
-        if(window.QfNativeIndicatorRender&&indicatorRenderer?.chart!==chart){indicatorRenderer?.dispose();indicatorRenderer=window.QfNativeIndicatorRender.attach(chart);indicatorRenderer.configure(indicatorConfig.settings,true);}
+        if(window.QfNativeIndicatorRender&&indicatorRenderer?.chart!==chart){indicatorRenderer?.dispose();indicatorRenderer=window.QfNativeIndicatorRender.attach(chart);indicatorRenderer.configure(indicatorConfig.settings,true,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});}
         const data=result.status==='ready'?window.QfNativeIndicatorData.snapshot(chart,indicatorConfig):{issue:'行情或图表数据正在核实'};
         const encoded=JSON.stringify(data);
         if(encoded!==indicatorEncoded){indicatorEncoded=encoded;indicatorSeq++;

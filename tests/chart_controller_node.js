@@ -7,6 +7,10 @@ class E{
     this.clientWidth=1100;this.clientHeight=900;
     this.classList={add(){},remove(){},toggle(){}};}
   append(...nodes){this.children.push(...nodes);}
+  get offsetWidth(){return this.boxWidth??this.clientWidth;}
+  get offsetHeight(){return this.boxHeight??this.clientHeight;}
+  getBoundingClientRect(){return {width:this.rectWidth??this.clientWidth,
+    height:this.rectHeight??this.clientHeight};}
   setAttribute(){}
   querySelector(selector){
     if(selector.startsWith('[data-pane='))return this.children.find(
@@ -23,8 +27,8 @@ global.QfAccountView={create:()=>({update(){},setCollapsed(){}})};
 require('../qf/web/chart-state.js');require('../qf/web/chart-drawings.js');
 require('../qf/web/chart-save.js');require('../qf/web/chart-workspace.js');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-async function fixture(){
-  const root=new E(),config=QfChartState.defaults();config.layout='quad';
+async function fixture(layout='quad'){
+  const root=new E(),config=QfChartState.defaults();config.layout=layout;
   for(const p of config.panes)p.continuous='KQ.m@SHFE.rb';
   const calls=[],saved=[];
   const workspace=QfChartWorkspace.create(root,{config,
@@ -37,6 +41,23 @@ async function fixture(){
   return {root,workspace,calls,saved};
 }
 (async()=>{
+  const fractional=await fixture('columns'),scroll=fractional.root.querySelector('.chart-grid-scroll');
+  Object.assign(scroll,{clientWidth:2509,clientHeight:905,boxWidth:2509,boxHeight:905,
+    rectWidth:2508.6667,rectHeight:904.3125});
+  fractional.root.querySelector('#expand-workspace').onclick();
+  const fractionalGrid=fractional.root.querySelector('.chart-grid');
+  assert.ok(parseFloat(fractionalGrid.style.width)<=2498.6667,
+    '整数 clientWidth 向上取整不能让图表超出小数可用宽度并触发滚动条循环');
+  assert.ok(parseFloat(fractionalGrid.style.height)<=894.3125,
+    '整数 clientHeight 向上取整不能让图表超出小数可用高度');
+  Object.assign(scroll,{clientWidth:2493,clientHeight:890});
+  fractional.root.querySelector('#expand-workspace').onclick();
+  fractional.root.querySelector('#expand-workspace').onclick();
+  assert.ok(parseFloat(fractionalGrid.style.width)<=2482.6667,
+    '已有纵向滚动条时仍须扣除小数取整误差');
+  assert.ok(parseFloat(fractionalGrid.style.height)<=879.3125,
+    '已有横向滚动条时仍须扣除小数取整误差');
+  fractional.workspace.dispose();
   const f=await fixture(),grid=f.root.querySelector('.chart-grid');
   grid.querySelector('[data-pane="pane-2"]').activate();
   const divider=grid.children.find(n=>n.className==='chart-split split-column');

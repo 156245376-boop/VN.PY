@@ -214,3 +214,13 @@ def test_workspace_lifecycle_in_real_webview(tmp_path):
             capture_output=True, text=True, encoding='utf-8', timeout=30)
         assert result.returncode == 0, result.stdout + result.stderr
         assert 'WORKSPACE_LIFECYCLE_OK' in result.stdout
+
+
+def test_mixed_period_panes_do_not_reload_when_fractional_viewport_settles():
+    result = subprocess.run(
+        [sys.executable, '-I', '-B', '-X', 'utf8',
+         str(Path(__file__).with_name('workspace_stability_smoke.py'))],
+        capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=100,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'WORKSPACE_STABILITY_OK' in result.stdout

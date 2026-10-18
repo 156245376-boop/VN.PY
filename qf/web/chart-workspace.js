@@ -95,8 +95,13 @@
       const rowMinimum=ids=>ids.some(id=>S.period(config.panes.find(p=>p.id===id))==='1d')?480:448;
       const topMin=rowMinimum(config.layout==='rows'?ids.slice(0,1):ids.slice(0,2));
       const bottomMin=rowMinimum(config.layout==='rows'?ids.slice(1,2):ids.slice(2,4));
-      const width=Math.max(twoColumns?852:420,scroll.clientWidth-10),minimum=twoRows?topMin+bottomMin+12:Math.max(480,topMin);
-      const height=workspaceExpanded?Math.max(minimum,scroll.clientHeight-10):twoRows?Math.max(960,minimum):560;
+      // clientWidth/Height 会将 DPI 下的小数尺寸取整。按真实边界向下取整，
+      // 扣除已有滚动条，避免不到一像素的溢出反复触发横竖滚动条和重绘。
+      const bounds=scroll.getBoundingClientRect();
+      const availableWidth=Math.floor(bounds.width-scroll.offsetWidth+scroll.clientWidth)-10;
+      const availableHeight=Math.floor(bounds.height-scroll.offsetHeight+scroll.clientHeight)-10;
+      const width=Math.max(twoColumns?852:420,availableWidth),minimum=twoRows?topMin+bottomMin+12:Math.max(480,topMin);
+      const height=workspaceExpanded?Math.max(minimum,availableHeight):twoRows?Math.max(960,minimum):560;
       const firstColumn=Math.max(420,Math.min(width-432,(width-12)*config.split.column));
       const firstRow=Math.max(topMin,Math.min(height-12-bottomMin,(height-12)*config.split.row));
       grid.style.width=width+'px';grid.style.height=height+'px';grid.style.minHeight=minimum+'px';

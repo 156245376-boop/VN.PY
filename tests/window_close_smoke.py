@@ -79,7 +79,7 @@ def exercise():
                 cleanup_done.set()
                 assert window.events.closed.wait(5)
             except Exception as exc:
-                errors.append(str(exc))
+                errors.append(f'{type(exc).__name__} at line {exc.__traceback__.tb_lineno}: {exc}')
             finally:
                 cleanup_done.set()
                 window.create_confirmation_dialog = lambda *args: True

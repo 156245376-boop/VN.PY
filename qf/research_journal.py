@@ -12,7 +12,8 @@ from qf.research_config import decimal_value, public_values
 from qf.trade_risk import RiskState
 
 PAYLOAD_FIELDS = {'signal', 'sizing', 'reason', 'phase', 'price', 'quote_ns', 'cost_source',
-                  'price_tick', 'volume_multiple', 'commission_per_lot', 'margin_per_lot'}
+                  'price_tick', 'volume_multiple', 'commission_per_lot', 'margin_per_lot',
+                  'fill_keys'}
 KINDS = {'signal', 'fill', 'protection', 'intent', 'sealed', 'reconciled', 'skipped', 'stopped'}
 DECIMALS = {'entry_price', 'initial_r', 'stop_price', 'peak_gross'}
 
@@ -41,7 +42,36 @@ def dumps(value):
     return json.dumps(public_values(value), ensure_ascii=False, allow_nan=False)
 
 
+def bar_end_ns(stamp, seconds):
+    return (_get_trading_day_end_time(_get_trading_day_from_timestamp(stamp))
+            if seconds == 86400 else stamp + seconds * 1_000_000_000)
+
+
+def integrity_manifest(db):
+    result = {}
+    for table in ('state', 'research_bars', 'risk_events', 'fills', 'equity', 'orders'):
+        digest, count = hashlib.sha256(), 0
+        query = ("SELECT * FROM state WHERE key!='research_integrity' ORDER BY key"
+                 if table == 'state' else f'SELECT * FROM {table} ORDER BY rowid')
+        for row in db.execute(query):
+            digest.update((dumps(row) + '\n').encode('utf-8'))
+            count += 1
+        result[table] = {'count': count, 'sha256': digest.hexdigest()}
+    return result
+
+
 class ResearchJournal(Journal):
+    @classmethod
+    def create(cls, root, mode, config, metadata=None):
+        journal = super().create(root, mode, config, metadata)
+        journal.set('risk_state', public_values(asdict(RiskState())))
+        return journal
+
+    def checkpoint_integrity(self):
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO state VALUES (?,?)',
+                            ('research_integrity', dumps(integrity_manifest(self.db))))
+
     def __init__(self, path):
         super().__init__(path)
         self.db.executescript('''
@@ -74,6 +104,8 @@ class ResearchJournal(Journal):
             return False
         risk_json = dumps(asdict(risk_state))
         risk_from_dict(json.loads(risk_json))
+        if fills:
+            payload = payload | {'fill_keys': [research_trade_key(fill) for fill in fills]}
         with self.db:
             for fill in fills:
                 self.db.execute('INSERT INTO fills VALUES (?,?,?,?,?,?,?,?)', (
@@ -94,8 +126,7 @@ class ResearchJournal(Journal):
             fields = ('open', 'high', 'low', 'close', 'volume', 'close_oi')
             data = {k: float(row[k]) for k in fields}
             data.update(time_ns=str(stamp), completed=completed)
-            end = (_get_trading_day_end_time(_get_trading_day_from_timestamp(stamp))
-                   if bar_seconds == 86400 else stamp+bar_seconds*1_000_000_000)
+            end = bar_end_ns(stamp, bar_seconds)
             data['end_ns'] = str(end)
             if stamp <= 0 or min(data[k] for k in ('open', 'high', 'low', 'close')) <= 0:
                 raise ValueError('K线无效')
@@ -124,6 +155,7 @@ class ResearchJournal(Journal):
                     offset=offset, next_offset=offset+len(bars))
 
     def export(self):
+        self.checkpoint_integrity()
         tables = ('signals', 'fills', 'orders', 'equity', 'events', 'risk_events', 'research_bars')
         for table in tables:
             cursor = self.db.execute(f'SELECT * FROM {table}')

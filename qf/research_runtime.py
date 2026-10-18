@@ -18,7 +18,7 @@ from qf.journal import PaperLock
 from qf.ma_cross import completed_cross
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
-from qf.research_journal import ResearchJournal, research_trade_key
+from qf.research_journal import ResearchJournal, bar_end_ns, research_trade_key
 from qf.research_results import run_path, summarize_run
 from qf.runtime import (
     check_connections,
@@ -126,6 +126,8 @@ class ResearchLoop:
         self.stopping_flat = False
         self.fee_day = None
         self.previous_day_fee = dec(0)
+        self.last_equity_ns = 0
+        self.trimming_entry = False
         self.total_fee = dec(journal.get('total_commission', 0))
         self.startup_equity = dec(journal.get('initial_equity', config.initial_balance))
 
@@ -170,6 +172,7 @@ class ResearchLoop:
                 self.pending_direction = direction
             return
         self.phase, self.pending_direction = 'exiting', direction
+        self.trimming_entry = False
         self.risk = replace(self.risk, exit_reason=reason)
         self.block_before = now
         self.journal.set('block_before', now)
@@ -196,10 +199,23 @@ class ResearchLoop:
                     self.phase = 'flat'
                     self.pending_since = None
                     self.record('reconciled', now, {'phase': 'flat'}, target=0)
-        elif self.phase == 'entering' and self.risk.quantity == abs(self.target) and not pending:
-            self.risk, self.phase = seal_entry(self.risk), 'holding'
-            self.pending_since = None
-            self.record('sealed', now)
+        elif self.phase == 'entering' and not pending:
+            remaining = abs(self.target) - self.risk.quantity
+            if self.risk.quantity and 0 < remaining < self.spec.min_open_lots:
+                if not self.trimming_entry:
+                    self.trimming_entry = True
+                    self.task.cancel()
+                    self.pending_since = time.monotonic()
+                    self.target = self.risk.side * self.risk.quantity
+                    self.record('intent', now, {'phase': 'entering'}, target=self.target)
+            if (remaining == 0 or self.trimming_entry) and (
+                    not self.trimming_entry or self.task.is_finished()):
+                if self.trimming_entry:
+                    self.task = None
+                    self.target = self.risk.side * self.risk.quantity
+                self.risk, self.phase = seal_entry(self.risk), 'holding'
+                self.pending_since, self.trimming_entry = None, False
+                self.record('sealed', now, target=self.target)
         if self.pending_since and time.monotonic()-self.pending_since > \
                 self.config.execution_timeout_seconds:
             self.guard.freeze('execution_timeout')
@@ -215,15 +231,18 @@ class ResearchLoop:
             self.submit(direction*decision.lots, now)
 
     def equity(self, now):
+        if now < self.last_equity_ns:
+            return
         account = self.api.get_account()
         commission = dec(account.commission)
         day = _get_trading_day_from_timestamp(now)
         if self.fee_day is None:
             self.previous_day_fee = commission if self.paper else dec(0)
-        elif day != self.fee_day:
+        elif day > self.fee_day:
             self.previous_day_fee = dec(0)
         self.total_fee += max(dec(0), commission-self.previous_day_fee)
         self.fee_day, self.previous_day_fee = day, commission
+        self.last_equity_ns = now
         self.journal.set('total_commission', str(self.total_fee))
         self.journal.equity(now, float(account.balance), float(self.total_fee))
 
@@ -255,14 +274,19 @@ class ResearchLoop:
                                       [rows[-1]], completed=False)
         if len(rows) >= self.config.slow_period+2:
             completed = rows[-2]['datetime']
-            if completed > self.last_bar:
+            finished_ns = min(bar_end_ns(completed, self.config.bar_seconds),
+                              rows[-1]['datetime'])
+            ready_ns = max(finished_ns, rows[-1]['datetime'])
+            if completed > self.last_bar and now >= ready_ns:
                 self.journal.capture_bars(self.config.symbol, self.config.bar_seconds, rows[:-1])
                 self.last_bar = completed
                 self.journal.set('last_bar', completed)
                 signal = completed_cross(rows, self.config.fast_period, self.config.slow_period,
-                                         completed_ns=now)
+                                         completed_ns=ready_ns)
+                if signal:
+                    signal = replace(signal, completed_ns=finished_ns)
                 if (signal and completed > minimum_bar and start_ns <= completed <= end_ns
-                        and now > self.block_before and not self.stopping_flat):
+                        and finished_ns > self.block_before and not self.stopping_flat):
                     self.record('signal', now, {'signal': public_values(asdict(signal))})
                     if self.phase == 'flat':
                         direction = signal.direction
@@ -433,5 +457,8 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
         j.set('cancellation_confirmed', confirmed)
         j.export()
         j.close()
-    return dict(run_id=j.path.name, status=status, reason=reason,
-                summary=summarize_run(root, j.path.name))
+    try:
+        summary = summarize_run(root, j.path.name)
+    except ValueError:
+        summary = {'issue': '结果记录不完整，不可可信复盘'}
+    return dict(run_id=j.path.name, status=status, reason=reason, summary=summary)

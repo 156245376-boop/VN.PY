@@ -6,6 +6,7 @@
     sizing:'定仓方式',fixed_lots:'固定手数',risk_budget:'风险预算（元）',stop_ticks:'初始止损（跳）',max_lots:'手数上限',max_margin_ratio:'保证金比例',take_profit_mode:'止盈方式',take_profit_value:'终点止盈',stairs_enabled:'阶梯保护',first_trigger_r:'第一档触发（R）',first_offset_ticks:'第一档偏移（跳）',second_trigger_r:'第二档触发（R）',second_lock_r:'第二档锁利（R）'};
   const fillName=f=>f.direction==='BUY'?(f.offset==='OPEN'?'买开（做多）':'买平（平空）'):(f.offset==='OPEN'?'卖开（做空）':'卖平（平多）');
   const reasonName=r=>({ma_reverse:'双均线反向交叉',initial_stop:'触发初始止损',stair_stop:'触发阶梯保护',take_profit:'达到终点止盈',user_flatten:'用户要求平仓停止'}[r]||'双均线交叉入场');
+  const fillEvent=(events,key)=>events.find(e=>e.kind==='fill'&&e.payload?.fill_keys?.includes(key));
   function time(stamp){try{return new Date(Number(BigInt(stamp)/1000000n)+8*3600000).toISOString().slice(0,19).replace('T',' ');}catch(_){return '时间待核实';}}
   function create(root,api){let current=null,details={fills:[],risk_events:[]},binding=null,queued=null,disposed=false;
     const el=(tag,text)=>{const e=document.createElement(tag);e.textContent=text??'';return e;};
@@ -28,7 +29,7 @@
       if(payload.comparability_warnings?.length)comparison.append(el('p','注意：区间、资金、精度、费用或完成状态不同，请核对可比条件；成本压力回放不是参数A/B实验。'));}
     compareButton.onclick=async()=>{const r=await api.compare_research_runs([...selected]);if(r.ok)compare(r.comparison);else comparison.textContent=r.reason;};
     function showFill(key,focus=true){const f=details.fills.find(f=>f.key===key);if(!f)return;
-      const events=details.risk_events.filter(e=>BigInt(e.time_ns)<=BigInt(f.time_ns)),last=events.at(-1),signal=events.findLast(e=>e.payload?.signal)?.payload.signal;
+      const events=details.risk_events.filter(e=>BigInt(e.time_ns)<=BigInt(f.time_ns)),last=fillEvent(details.risk_events,f.key),signal=events.findLast(e=>e.payload?.signal)?.payload.signal;
       const r=last?.risk||{};reason.textContent=fillName(f)+' · '+time(f.time_ns)+'（北京时间）\n成交：'+number(f.volume)+' 手，价格 '+number(f.price)+'\n原因：'+reasonName(r.exit_reason)+
         '\n初始R：'+number(r.initial_r)+' 元；阶梯：'+(r.stage??'—')+'；保护价：'+number(r.stop_price)+(signal?'\n交叉依据：快线 '+number(signal.fast_current)+'；慢线 '+number(signal.slow_current):'');
       if(binding&&focus)frame.contentWindow.postMessage({kind:'qf-replay-focus',run_id:binding.run_id,revision:binding.revision,fill_id:key},new URL(binding.url).origin);}
@@ -52,5 +53,5 @@
     addEventListener('message',message);refresh().catch(()=>{});
     return {refresh,render,compare,dispose(){disposed=true;removeEventListener('message',message);frame.removeAttribute('src');}};
   }
-  globalThis.QfResearchResults={create,number,precision,fillName};
+  globalThis.QfResearchResults={create,number,precision,fillName,fillEvent};
 })();

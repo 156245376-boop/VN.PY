@@ -7,7 +7,7 @@ from contextlib import closing
 from pathlib import Path
 
 from qf.research_config import decimal_value, public_values, validate_research_config
-from qf.research_journal import risk_from_dict
+from qf.research_journal import integrity_manifest, risk_from_dict
 
 RUN_ID = re.compile(r"\d{8}T\d{6}-[0-9a-f]{12}\Z")
 
@@ -29,13 +29,23 @@ def _read(root, run_id):
         with closing(
             sqlite3.connect((path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)
         ) as db:
+            db.execute('BEGIN')
             state = {k: json.loads(v) for k, v in db.execute("SELECT * FROM state")}
             if state.get("research_schema") != 1:
                 raise ValueError("不支持的实验版本")
             config = validate_research_config(state["config"])
-            if "risk_state" in state:
-                risk_from_dict(state["risk_state"])
+            risk_from_dict(state['risk_state'])
+            if state.get('research_integrity') != integrity_manifest(db):
+                raise ValueError('实验完整性校验失败')
             fills = list(db.execute("SELECT * FROM fills ORDER BY time_ns,rowid"))
+            linked = []
+            for kind, payload, risk in db.execute('SELECT kind,payload,risk FROM risk_events'):
+                risk_from_dict(json.loads(risk))
+                keys = json.loads(payload).get('fill_keys', [])
+                if kind == 'fill':
+                    linked.extend(keys)
+            if sorted(linked) != sorted(row[0] for row in fills):
+                raise ValueError('成交风险关联不完整')
             equity = list(db.execute("SELECT * FROM equity ORDER BY time_ns"))
             actual = state.get("final_positions")
             if actual is not None and (
@@ -66,6 +76,9 @@ def _read(root, run_id):
             span = db.execute(
                 "SELECT min(time_ns),max(time_ns),count(*) FROM research_bars"
             ).fetchone()
+            if db.execute('SELECT 1 FROM research_bars WHERE symbol!=? OR bar_seconds!=?',
+                          (config.symbol, config.bar_seconds)).fetchone():
+                raise ValueError('柱品种或周期不匹配')
     except (OSError, KeyError, TypeError, sqlite3.Error, ValueError):
         raise ValueError("实验文件缺失、版本不支持或记录不完整") from None
     return config, state, fills, equity, span

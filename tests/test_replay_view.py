@@ -15,6 +15,7 @@ def saved_run(root):
         for i in range(40)])
     j.set('status', 'backtest_finished')
     identity = j.path.name
+    j.checkpoint_integrity()
     j.close()
     return identity
 

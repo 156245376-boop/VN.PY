@@ -21,6 +21,7 @@ def test_realized_trade_count_and_open_position_are_distinct(tmp_path):
                     risk_state=replace(entered(), quantity=1),
                     fills=[fill(key='close-1', direction='SELL', offset='CLOSE', volume=1)])
     identity = j.path.name
+    j.checkpoint_integrity()
     j.close()
     result = summarize_run(tmp_path, identity)
     assert result['max_drawdown_amount'] == '11000'
@@ -46,12 +47,14 @@ def test_missing_old_schema_or_foreign_run_never_reads_live_market(tmp_path):
 def test_compare_exposes_precision_and_cost_differences(tmp_path):
     j = journal(tmp_path)
     first = j.path.name
+    j.checkpoint_integrity()
     j.close()
     data = config_data()
     data.update(precision='tick', fast_period=10, slow_period=30)
     j = ResearchJournal.create(tmp_path, 'backtest', data)
     j.set('fee_multiplier', 2)
     second = j.path.name
+    j.checkpoint_integrity()
     j.close()
     comparison = compare_runs(tmp_path, [first, second])
     assert comparison['config_differences']['fast_period'] == [5, 10]

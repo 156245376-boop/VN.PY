@@ -1,6 +1,6 @@
 # 双均线实验与阶梯保护实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 在现有独立工作台中完成可选参数的双均线回测、阶梯保护、实验比较、成交复盘与显式快期模拟。
 
@@ -62,11 +62,11 @@
 - ExperimentStore(root: Path)：save(config: ResearchConfig, *, experiment_id: str|None=None) -> dict、load(experiment_id: str, revision: int) -> ResearchConfig、list() -> list[dict]、copy(experiment_id: str, revision: int, *, name: str) -> dict。
 - 返回引用固定为experiment_id（UUID十六进制）、revision、parent（仅含来源experiment_id/revision或None）；修订不覆盖，写临时文件后原子提交；仅在指定根下读写，不接受网页传路径。
 
-- [ ] **Step 1：写失败测试。** `test_new_config_does_not_change_legacy_period`使用`assert legacy.period == 15`、`assert config.bar_seconds == 300`；`test_config_rejects_unknown_secret_bool_nan_and_invalid_stairs`对password/未知字段、bool手数、非有限金额、fast>=slow及R倍数终点低于第二档使用`with pytest.raises(ValueError)`。`test_copy_is_new_identity_and_revision_is_immutable`保存5/20再复制10/30，使用`assert copied['experiment_id'] != original['experiment_id']`、`assert copied['parent'] == {k: original[k] for k in ('experiment_id', 'revision')}`及`assert store.load(original['experiment_id'], original['revision']).fast_period == 5`；`test_store_rejects_traversal_and_interrupted_write_preserves_previous`覆盖../、绝对路径及模拟写入失败。
-- [ ] **Step 2：运行红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_research_config.py tests/test_experiment_store.py -q`；预期因新模块/接口未实现失败，不能是fixture或环境错误。
-- [ ] **Step 3：实现上述接口。** TOML用标准库读取、显式白名单写入，无新增依赖；draft可未填写风险数值，保存可运行修订必须完整验证。金额终点是否使阶梯不可达依赖实际定仓R，在开仓预览/执行时再次拒绝，不把“元”和R直接比较。
-- [ ] **Step 4：运行绿测及旧配置回归。** 同上并加入tests/test_research_core.py、tests/test_cli.py；预期全部通过。
-- [ ] **Step 5：仅提交本任务文件。** `git add -- qf/research_config.py qf/experiment_store.py tests/test_research_config.py tests/test_experiment_store.py`；`git commit -m "feat: 添加版本化策略实验配置与复制"`。
+- [x] **Step 1：写失败测试。** `test_new_config_does_not_change_legacy_period`使用`assert legacy.period == 15`、`assert config.bar_seconds == 300`；`test_config_rejects_unknown_secret_bool_nan_and_invalid_stairs`对password/未知字段、bool手数、非有限金额、fast>=slow及R倍数终点低于第二档使用`with pytest.raises(ValueError)`。`test_copy_is_new_identity_and_revision_is_immutable`保存5/20再复制10/30，使用`assert copied['experiment_id'] != original['experiment_id']`、`assert copied['parent'] == {k: original[k] for k in ('experiment_id', 'revision')}`及`assert store.load(original['experiment_id'], original['revision']).fast_period == 5`；`test_store_rejects_traversal_and_interrupted_write_preserves_previous`覆盖../、绝对路径及模拟写入失败。
+- [x] **Step 2：运行红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_research_config.py tests/test_experiment_store.py -q`；预期因新模块/接口未实现失败，不能是fixture或环境错误。
+- [x] **Step 3：实现上述接口。** TOML用标准库读取、显式白名单写入，无新增依赖；draft可未填写风险数值，保存可运行修订必须完整验证。金额终点是否使阶梯不可达依赖实际定仓R，在开仓预览/执行时再次拒绝，不把“元”和R直接比较。
+- [x] **Step 4：运行绿测及旧配置回归。** 同上并加入tests/test_research_core.py、tests/test_cli.py；预期全部通过。
+- [x] **Step 5：仅提交本任务文件。** `git add -- qf/research_config.py qf/experiment_store.py tests/test_research_config.py tests/test_experiment_store.py`；`git commit -m "feat: 添加版本化策略实验配置与复制"`。
 
 ### Task 2：双均线、定仓和多空对称的阶梯保护
 
@@ -81,12 +81,12 @@
 - apply_entry_fill(state: RiskState, *, side: int, price: Decimal, quantity: int, time_ns: int, risk: RiskConfig, spec: ContractSpec, trade_id: str) -> RiskState；seal_entry(state: RiskState) -> RiskState。
 - protect(state: RiskState, *, price: Decimal, time_ns: int, risk: RiskConfig, spec: ContractSpec) -> RiskState；纯函数只产生状态，exit_reason为None/initial_stop/stair_stop/take_profit；同时间价更新可检查保护，time_ns更旧则拒绝行情更新，成交独立处理。
 
-- [ ] **Step 1：写失败测试。** `test_cross_uses_two_completed_windows_not_live_bar`用相等→上穿、相等→下穿及恶意末柱验证±1与不受形成柱影响；`test_warmup_duplicate_time_invalid_price_yields_no_signal`覆盖slow+1已完成预热。定仓测试断言每手300/预算1000→3手/R900/3R2700；不足一手→0，最小2手不可上凑，保证金上限不会随盈利增长。
+- [x] **Step 1：写失败测试。** `test_cross_uses_two_completed_windows_not_live_bar`用相等→上穿、相等→下穿及恶意末柱验证±1与不受形成柱影响；`test_warmup_duplicate_time_invalid_price_yields_no_signal`覆盖slow+1已完成预热。定仓测试断言每手300/预算1000→3手/R900/3R2700；不足一手→0，最小2手不可上凑，保证金上限不会随盈利增长。
   `test_long_short_staircases_exact_thresholds`设tick=1、乘数10、2手、止损50跳、E=1000，R=1000；多头1050→`assert state.stop_price == Decimal('1001')`，1100→`assert state.stop_price == Decimal('1025')`，1150→`assert state.exit_reason == 'take_profit'`；空头950→999、900→975、850→退出。`test_gap_rounding_stale_quote_and_same_time_quote`验证跳档、只收紧、半跳取整、旧报价及早于最新成交的报价不抬保护、同时间后到成交不丢；`test_partial_fill_does_not_relax_stop_or_change_sealed_r`验证入场补充成交不放宽，封存后拒绝加仓。
-- [ ] **Step 2：运行红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_ma_cross.py tests/test_trade_risk.py -q`；预期缺少新接口的失败。
-- [ ] **Step 3：实现纯函数。** 阶梯、初始止损和终点在每次有效报价评估；新保护越过当前价格立即退出；固定金额与R终点择一，按实际R拒绝不可达阶梯。保护取整用Decimal整跳，多头向下/空头向上；所有状态保留真实时间，费用不计入毛R。apply_entry_fill仅允许同方向入场，首次成交即建保护，封存后仅由退出成交减少仓位（任务3处理）。
-- [ ] **Step 4：绿测。** 同上并加入tests/test_research_core.py；预期全部通过，现有单均线输出不变。
-- [ ] **Step 5：提交。** `git add -- qf/ma_cross.py qf/trade_risk.py tests/test_ma_cross.py tests/test_trade_risk.py`；`git commit -m "feat: 实现双均线信号与阶梯风险计算"`。
+- [x] **Step 2：运行红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_ma_cross.py tests/test_trade_risk.py -q`；预期缺少新接口的失败。
+- [x] **Step 3：实现纯函数。** 阶梯、初始止损和终点在每次有效报价评估；新保护越过当前价格立即退出；固定金额与R终点择一，按实际R拒绝不可达阶梯。保护取整用Decimal整跳，多头向下/空头向上；所有状态保留真实时间，费用不计入毛R。apply_entry_fill仅允许同方向入场，首次成交即建保护，封存后仅由退出成交减少仓位（任务3处理）。
+- [x] **Step 4：绿测。** 同上并加入tests/test_research_core.py；预期全部通过，现有单均线输出不变。
+- [x] **Step 5：提交。** `git add -- qf/ma_cross.py qf/trade_risk.py tests/test_ma_cross.py tests/test_trade_risk.py`；`git commit -m "feat: 实现双均线信号与阶梯风险计算"`。
 
 ### Task 3：成交与风险的事务记录、结果统计和比较
 
@@ -100,11 +100,11 @@
 - read_run(root: Path, run_id: str) -> dict、summarize_run(root: Path, run_id: str) -> dict、compare_runs(root: Path, run_ids: list[str]) -> dict位于research_results.py；run_id复用既有正则，schema/字段/数值白名单校验，错误为受限reason。
 - 报告字段：status、reason、precision、coverage、gross_pnl、net_pnl、commission、max_drawdown_amount、max_drawdown_pct、fill_count、closed_trade_count、open_position；权益balance已含手续费时净收益直接balance-initial，毛收益=净收益+commission，禁止重复扣费。比较返回items、config_differences、comparability_warnings。
 
-- [ ] **Step 1：写失败测试。** `test_fill_risk_and_exit_intent_commit_atomically`在事务中注入写失败，使用`assert journal.expected_position() == 0`、`assert journal.load_risk() == before`断言全回滚；重复成交key不同event_id也不增加仓位，原始trade_id相同但不同交易日的有效成交均保留。`test_two_protection_events_in_one_minute_are_retained`断言1R、2R同一分钟分别记录。`test_realized_trade_count_and_open_position_are_distinct`覆盖部分平仓/末尾持仓；权益[100000,110000,99000]使用`assert summary['max_drawdown_amount'] == '11000'`、`assert summary['max_drawdown_pct'] == '10'`，费用只计一次。`test_missing_old_schema_or_foreign_run_never_reads_live_market`断言无文件、未知版本、错误run_id明确失败；`test_compare_exposes_precision_and_cost_differences`断言A/B与双费类别分开。
-- [ ] **Step 2：红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_research_journal.py tests/test_research_results.py -q`；预期接口尚未实现失败。
-- [ ] **Step 3：实现接口和增量schema。** 新增risk_events、research_bars、research_run状态，不把quote风控塞进旧signals主键。处理成交时先验证ownership和去重，reduce实际仓位后在同一事务提交；跨平仓成交保留entry锚点和初始R，所有业务事件是白名单。比较最多选两个run_id，关闭后只从本机记录读取，不连接SDK补数据。
-- [ ] **Step 4：绿测。** 同上加入tests/test_runtime_safety.py；预期旧Journal/Guard去重及恢复测试继续通过。
-- [ ] **Step 5：提交。** `git add -- qf/research_journal.py qf/research_results.py qf/journal.py qf/trade_risk.py tests/test_research_journal.py tests/test_research_results.py`；`git commit -m "feat: 持久记录策略风险与实验比较结果"`。
+- [x] **Step 1：写失败测试。** `test_fill_risk_and_exit_intent_commit_atomically`在事务中注入写失败，使用`assert journal.expected_position() == 0`、`assert journal.load_risk() == before`断言全回滚；重复成交key不同event_id也不增加仓位，原始trade_id相同但不同交易日的有效成交均保留。`test_two_protection_events_in_one_minute_are_retained`断言1R、2R同一分钟分别记录。`test_realized_trade_count_and_open_position_are_distinct`覆盖部分平仓/末尾持仓；权益[100000,110000,99000]使用`assert summary['max_drawdown_amount'] == '11000'`、`assert summary['max_drawdown_pct'] == '10'`，费用只计一次。`test_missing_old_schema_or_foreign_run_never_reads_live_market`断言无文件、未知版本、错误run_id明确失败；`test_compare_exposes_precision_and_cost_differences`断言A/B与双费类别分开。
+- [x] **Step 2：红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_research_journal.py tests/test_research_results.py -q`；预期接口尚未实现失败。
+- [x] **Step 3：实现接口和增量schema。** 新增risk_events、research_bars、research_run状态，不把quote风控塞进旧signals主键。处理成交时先验证ownership和去重，reduce实际仓位后在同一事务提交；跨平仓成交保留entry锚点和初始R，所有业务事件是白名单。比较最多选两个run_id，关闭后只从本机记录读取，不连接SDK补数据。
+- [x] **Step 4：绿测。** 同上加入tests/test_runtime_safety.py；预期旧Journal/Guard去重及恢复测试继续通过。
+- [x] **Step 5：提交。** `git add -- qf/research_journal.py qf/research_results.py qf/journal.py qf/trade_risk.py tests/test_research_journal.py tests/test_research_results.py`；`git commit -m "feat: 持久记录策略风险与实验比较结果"`。
 
 ### Task 4：受限多空执行与真实SDK事件顺序
 
@@ -116,15 +116,15 @@
 - execute_research(mode: str, config: ResearchConfig, root: Path, credentials: tuple[str,str], *, sdk=None, activate=False, resume: str|None=None, fee_multiplier=1, stop_requested: Callable[[],bool], flatten_requested: Callable[[],bool], progress: Callable|None=None) -> dict；mode仅backtest/paper。
 - 输出包含run_id、status、reason及任务3摘要引用；默认只跑一次基准，双费由调用端作为独立关联实验启动，旧runtime.execute仍默认原两轮行为。
 
-- [ ] **Step 1：写失败测试。** `test_legacy_guard_stays_one_lot_long_only`保留旧拒绝；`test_scoped_guard_counts_pending_open_volume_and_net_short`覆盖多空手数、在途开仓和双向仓；固定target=3不能每次发3手累加超限。`test_risk_runs_on_quote_without_new_bar`同一分钟先1R再2R并回撤，断言退出只一次。`test_partial_entry_stop_cancels_then_reconciles_late_fill`模拟2/3手成交、触发、撤单期间再成交1手，断言最终退出3手且无反向开仓。`test_reverse_waits_for_flat_and_no_orders`断言先target0、确认空仓后才负目标。
+- [x] **Step 1：写失败测试。** `test_legacy_guard_stays_one_lot_long_only`保留旧拒绝；`test_scoped_guard_counts_pending_open_volume_and_net_short`覆盖多空手数、在途开仓和双向仓；固定target=3不能每次发3手累加超限。`test_risk_runs_on_quote_without_new_bar`同一分钟先1R再2R并回撤，断言退出只一次。`test_partial_entry_stop_cancels_then_reconciles_late_fill`模拟2/3手成交、触发、撤单期间再成交1手，断言最终退出3手且无反向开仓。`test_reverse_waits_for_flat_and_no_orders`断言先target0、确认空仓后才负目标。
   `test_tick_denied_does_not_change_precision_contract_or_account`使用`assert result['status'] == 'failed'`且`assert subscriptions == [('tick', config.symbol)]`核实无降级；`test_minute_subscription_exists_with_hourly_signal`断言一分钟报价+小时信号独立。`test_resume_missing_risk_external_order_disconnect_and_expiry_freeze`覆盖既有边界；`test_close_unconfirmed_does_not_report_flat`断言未决暴露保留。`test_provenance_hash_includes_research_frontend`在临时根修改research.js后断言`assert before['source_sha256'] != after['source_sha256']`。
-- [ ] **Step 2：红测并核实SDK。** 运行`.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_research_runtime.py tests/test_research_execution.py -q`预期失败；只读检查本机get_tick_serial、query_quotes、TargetPosTask.cancel/is_finished、最小开仓支持、已完成柱时间/交易日边界。禁止调用真实TqApi进行离线探测。
-- [ ] **Step 3：实现运行编排。** 复用tracked_api、provenance、连接/超时核对、PaperLock；先消费所有新成交并提交风险，再核对仓位/挂单，再处理行情保护，最后处理新完成柱。SDK报单入口再次核对Guard；先持久化目标，后set_target_volume。部分入场触发退出时cancel旧任务、等确认、重核在途成交，旧任务结束后才创建退出任务，始终只有一个活动任务；不是cancel即平仓。
+- [x] **Step 2：红测并核实SDK。** 运行`.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_research_runtime.py tests/test_research_execution.py -q`预期失败；只读检查本机get_tick_serial、query_quotes、TargetPosTask.cancel/is_finished、最小开仓支持、已完成柱时间/交易日边界。禁止调用真实TqApi进行离线探测。
+- [x] **Step 3：实现运行编排。** 复用tracked_api、provenance、连接/超时核对、PaperLock；先消费所有新成交并提交风险，再核对仓位/挂单，再处理行情保护，最后处理新完成柱。SDK报单入口再次核对Guard；先持久化目标，后set_target_volume。部分入场触发退出时cancel旧任务、等确认、重核在途成交，旧任务结束后才创建退出任务，始终只有一个活动任务；不是cancel即平仓。
   新TargetPosTask使用offset_priority="今,昨,开"保证今仓、昨仓、开仓顺序等待，避免同轮拆分平仓撞上单挂单保护；tests/test_research_execution.py用今仓1手/昨仓1手验证完整退出。最小开仓参数按本机support_open_min_volume能力显式核实和传入，不能忽略构造失败或改用手工报单。
   新阶段明确flat/entering/holding/exiting/frozen/stopped，退出状态只允许减仓，实际空仓且无挂单才结束。记录trigger完成时刻，防止旧交叉重开；等待反向开仓期间方向以最新交叉为准。临近到期沿用旧规则；主力变化只冻结新目标，不自动换月。断线后停止继续报单，不声称离线保护仍有效。
   分钟模式显式订60秒报价来源，信号周期独立；Tick模式显式订Tick并核实返回时间和权限。数据不覆盖/坏序列明确失败。回测起止使用TqBacktest交易日边界及预热，禁止界外委托；期末剩仓只估值不造平仓。provenance增加qf/web递归源码清单及新实验配置版本，不扫描凭证、本机数据或虚拟环境。停机不需无限等待，用execution_timeout_seconds结束等待并保留frozen原因；恢复须同日、干净停止、账户绑定、代码/配置和风险状态全核对，无待应用意图。
-- [ ] **Step 4：绿测及真实协程边界。** 同上加入tests/test_real_sdk_boundary.py、tests/test_sdk_loop.py、tests/test_runtime_safety.py；离线真实InsertOrderTask验证BUY/SELL OPEN与CLOSE/CLOSETODAY、位置参数和on_fill事务路径，所有测试不连账户；预期全通过。
-- [ ] **Step 5：提交。** `git add -- qf/research_runtime.py qf/safety.py qf/runtime.py tests/test_research_runtime.py tests/test_research_execution.py tests/test_real_sdk_boundary.py`；`git commit -m "feat: 接入多空回测与受限模拟阶梯执行"`。
+- [x] **Step 4：绿测及真实协程边界。** 同上加入tests/test_real_sdk_boundary.py、tests/test_sdk_loop.py、tests/test_runtime_safety.py；离线真实InsertOrderTask验证BUY/SELL OPEN与CLOSE/CLOSETODAY、位置参数和on_fill事务路径，所有测试不连账户；预期全通过。
+- [x] **Step 5：提交。** `git add -- qf/research_runtime.py qf/safety.py qf/runtime.py tests/test_research_runtime.py tests/test_research_execution.py tests/test_real_sdk_boundary.py`；`git commit -m "feat: 接入多空回测与受限模拟阶梯执行"`。
 
 ### Task 5：工作台实验表单、后台会话与模拟控制
 
@@ -136,12 +136,12 @@
 - 页面QfResearchForm.create(root, options)返回read()/render(config)/setRunning(bool)/dispose()；QfResearch.create(root, api)返回show(view)/prepareExit()/dispose()。不从行情轮询重复重建研究表单。
 - 研究运行读取已有Windows凭证或当前内存凭证，不将已保存密码发回网页，不依靠点击启动自动连接/激活模拟。
 
-- [ ] **Step 1：写失败测试。** `test_double_start_and_draft_edit_cannot_mutate_run`用阻塞execute_fn验证`assert len(calls) == 1`、`assert calls[0].config == original_config`；`test_bridge_rejects_live_traversal_foreign_contract_and_secret_fields`断言仅允许选定目录/合约、backtest/paper及安全ID。`test_saved_login_is_not_returned_and_paper_requires_activate`使用`assert password not in json.dumps(snapshot)`，默认观察；`test_close_with_pending_position_finishes_without_claiming_flat`断言一次关闭确认、后台超时后可退出并保留frozen。Node测试断言中文标签、风险输入切换、实际R预览、2倍费用可选、三个独立导航、已保存配置加载不启动。
-- [ ] **Step 2：红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_research_session.py tests/test_research_bridge.py tests/test_research_ui.py -q`；test_research_ui.py复用现有Node查找/执行方式跑research_form_node.js，预期缺少研究接口失败。
-- [ ] **Step 3：实现接口与页面。** 保存按钮只保存配置；回测只创建选定修订的run；模拟明确显示TqKq、服务端权益、观察/允许委托状态，启动委托前用户需明确确认。提供停止与“平仓并停止”，关闭确认文字包含仓位与保护停止影响。旧研究按钮仍可用，旧研究与本窗口通过同一PaperLock互斥。
+- [x] **Step 1：写失败测试。** `test_double_start_and_draft_edit_cannot_mutate_run`用阻塞execute_fn验证`assert len(calls) == 1`、`assert calls[0].config == original_config`；`test_bridge_rejects_live_traversal_foreign_contract_and_secret_fields`断言仅允许选定目录/合约、backtest/paper及安全ID。`test_saved_login_is_not_returned_and_paper_requires_activate`使用`assert password not in json.dumps(snapshot)`，默认观察；`test_close_with_pending_position_finishes_without_claiming_flat`断言一次关闭确认、后台超时后可退出并保留frozen。Node测试断言中文标签、风险输入切换、实际R预览、2倍费用可选、三个独立导航、已保存配置加载不启动。
+- [x] **Step 2：红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_research_session.py tests/test_research_bridge.py tests/test_research_ui.py -q`；test_research_ui.py复用现有Node查找/执行方式跑research_form_node.js，预期缺少研究接口失败。
+- [x] **Step 3：实现接口与页面。** 保存按钮只保存配置；回测只创建选定修订的run；模拟明确显示TqKq、服务端权益、观察/允许委托状态，启动委托前用户需明确确认。提供停止与“平仓并停止”，关闭确认文字包含仓位与保护停止影响。旧研究按钮仍可用，旧研究与本窗口通过同一PaperLock互斥。
   报价单位、跳数对应金额、实际R和止盈预览来源必须可见，缺参数显示待核实；服务端发现不可信价格/成本再次拒绝，不能只信浏览器校验。stop/close在后台等待，页面退出后停止研究轮询；Worker迟到消息带run_id/revision，不能覆写另一个实验。研究失败不清空行情图或已完成结果。
-- [ ] **Step 4：绿测及已有关闭回归。** 同上加入tests/test_workbench.py、tests/test_window_host.py、tests/test_market_shutdown.py；预期全通过。真实WebView验收留任务7串行运行。
-- [ ] **Step 5：提交。** 仅git add上述Files中本任务实际修改文件；`git commit -m "feat: 添加双均线实验表单与模拟运行控制"`。
+- [x] **Step 4：绿测及已有关闭回归。** 同上加入tests/test_workbench.py、tests/test_window_host.py、tests/test_market_shutdown.py；预期全通过。真实WebView验收留任务7串行运行。
+- [x] **Step 5：提交。** 仅git add上述Files中本任务实际修改文件；`git commit -m "feat: 添加双均线实验表单与模拟运行控制"`。
 
 ### Task 6：成交复盘、保护线、结果比较与离线重开
 
@@ -153,12 +153,12 @@
 - QfNativeReplay.attach(chart, options)返回apply(payload)/focusFill(fill_id)/dispose()；payload固定run_id、revision、symbol、bar_seconds、bars、signals、fills、risk_events、coverage、precision，ns为字符串。只接受同run_id/revision且来源匹配的消息。
 - QfResearchResults.create(root, api)返回render(summary)/compare(payload)/dispose()；成交点击调用focusFill，按真实成交时间定位所属K线并显示独立价格/成交量/方向/决策原因，不按记录序号猜日期。
 
-- [ ] **Step 1：写失败测试。** `test_replay_opens_without_sdk_or_credentials`使用合成已存结果，用`assert url.startswith('http://127.0.0.1:')`及`api_constructor.assert_not_called()`证明无会话。`test_replay_rejects_path_traversal_old_schema_and_missing_bars`验证白名单和明确失败。Node断言两均线、成交箭头和保护分段共享同一真实坐标；`test_stale_replay_message_and_script_names_do_not_execute`验证旧run消息丢弃，名称用textContent显示。断线区间没有虚拟连接线，窗口尺寸改变不重开服务/重置视图。
-- [ ] **Step 2：红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_replay_view.py tests/test_research_ui.py -q`；预期缺少回放服务/渲染接口失败，不使用公网。
-- [ ] **Step 3：实现原生图表适配。** 参考tests/window_smoke.py的已验证离线klines协议，但生产实现不得import测试。服务只提供SDK原生静态资源和已存数据；大量数据按已有柱范围分页，以实际time/id映射，不能截断后宣称完整覆盖。native-replay.js复用chart/board/坐标和SVG覆盖层，点击命中真实成交，展示均线决策值与风险事件。保护路径在状态不可信/停机后断开；价格轴与数据时间保持现有约定。
+- [x] **Step 1：写失败测试。** `test_replay_opens_without_sdk_or_credentials`使用合成已存结果，用`assert url.startswith('http://127.0.0.1:')`及`api_constructor.assert_not_called()`证明无会话。`test_replay_rejects_path_traversal_old_schema_and_missing_bars`验证白名单和明确失败。Node断言两均线、成交箭头和保护分段共享同一真实坐标；`test_stale_replay_message_and_script_names_do_not_execute`验证旧run消息丢弃，名称用textContent显示。断线区间没有虚拟连接线，窗口尺寸改变不重开服务/重置视图。
+- [x] **Step 2：红测。** `.\.venv-tqsdk\Scripts\python.exe -I -B -m pytest tests/test_replay_view.py tests/test_research_ui.py -q`；预期缺少回放服务/渲染接口失败，不使用公网。
+- [x] **Step 3：实现原生图表适配。** 参考tests/window_smoke.py的已验证离线klines协议，但生产实现不得import测试。服务只提供SDK原生静态资源和已存数据；大量数据按已有柱范围分页，以实际time/id映射，不能截断后宣称完整覆盖。native-replay.js复用chart/board/坐标和SVG覆盖层，点击命中真实成交，展示均线决策值与风险事件。保护路径在状态不可信/停机后断开；价格轴与数据时间保持现有约定。
   结果页基准与成本压力分别标记，比较两个run的参数差异、收益、费用、回撤和期末暴露。关闭实验再打开读取同一SQLite数据；无记录明确提示，不连账户、不静默修复坏结果。关闭回放服务不关闭行情/研究会话。
-- [ ] **Step 4：绿测。** 同上并加入tests/test_native_history.py、tests/test_native_tools.py、tests/test_research_results.py；预期全部通过。
-- [ ] **Step 5：提交。** 仅git add本任务Files中实际修改文件；`git commit -m "feat: 添加本机成交复盘与实验结果比较"`。
+- [x] **Step 4：绿测。** 同上并加入tests/test_native_history.py、tests/test_native_tools.py、tests/test_research_results.py；预期全部通过。
+- [x] **Step 5：提交。** 仅git add本任务Files中实际修改文件；`git commit -m "feat: 添加本机成交复盘与实验结果比较"`。
 
 ### Task 7：完整操作验收、故障演练和中文使用说明
 

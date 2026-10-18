@@ -12,6 +12,25 @@ from qf.volume_profile import calculate_volume_profile
 ROW_KEYS = {'id', 'time_ns', 'open', 'high', 'low', 'close', 'volume', 'close_oi'}
 
 
+def bar_intervals(rows, period):
+    day, hour = 86400_000_000_000, 3600_000_000_000
+    duration = {'close': 60, '1m': 60, '5m': 300, '15m': 900,
+                '30m': 1800, '1h': 3600, '1d': 86400}[period]*1_000_000_000
+    bounds = []
+    for row in rows:
+        stamp = int(row['time_ns'])
+        start, end = stamp, stamp+duration
+        if period == '1d':
+            start, end = stamp-6*hour, stamp+18*hour
+            weekday = ((start+8*hour)//day+3) % 7
+            if weekday >= 5:
+                start -= (weekday-4)*day
+        bounds.append([start, end])
+    for i in range(len(bounds)-1):
+        bounds[i][1] = min(bounds[i][1], bounds[i+1][0])
+    return bounds
+
+
 def validate_rows(rows):
     if not isinstance(rows, list) or not 1 <= len(rows) <= 20000:
         raise ValueError('输入须为 1–20000 根柱')
@@ -37,6 +56,7 @@ def calculate_indicators(request: dict) -> dict:
     rows = validate_rows(request['rows'])
     items = [validate_item(i) for i in request['items']]
     frame = pd.DataFrame(rows)
+    intervals = bar_intervals(rows, request['period'])
     result = {'series': [], 'profiles': [], 'issues': [],
               'calculation_start_ns': rows[0]['time_ns'],
               'warmup': '按实际已加载数据计算；首段可能不足预热；OBV 从该起点累计'}
@@ -49,19 +69,23 @@ def calculate_indicators(request: dict) -> dict:
                 wanted = p['range'] if p['mode'] == 'fixed' else None
                 if p['mode'] == 'fixed' and (not wanted or wanted['symbol'] != request['symbol']):
                     raise ValueError('请为本合约重新选择 VP 区间')
-                selected = [r for r in rows if (int(wanted['start_ns']) <= int(r['time_ns'])
-                            < int(wanted['end_ns']))] if wanted else [
+                selected = [r for r, bounds in zip(rows, intervals, strict=True)
+                            if bounds[1] > int(wanted['start_ns'])
+                            and bounds[0] < int(wanted['end_ns'])] if wanted else [
                                 r for r in rows if
                                 request['visible'][0] <= r['id'] <= request['visible'][1]]
                 if not selected:
                     raise ValueError('所选范围尚未完整加载')
-                end = int(rows[-1]['time_ns'])+60_000_000_000
-                if wanted and (int(wanted['start_ns']) < int(rows[0]['time_ns'])
-                               or int(wanted['end_ns']) > request.get('coverage_end_ns', end)):
+                end = min(intervals[-1][1], int(request.get('coverage_end_ns', intervals[-1][1])))
+                if wanted and (int(wanted['start_ns']) < intervals[0][0]
+                               or int(wanted['end_ns']) > end):
                     raise ValueError('所选范围尚未完整加载')
                 value = calculate_volume_profile(selected, p, request['price_tick'])
                 result['profiles'].append({'item_id': item['id'], 'period': request['period'],
-                    'start_ns': selected[0]['time_ns'], 'end_ns': selected[-1]['time_ns'], **value})
+                    'start_ns': str(wanted['start_ns'] if wanted else
+                                    intervals[selected[0]['id']-rows[0]['id']][0]),
+                    'end_ns': str(wanted['end_ns'] if wanted else
+                                  intervals[selected[-1]['id']-rows[0]['id']][1]), **value})
                 continue
             if kind in ('volume', 'oi'):
                 output = pd.DataFrame({kind: frame['volume' if kind == 'volume' else 'close_oi']})

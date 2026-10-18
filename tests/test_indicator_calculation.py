@@ -1,4 +1,5 @@
 import math
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import pytest
@@ -65,3 +66,33 @@ def test_parameter_key_order_cannot_change_formula():
     original = calculate_indicators(request(rows, [item]))
     item['params'] = {'m': 9, 'long': 26, 'short': 12}
     assert calculate_indicators(request(rows, [item])) == original
+
+
+def test_fixed_profile_uses_full_loaded_intervals_and_isolates_missing_range():
+    rows = bars(4)
+    vp = default_item('vp', 'vp-fixed')
+    vp['params'].update(mode='fixed', range={'symbol': 'SHFE.rb2701',
+        'start_ns': rows[0]['time_ns'],
+        'end_ns': str(int(rows[1]['time_ns'])+60_000_000_000)})
+    data = request(rows, [vp, default_item('ma')])
+    data['coverage_end_ns'] = str(int(rows[-1]['time_ns'])+60_000_000_000)
+    result = calculate_indicators(data)
+    assert result['profiles'][0]['total_volume'] == 3
+    vp['params']['range']['end_ns'] = str(int(data['coverage_end_ns'])+60_000_000_000)
+    result = calculate_indicators(data)
+    assert not result['profiles'] and result['issues']
+    assert result['series'], '固定区间缺失不能停止其他指标'
+
+
+def test_monday_daily_bar_includes_friday_night_range():
+    def stamp(day, hour):
+        return str(int(datetime(2026, 10, day, hour, tzinfo=timezone(
+            timedelta(hours=8))).timestamp())*1_000_000_000)
+    rows = bars(1)
+    rows[0]['time_ns'] = stamp(19, 0)
+    vp = default_item('vp', 'vp-fixed')
+    vp['params'].update(mode='fixed', range={'symbol': 'SHFE.rb2701',
+                                           'start_ns': stamp(16, 21),
+                                           'end_ns': stamp(17, 2)})
+    data = request(rows, [vp]) | {'period': '1d', 'coverage_end_ns': stamp(19, 18)}
+    assert calculate_indicators(data)['profiles'][0]['total_volume'] == 1

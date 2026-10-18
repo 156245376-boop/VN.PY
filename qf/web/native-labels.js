@@ -7,7 +7,7 @@
   let sharedRequested='';
   let repairAt=0;
   let measuredWidth=0,measuredHeight=0;
-  let indicatorConfig=null,indicatorEncoded='',indicatorSeq=0,indicatorRenderer=null;
+  let indicatorConfig=null,indicatorEncoded='',indicatorSeq=0,indicatorRenderer=null,vpRanges=null;
   const indicatorSession=Math.random().toString(36).slice(2,12);
   const periods={close:6e10,'1m':6e10,'5m':3e11,'15m':9e11,'30m':18e11,'1h':36e11,'1d':864e11};
   const emit=data=>parent.postMessage({...data,pane_id:paneId,generation,revision},qfParentOrigin);
@@ -67,11 +67,14 @@
   addEventListener('message',event=>{
     if(event.source!==parent||event.origin!==qfParentOrigin)return;
     const data=event.data;
+    if(data?.kind==='qf-vp-range-command'&&data.pane_id===paneId&&data.generation===generation&&data.chart_revision===revision&&data.symbol===requestedSymbol&&data.period===requestedPeriod&&indicatorConfig?.settings_revision===data.settings_revision){
+      if(data.command==='begin')vpRanges?.begin(data.item_id);else if(data.command==='locate')vpRanges?.locate(data.item_id);else if(data.command==='cancel')vpRanges?.cancel();return;}
     if(['qf-indicator-config','qf-indicator-result'].includes(data?.kind)&&data.pane_id===paneId&&
       data.generation===generation&&data.chart_revision===revision&&data.symbol===requestedSymbol&&data.period===requestedPeriod){
       if(data.kind==='qf-indicator-config'){
         if(!indicatorConfig||indicatorConfig.settings_revision!==data.settings_revision)indicatorEncoded='';
         indicatorConfig=data;indicatorRenderer?.configure(data.settings,data.enabled,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});
+        vpRanges?.configure(data.enabled?data.settings.items:[]);
       }else if(indicatorConfig?.settings_revision===data.settings_revision)indicatorRenderer?.apply(data.result,indicatorConfig.settings);
       return;
     }
@@ -81,7 +84,7 @@
     if(data?.kind==='qf-chart-command'&&data.revision===revision&&
       (!paneId||(data.pane_id===paneId&&data.generation===generation))){
       const command=event.data.command;
-      if(command==='dispose'){disposed=true;clearInterval(timer);observer.disconnect();indicatorRenderer?.dispose();window.QfNativeTools?.dispose();return}
+      if(command==='dispose'){disposed=true;clearInterval(timer);observer.disconnect();vpRanges?.dispose();indicatorRenderer?.dispose();window.QfNativeTools?.dispose();return}
       if(command==='cancel'){window.QfNativeTools?.cancelInteraction();return}
       const ok=command==='year'&&/^\d{4}$/.test(event.data.year||'')?
         window.QfNativeHistory?.jumpToYear(event.data.year):command==='latest'?
@@ -131,7 +134,8 @@
       emit({kind:'qf-chart-state',...result});
       const chart=window.QfNativeHistory.getChart?.();
       if(indicatorConfig&&chart&&chart.symbol===requestedSymbol&&indicatorConfig.enabled){
-        if(window.QfNativeIndicatorRender&&indicatorRenderer?.chart!==chart){indicatorRenderer?.dispose();indicatorRenderer=window.QfNativeIndicatorRender.attach(chart);indicatorRenderer.configure(indicatorConfig.settings,true,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});
+        if(window.QfNativeIndicatorRender&&indicatorRenderer?.chart!==chart){vpRanges?.dispose();indicatorRenderer?.dispose();indicatorRenderer=window.QfNativeIndicatorRender.attach(chart);indicatorRenderer.configure(indicatorConfig.settings,true,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});
+          vpRanges=window.QfNativeVpRange.attach(chart,{onChange:(item_id,range)=>emit({kind:'qf-vp-range-change',chart_revision:revision,symbol:requestedSymbol,period:requestedPeriod,settings_revision:indicatorConfig.settings_revision,item_id,range})});vpRanges.configure(indicatorConfig.settings.items);
           indicatorRenderer.onHeight=(item_id,height)=>emit({kind:'qf-indicator-height',chart_revision:revision,symbol:requestedSymbol,period:requestedPeriod,settings_revision:indicatorConfig.settings_revision,item_id,height});}
         const data=result.status==='ready'?window.QfNativeIndicatorData.snapshot(chart,indicatorConfig):{issue:'行情或图表数据正在核实'};
         const encoded=JSON.stringify(data);

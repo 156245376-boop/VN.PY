@@ -2,6 +2,10 @@
 (() => {
   'use strict';const S=()=>QfIndicatorState;
   const labels={periods:'均线周期（逗号分隔，可增减）',n:'计算周期',m:'平滑周期',m1:'第一平滑周期',m2:'第二平滑周期',short:'短周期',long:'长周期',p:'标准差倍数',step:'加速步长',max:'加速上限',ticks_per_row:'每价格档跳数（0 为自动）'};
+  function timeInput(ns){return ns?new Date(Number(BigInt(ns)/1000000n)+8*3600e3).toISOString().slice(0,19):'';}
+  function timeValue(text,previous){if(previous&&text===timeInput(previous))return previous;
+    if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(text))throw Error('请填写完整的北京时间');
+    const ms=Date.parse(text+'+08:00');if(!Number.isFinite(ms))throw Error('时间无效');return String(BigInt(ms)*1000000n);}
   function parameters(item,values){const next=S().clone(item);
     for(const [key,value]of Object.entries(values)){
       if(key==='periods')next.params[key]=String(value).split(/[,，\s]+/).filter(Boolean).map(Number);
@@ -38,7 +42,7 @@
         const width=el('input');width.type='number';width.min=1;width.max=6;width.value=style.width;field('线宽（像素）',width);
         const height=el('input');height.type='number';height.min=120;height.max=600;height.value=item.height;
         if(S().catalog()[item.type].board==='sub')field('副图高度（像素）',height);
-        let side,percent,transparency,poc;
+        let side,percent,transparency,poc,startInput,endInput;
         if(item.type==='vp'){
           side=el('select');side.add(new Option('图表左侧','left'));side.add(new Option('图表右侧','right'));side.value=style.side;field('分布位置',side);
           percent=el('input');percent.type='number';percent.min=10;percent.max=40;percent.value=style.width_pct;field('最大宽度（占图表 %）',percent);
@@ -46,6 +50,9 @@
           poc=el('input');poc.type='checkbox';poc.checked=style.poc;field('显示最大量价位线 POC',poc);
           const actions=el('div');actions.append(button('在图上选择时间区间',()=>{options.onSelectRange?.(pane,item.id);close();}),
             button('定位到所选区间',()=>{options.onLocateRange?.(pane,item.id);close();}));box.append(actions);
+          startInput=el('input');endInput=el('input');for(const input of [startInput,endInput]){input.type='datetime-local';input.step='1';}
+          startInput.value=timeInput(item.params.range?.start_ns);endInput.value=timeInput(item.params.range?.end_ns);
+          field('固定区间开始（北京时间）',startInput);field('固定区间结束（北京时间）',endInput);
           const summary=el('p',item.params.range?'已选区间：'+new Date(Number(BigInt(item.params.range.start_ns)/1000000n)+8*3600e3).toISOString().slice(0,19).replace('T',' ')+' 起（北京时间）':'固定区间尚未选择');summary.className='indicator-range-summary';box.append(summary);
         }
         const actions=el('div');actions.className='indicator-item-actions';
@@ -55,6 +62,7 @@
         box.onsubmit=e=>{e.preventDefault();try{const next=parameters(item,Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.value])));
           next.style.colors=colors.map(c=>c.value);next.style.width=Number(width.value);next.height=Number(height.value);
           if(side){next.style.side=side.value;next.style.width_pct=Number(percent.value);next.style.transparency=Number(transparency.value);next.style.poc=poc.checked;}
+          if(startInput&&(startInput.value||endInput.value)){next.params.range={symbol:options.symbol?.(pane)||item.params.range?.symbol||'',start_ns:timeValue(startInput.value,item.params.range?.start_ns),end_ns:timeValue(endInput.value,item.params.range?.end_ns)};}
           change({type:'change',item:S().check(next)});
         }catch(err){error.textContent=err.message;}};
         root.append(box);
@@ -67,5 +75,5 @@
     return {open(id,next){pane=id;config=S().clone(next);root.hidden=false;render();},close,
       dispose(){document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',key,true);removeEventListener('blur',close);root.remove();}};
   }
-  window.QfIndicatorPanel={create,parameters};
+  window.QfIndicatorPanel={create,parameters,timeInput,timeValue};
 })();

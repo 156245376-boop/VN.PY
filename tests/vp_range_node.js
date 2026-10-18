@@ -1,0 +1,12 @@
+'use strict';const assert=require('node:assert/strict');global.window=global;
+require('../qf/web/native-vp-range.js');require('../qf/web/indicator-panel.js');
+const R=QfNativeVpRange;
+const a={start:1700000000000000000,end:1700003600000000000},b={start:1700003600000000000,end:1700007200000000000};
+const range=R.rangeForIntervals('SHFE.rb2701',a,b);
+assert.equal(BigInt(range.end_ns)-BigInt(range.start_ns),120n*60n*1000000000n);
+assert.deepEqual(R.rangeForIntervals('SHFE.rb2701',b,a),range);
+const P=QfIndicatorPanel,ns='1700000000000000001';
+assert.equal(P.timeValue(P.timeInput(ns),ns),ns);
+assert.equal(P.timeValue('2023-11-15T06:14:20',ns),'1700000060000000000');
+assert.throws(()=>P.timeValue('invalid',ns));
+console.log('VP_RANGE_OK');

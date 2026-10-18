@@ -51,6 +51,29 @@ def exercise():
                 throw Error('自动价格域未包含主图指标 '+domain);
             };
             assertAuto();
+            if(!window.QfNativeVpRange)throw Error('固定 VP 选区未接入');
+            let selected=null;
+            const ranges=QfNativeVpRange.attach(chart,{onChange:(id,r)=>selected=r});
+            const canvas=chart.mainBoard._centerTopCanvas.dom,box=canvas.getBoundingClientRect();
+            ranges.begin('vp-fixed');
+            for(const x of [60,140])canvas.dispatchEvent(new MouseEvent('mousedown',
+              {bubbles:true,button:0,buttons:1,clientX:box.left+x,clientY:box.top+50}));
+            if(!selected||
+              BigInt(selected.end_ns)<=BigInt(selected.start_ns))
+              throw Error('固定 VP 两点选择未提交');
+            const handle=document.querySelector('.qf-vp-range circle');
+            if(!handle)throw Error('VP 编辑端点缺失');
+            const old=selected.start_ns,hr=handle.getBoundingClientRect();
+            handle.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,
+              buttons:1,clientX:hr.left+3,clientY:hr.top+3}));
+            document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,buttons:1,
+              clientX:hr.left+30,clientY:hr.top+3}));
+            document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
+            if(selected.start_ns===old)throw Error('VP 端点编辑没有改变时间');
+            ranges.configure([{id:'vp-fixed',type:'vp',visible:true,params:{mode:'screen'}}]);
+            if(document.querySelectorAll('.qf-vp-range circle').length)
+              throw Error('屏幕模式仍保留固定区间端点');
+            ranges.begin('vp-fixed');ranges.cancel();
             const before=chart.chartCtrl.pixelLeft;
             chart.chartCtrl.move(-20);chart.draw();
             const vp=document.querySelectorAll('.qf-vp rect').length;

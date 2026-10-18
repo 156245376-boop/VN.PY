@@ -11,7 +11,7 @@
     if(options.indicators){
       const node=document.createElement('section');document.body.append(node);
       function changeIndicator(a){indicatorConfig=QfIndicatorState.reduce(indicatorConfig,a);indicators.configure(a.pane,indicatorConfig.panes[a.pane]);indicatorPanel.open(a.pane,indicatorConfig.panes[a.pane]);}
-      indicatorPanel=QfIndicatorPanel.create(node,{onChange:changeIndicator,
+      indicatorPanel=QfIndicatorPanel.create(node,{onChange:changeIndicator,symbol:id=>panes.get(id)?.indicatorContext()?.identity.symbol,
         onSelectRange:(id,item)=>indicators.command(id,'begin',item),onLocateRange:(id,item)=>indicators.command(id,'locate',item)});
       indicators=QfIndicatorController.create({config:indicatorConfig,getPane:id=>panes.get(id)?.indicatorContext(),
         submit:options.onIndicatorSubmit,poll:options.onIndicatorPoll,save:options.onIndicatorSave,onNotice:options.onNotice,

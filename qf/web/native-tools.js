@@ -136,6 +136,7 @@
   function select(mode) {
     const s = states.get(active);
     if (!s || !Object.hasOwn(names, mode)) return false;
+    if(s.external){const external=s.external;s.external=null;external.cancel?.();}
     cancelEdit(s); stopFocus(s); s.navigation = ''; finishNative(active);
     active.mainBoard._centerTopCanvas.dom.style.cursor = mode === 'pan' ? '' : 'crosshair';
     s.mode = mode; s.pending = null; s.preview = null; s.selected = null;
@@ -349,6 +350,7 @@
     }, true);
     root.addEventListener('mousedown', event => {
       if (event.target !== canvas) return;
+      if(s.external?.mousedown?.(event)){event.preventDefault();event.stopImmediatePropagation();return;}
       hideMenu(s);
       if (event.button === 0 && s.mode === 'pan') {
         stopFocus(s); s.navigation = '';
@@ -373,6 +375,7 @@
     }, true);
     root.addEventListener('mousemove', event => {
       if (event.target !== canvas || s.edit) return;
+      if(s.external?.mousemove?.(event)){event.preventDefault();event.stopImmediatePropagation();return;}
       if (s.mode === 'pan') {
         const target = hit(chart, s, event), id = target?.id;
         canvas.style.cursor = target ? target.handle >= 0 ? 'crosshair' : 'move' : '';
@@ -447,6 +450,7 @@
   }
   function cancelInteraction(){
     const s=states.get(active);if(!s)return false;
+    if(s.external){const external=s.external;s.external=null;external.cancel?.();}
     const used=s.mode!=='pan'||!!s.edit||!!s.pending||!!s.focus||!!s.navigation;
     stopFocus(s);s.navigation='';cancelEdit(s);s.pending=null;s.preview=null;s.mode='pan';
     hideMenu(s);finishNative(active);render(active);return used;
@@ -468,5 +472,7 @@
   }
   window.QfNativeTools = {attach, render, select, restore, undo, clear, inspect,cancelInteraction,dispose,intervals,
     setIndicatorPriceExtent(chart,extent){const s=states.get(chart);if(s)s.indicatorExtent=validDomain(extent)?extent.slice():null;},
+    setExternalInteraction(chart,handler){const s=states.get(chart);if(s){s.external=handler;finishNative(chart);}},
+    focusTimeRange(chart,from,to){const s=states.get(chart);if(s&&from<to)followDrawing(chart,s,{from,to});},
     exportDrawings,applyDrawings,configureShared(prefix){if(!sharedPrefix)sharedPrefix=prefix+'-'+Math.random().toString(36).slice(2,10);}};
 })();

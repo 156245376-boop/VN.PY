@@ -38,6 +38,7 @@ def _install_chart_labels(window):
                   + (assets / "native-history.js").read_text(encoding="utf-8") + "\n"
                   + (assets / "native-indicator-data.js").read_text(encoding="utf-8") + "\n"
                   + (assets / "native-indicator-render.js").read_text(encoding="utf-8") + "\n"
+                  + (assets / "native-vp-range.js").read_text(encoding="utf-8") + "\n"
                   + (assets / "native-labels.js").read_text(encoding="utf-8") + "\n})();")
         tasks = []
         window.native.Invoke(Action(lambda: tasks.append(

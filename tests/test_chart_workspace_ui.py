@@ -6,7 +6,8 @@ import pytest
 
 
 @pytest.mark.parametrize('script', ['indicator_state_node.js', 'indicator_protocol_node.js',
-                                   'indicator_render_node.js', 'indicator_panel_node.js'])
+                                   'indicator_render_node.js', 'indicator_panel_node.js',
+                                   'vp_range_node.js'])
 def test_indicator_javascript_behaviors(script):
     node = shutil.which('node')
     if not node:

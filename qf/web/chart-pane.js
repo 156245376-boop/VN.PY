@@ -82,6 +82,7 @@
       const d=event.data||{};
       if(d.kind==='qf-chart-ready'){bind();return;}
       if(d.pane_id!==id||d.generation!==context.generation||d.revision!==context.request.revision)return;
+      if(['qf-drawings-request','qf-drawings-commit','qf-drawings-undo','qf-drawings-conflict'].includes(d.kind)&&d.symbol===context.runtime?.symbol){options.onDrawing?.(id,d);return;}
       if(d.kind==='qf-chart-activate'){options.onActivate(id);return;}
       if(d.kind==='qf-chart-escape'){options.onEscape(id);return;}
       if(d.kind==='qf-chart-selection'&&context.catalog.some(p=>p.continuous===d.continuous)&&['actual','continuous'].includes(d.mode)){

@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict');global.window=global;
+require('../qf/web/chart-drawings.js');
+const book=QfDrawingBook.create(),symbol='SHFE.rb2701';
+const rect={id:'pane-1-1',type:'rectangle',points:[{time:1767574800000000000,price:3300,boundary:true},{time:1767582000000000000,price:3350,boundary:true}]};
+assert.deepEqual(book.read(symbol),{ok:true,version:0,drawings:[]});
+assert.equal(book.commit(symbol,0,[rect]).version,1);
+assert.equal(book.commit(symbol,0,[]).ok,false,'旧快照不能覆盖新图形');
+let changed=structuredClone(rect);changed.points[0].price=3310;
+assert.equal(book.commit(symbol,1,[changed]).version,2);
+assert.equal(book.undo(symbol,2).drawings[0].points[0].price,3300);
+assert.equal(book.read('KQ.m@SHFE.rb').drawings.length,0);
+assert.equal(book.commit(symbol,3,Array(201).fill(rect)).ok,false);
+assert.equal(book.commit(symbol,3,[{...rect,points:[{time:NaN,price:1}]}]).ok,false);
+const copy=book.read(symbol);copy.drawings.length=0;assert.equal(book.read(symbol).drawings.length,1);
+console.log('CHART_DRAWINGS_OK');

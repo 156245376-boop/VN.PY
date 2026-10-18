@@ -322,4 +322,40 @@ test('clearing the drawing also cancels its pending historical focus', () => {
   assert.equal(f.api.inspect().drawings.length, 0);
   assert.equal(f.packets.at(-1).view_width, 0);
 });
+test('shared commits preserve a second local drawing while awaiting acknowledgement',()=>{
+  const f=fixture(),sent=[];f.api.configureShared('pane-1');
+  f.api.onCommit=d=>sent.push(d);
+  f.api.applyDrawings(f.chart.symbol,0,[]);
+  f.api.select('horizontal');f.fire('mousedown',{clientY:100});
+  assert.equal(sent.length,1);
+  f.fire('mousedown',{clientY:120});assert.equal(sent.length,1);
+  f.api.applyDrawings(f.chart.symbol,1,sent[0].drawings,true,true);
+  assert.equal(sent.length,2);assert.equal(sent[1].drawings.length,2);assert.equal(sent[1].version,1);
+  f.api.applyDrawings(f.chart.symbol,2,sent[1].drawings,true,true);
+  assert.equal(f.api.exportDrawings(f.chart.symbol).length,2);
+  assert.equal(sent.length,2,'远端确认不能回环');
+});
+test('remote commit cancels an unfinished edit and undo delegates the shared version',()=>{
+  const f=fixture(),remote=fixture(),sent=[];
+  f.api.select('rectangle');f.fire('mousedown',{clientX:130});f.fire('mousedown',{clientX:210});
+  const items=f.api.exportDrawings(f.chart.symbol);
+  remote.api.configureShared('pane-2');remote.api.applyDrawings(remote.chart.symbol,1,items);
+  remote.api.select('trend');remote.fire('mousedown',{clientX:150});
+  assert.equal(remote.api.inspect().pending,true);
+  remote.api.applyDrawings(remote.chart.symbol,2,[]);
+  assert.equal(remote.api.inspect().pending,false);
+  remote.api.onUndo=d=>sent.push(d);remote.api.undo();
+  assert.equal(sent[0].version,2);
+});
+test('unchanged shared snapshot cannot cancel cross-period historical focus',()=>{
+  const f=fixture(1,true),start=Date.parse('2025-03-03T09:00:00+08:00')*1e6;
+  f.chart.duration=3600e9;f.chart.mainSeries.data=[0,1].map(i=>({datetime:start+i*3600e9}));
+  f.chart.chartCtrl.range={leftId:0,rightId:1};f.chart.draw();
+  f.api.select('rectangle');f.fire('mousedown',{clientX:51});f.fire('mousedown',{clientX:59});
+  const items=f.api.exportDrawings(f.chart.symbol);f.api.configureShared('pane-1');f.api.applyDrawings(f.chart.symbol,1,items);
+  f.chart.duration=60e9;f.chart.mainSeries.data=Array.from({length:220},(_,i)=>({datetime:start+300*86400e9+i*60e9}));
+  f.chart.draw();f.flush();assert.ok(f.packets.length);
+  f.api.applyDrawings(f.chart.symbol,1,items);
+  assert.notEqual(f.packets.at(-1).view_width,0);
+});
 console.log('NATIVE_TOOLS_OFFLINE_OK');

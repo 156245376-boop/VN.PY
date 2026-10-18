@@ -6,6 +6,7 @@
     let config=S.clone(options.config),accepted=S.clone(config),state={catalog:[],rows:[],favorites:[]},alive=true,visible=true;
     let expanded=null,workspaceExpanded=false,viewKey='',pending=null,sending=false,drag=null;
     const panes=new Map(),revisions=new Map(config.panes.map(p=>[p.id,1]));
+    const drawingBook=QfDrawingBook.create();
     root.innerHTML=`<div class="section-title"><div><h2>行情图工作区</h2><span id="active-pane-label"></span></div>
       <div class="chart-actions"><label>布局 <select id="chart-layout"><option value="single">单图</option><option value="columns">左右双图</option><option value="rows">上下双图</option><option value="quad">四宫格</option></select></label>
       <label><input id="link-products" type="checkbox"> 品种联动</label><button id="expand-workspace">放大工作区</button></div></div>
@@ -51,6 +52,14 @@
     function choose(id,symbol,mode){activate(id);if(mode)config=S.reduce(config,{type:'source',value:mode});action({type:'choose',symbol});}
     function expand(id){expanded=expanded===id?null:id;render();}
     function escape(){if(expanded){expanded=null;render();}else if(workspaceExpanded){workspaceExpanded=false;render();}}
+    function drawing(id,data){
+      if(data.kind==='qf-drawings-conflict'){options.onNotice?.('其他分屏已更新画线，未提交的冲突编辑已取消。');return;}
+      const result=data.kind==='qf-drawings-request'?drawingBook.read(data.symbol):data.kind==='qf-drawings-undo'?
+        drawingBook.undo(data.symbol,data.version):drawingBook.commit(data.symbol,data.version,data.drawings);
+      if(!result.ok)options.onNotice?.('画线更新未应用：版本冲突或数量/格式超限，已保留最新结果。');
+      for(const [target,p] of panes)if(target===id||(data.kind!=='qf-drawings-request'&&result.ok&&p.inspect().state?.symbol===data.symbol))
+        p.send({kind:'qf-drawings-state',symbol:data.symbol,...result,source_pane:data.kind==='qf-drawings-request'?null:id});
+    }
     function render(){if(!alive)return;
       const ids=visible?S.visibleIds(config):[];
       for(const [id,p] of panes)if(!ids.includes(id)){p.dispose();panes.delete(id);}
@@ -58,7 +67,7 @@
           panes.set(id,QfChartPane.create(node,{id,onActivate:activate,onChoose:choose,
             onSource:(id,value)=>{activate(id);action({type:'source',value});},
             onPeriod:(id,value)=>{activate(id);action({type:'period',value});},onExpand:expand,
-            onEscape:escape,onFavorite:options.onFavorite,onState:options.onState}));}
+            onEscape:escape,onFavorite:options.onFavorite,onState:options.onState,onDrawing:drawing}));}
         const p=config.panes.find(p=>p.id===id),request=requests().find(p=>p.id===id);
         const runtime=state.panes?.find(p=>p.id===id&&p.revision===request.revision&&p.continuous===request.continuous&&p.mode===request.mode&&p.period===request.period);
         panes.get(id).update({...state,config:p,request,runtime,active:config.active===id});

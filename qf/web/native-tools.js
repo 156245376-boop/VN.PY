@@ -5,6 +5,7 @@
   const states = new WeakMap(), indexes = new WeakMap();
   const names = {pan: '浏览拖动', horizontal: '水平线', trend: '趋势线', rectangle: '矩形'};
   let active = null;
+  let sharedPrefix='';
   const groupKey = c => c.symbol;
   const viewKey = c => `${c.symbol}|${c.duration}|${c.mainType}`;
   const rangeKey = c => `${viewKey(c)}|${c.chartCtrl.range.leftId}|${c.chartCtrl.range.rightId}`;
@@ -51,6 +52,7 @@
   }
   const copy = items => items.map(item => ({...item, points: item.points.map(p => ({...p}))}));
   function remember(c, s, before = copy(drawings(c, s))) {
+    if(sharedPrefix)return;
     const key = groupKey(c);
     if (!s.history.has(key)) s.history.set(key, []);
     s.history.get(key).push(before);
@@ -148,6 +150,7 @@
     const s = states.get(active);
     if (!s) return;
     stopFocus(s); s.navigation = ''; cancelEdit(s); s.pending = null; s.preview = null; s.selected = null;
+    if(sharedPrefix){window.QfNativeTools.onUndo?.({symbol:active.symbol,version:s.versions?.get(active.symbol)||0});return;}
     const before = s.history.get(groupKey(active))?.pop();
     if (before) s.groups.set(groupKey(active), before);
     render(active); hideMenu(s);
@@ -312,7 +315,8 @@
     active = chart;
     if (states.has(chart) || !chart.mainBoard?._centerTopCanvas?.dom || !chart.mainBoard.rightYAxis?.axis?.tickValues) return;
     const s = {mode: 'pan', groups: new Map(), history: new Map(), nextId: 0, selected: null, hover: null,
-      edit: null, pending: null, preview: null, domain: null, last: null, group: viewKey(chart), symbol: chart.symbol};
+      edit: null, pending: null, preview: null, domain: null, last: null, group: viewKey(chart), symbol: chart.symbol,
+      versions:new Map(),published:new Map(),inFlight:null};
     states.set(chart, s); createUI(chart, s);
     const setRange = chart.setRange;
     if (typeof setRange === 'function') chart.setRange = function (...args) {
@@ -359,9 +363,10 @@
       if (event.button !== 0) return;
       const p = point(chart, event);
       if (!p) return;
-      if (s.mode === 'horizontal') { remember(chart, s); drawings(chart, s).push(complete('horizontal', p, null, ++s.nextId)); }
+      const nextId=()=>sharedPrefix?sharedPrefix+'-'+(++s.nextId):++s.nextId;
+      if (s.mode === 'horizontal') { remember(chart, s); drawings(chart, s).push(complete('horizontal', p, null, nextId())); }
       else if (!s.pending) s.pending = p;
-      else { remember(chart, s); drawings(chart, s).push(complete(s.mode, s.pending, p, ++s.nextId)); s.pending = null; s.preview = null; }
+      else { remember(chart, s); drawings(chart, s).push(complete(s.mode, s.pending, p, nextId())); s.pending = null; s.preview = null; }
       render(chart);
     }, true);
     root.addEventListener('mousemove', event => {
@@ -388,6 +393,13 @@
       if (chart.mainType === 'candle' && s.focusView && s.focusSymbol === chart.symbol && s.lastDrawingFocus)
         followDrawing(chart, s, s.lastDrawingFocus);
       s.focusView = key; s.focusSymbol = chart.symbol;
+    }
+    if(sharedPrefix&&!s.edit&&!s.pending&&!s.inFlight&&s.versions.has(chart.symbol)){
+      const items=copy(drawings(chart,s)),encoded=JSON.stringify(items);
+      if(encoded!==s.published.get(chart.symbol)){
+        s.inFlight={symbol:chart.symbol,encoded,base:s.versions.get(chart.symbol)};
+        window.QfNativeTools.onCommit?.({symbol:chart.symbol,version:s.inFlight.base,drawings:items});
+      }
     }
     if (!s.svg) return;
     const canvas = chart.mainBoard._centerTopCanvas.dom, width = canvas.clientWidth, height = canvas.clientHeight;
@@ -438,5 +450,20 @@
     hideMenu(s);finishNative(active);render(active);return used;
   }
   function dispose(){cancelInteraction();const s=states.get(active);if(s){s.svg?.remove();s.menu?.remove();s.badge?.remove();}}
-  window.QfNativeTools = {attach, render, select, restore, undo, clear, inspect,cancelInteraction,dispose};
+  function exportDrawings(symbol){const s=states.get(active);return s?copy(s.groups.get(symbol)||[]):[];}
+  function applyDrawings(symbol,version,items,own=false,ok=true){
+    const s=states.get(active);if(!s||!Number.isSafeInteger(version)||version<(s.versions.get(symbol)||0)||!Array.isArray(items))return false;
+    const flight=s.inFlight,local=s.groups.get(symbol)||[];
+    if(s.versions.has(symbol)&&version===s.versions.get(symbol)&&!flight&&JSON.stringify(local)===JSON.stringify(items))return true;
+    const keep=own&&ok&&flight?.symbol===symbol&&version===flight.base+1&&
+      (JSON.stringify(local)!==flight.encoded||!!s.edit||!!s.pending);
+    const interrupted=!own&&symbol===active.symbol&&(s.edit||s.pending||s.inFlight);
+    if(symbol===active.symbol&&(!own||!ok)){stopFocus(s);cancelEdit(s);s.pending=null;s.preview=null;}
+    s.inFlight=null;s.versions.set(symbol,version);s.published.set(symbol,JSON.stringify(items));
+    if(!keep)s.groups.set(symbol,copy(items));
+    if(interrupted)window.QfNativeTools.onConflict?.();
+    if(symbol===active.symbol)render(active);return true;
+  }
+  window.QfNativeTools = {attach, render, select, restore, undo, clear, inspect,cancelInteraction,dispose,
+    exportDrawings,applyDrawings,configureShared(prefix){if(!sharedPrefix)sharedPrefix=prefix+'-'+Math.random().toString(36).slice(2,10);}};
 })();

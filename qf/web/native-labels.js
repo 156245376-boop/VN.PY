@@ -4,6 +4,7 @@
   window.__qfChartLabels=true;
   let catalog=[],scheduled=false,requestedSymbol='',pendingSymbol='',requestedPeriod='1m',revision=0;
   let paneId='',generation=0,compact=false,disposed=false,lastPeriod='';
+  let sharedRequested='';
   const periods={close:6e10,'1m':6e10,'5m':3e11,'15m':9e11,'30m':18e11,'1h':36e11,'1d':864e11};
   const emit=data=>parent.postMessage({...data,pane_id:paneId,generation,revision},qfParentOrigin);
   function configureView(){
@@ -59,6 +60,9 @@
   addEventListener('message',event=>{
     if(event.source!==parent||event.origin!==qfParentOrigin)return;
     const data=event.data;
+    if(data?.kind==='qf-drawings-state'&&data.pane_id===paneId&&data.generation===generation&&data.revision===revision&&data.symbol===requestedSymbol){
+      window.QfNativeTools?.applyDrawings(data.symbol,data.version,data.drawings,data.source_pane===paneId,data.ok);return;
+    }
     if(data?.kind==='qf-chart-command'&&data.revision===revision&&
       (!paneId||(data.pane_id===paneId&&data.generation===generation))){
       const command=event.data.command;
@@ -76,9 +80,14 @@
       data.generation===generation&&data.revision<revision))return;
     if(!Array.isArray(event.data.catalog))return;
     catalog=event.data.catalog.filter(row=>typeof row?.name==='string'&&typeof row?.product==='string'&&typeof row?.exchange==='string');
-    revision=Number.isSafeInteger(event.data.revision)?event.data.revision:0;
+    const nextRevision=Number.isSafeInteger(event.data.revision)?event.data.revision:0;
+    if(nextRevision!==revision)sharedRequested='';revision=nextRevision;
     if(/^pane-[1-4]$/.test(data.pane_id||'')&&Number.isSafeInteger(data.generation)){
       paneId=data.pane_id;generation=data.generation;compact=data.compact===true;}
+    if(paneId&&window.QfNativeTools){window.QfNativeTools.configureShared(paneId);
+      window.QfNativeTools.onCommit=d=>emit({kind:'qf-drawings-commit',...d});
+      window.QfNativeTools.onUndo=d=>emit({kind:'qf-drawings-undo',...d});
+      window.QfNativeTools.onConflict=()=>emit({kind:'qf-drawings-conflict',symbol:requestedSymbol});}
     const symbol=event.data.symbol;
     const period=Object.hasOwn(periods,event.data.period)?event.data.period:'1m';
     if(typeof symbol==='string'&&/^(?:KQ\.m@)?(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.[A-Za-z]+\d{0,4}$/.test(symbol)&&
@@ -94,6 +103,9 @@
       const period=view?.mainType==='close'?'close':Object.keys(periods).find(p=>p!=='close'&&periods[p]===view?.duration);
       if(view?.instrumentId===requestedSymbol&&period&&period!==lastPeriod){lastPeriod=period;emit({kind:'qf-chart-period',period});}
       emit({kind:'qf-chart-state',...result});
+      const key=requestedSymbol+'|'+revision;
+      if(paneId&&result.status==='ready'&&result.symbol===requestedSymbol&&sharedRequested!==key){
+        sharedRequested=key;emit({kind:'qf-drawings-request',symbol:requestedSymbol});}
     }catch(_){emit({kind:'qf-chart-state',status:'unsupported'});}
   }
   addEventListener('DOMContentLoaded',()=>{

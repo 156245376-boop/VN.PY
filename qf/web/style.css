@@ -8,3 +8,12 @@
 .chart-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.chart-actions select{font-size:12px;max-width:180px}.chart-loading{padding:24px 18px;display:grid;gap:10px;color:#526f63}.chart-loading strong{font-size:13px}.chart-loading span{font-size:11px;color:#84958a}.chart-loading progress{width:100%;height:10px;accent-color:#287c61}.chart-card.expanded .chart-loading{flex-shrink:0}
 .history-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:0 18px 8px;font-size:11px;color:#5a7468}.history-controls select,.history-controls button{padding:6px 9px;font-size:11px}.chart-card.expanded .history-controls{flex-shrink:0}#history-summary[data-error=true]{color:#b3524f}
 .market-context-menu{position:fixed;z-index:200;background:white;border:1px solid #ccd8d1;border-radius:7px;box-shadow:0 4px 18px #0002;padding:7px;min-width:168px}.market-context-menu span{display:block;padding:5px 8px;color:#6a8275;font-size:11px}.market-context-menu button{display:block;width:100%;text-align:left;border:0}#chart-favorite{white-space:nowrap}
+/* 网格子项必须可缩小，表格的固有宽度只由自身滚动容器承接。 */
+.workspace,.market-layout,.main-column,.right-column,.card,.filters{min-width:0}
+.main-column{grid-template-columns:minmax(0,1fr)}
+.table-scroll{max-width:100%}.filters input{width:0;min-width:0}.filters select{flex-shrink:0}
+.navigation{overflow-y:auto}.brand-icon{flex-shrink:0}.nav-bottom{padding-top:18px}
+.section-title{flex-wrap:wrap}.section-title>div{min-width:0}.welcome>div{min-width:0}
+.favorite{gap:8px}.favorite>div{min-width:0;overflow-wrap:anywhere}.favorite>span{white-space:nowrap}
+@media(max-width:1250px){.market-layout{grid-template-columns:minmax(0,1fr)}.right-column{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1000px){.right-column{grid-template-columns:repeat(2,minmax(0,1fr))}header{flex-wrap:wrap;gap:12px}.connection form{min-width:0;max-width:100%}}

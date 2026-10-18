@@ -121,6 +121,20 @@ def exercise():
                     assert "正在连接" not in window.evaluate_js(
                         'document.querySelector("#notice").textContent')
                     check('document.querySelectorAll("#market-rows tr").length===2')
+                    for width, height in ((1280, 820), (960, 680), (1440, 900)):
+                        window.resize(width, height)
+                        time.sleep(0.15)
+                        bounds = window.evaluate_js('''(()=>{
+                          const card=document.querySelector('.market-card').getBoundingClientRect();
+                          const side=document.querySelector('.right-column').getBoundingClientRect();
+                          const footer=document.querySelector('.market-card footer').getBoundingClientRect();
+                          return {cardRight:card.right,sideLeft:side.left,sideTop:side.top,
+                            cardBottom:card.bottom,footerRight:footer.right,width:innerWidth,
+                            pageWidth:document.body.scrollWidth};})()''')
+                        assert (bounds['cardRight'] <= bounds['sideLeft'] + 1 or
+                                bounds['sideTop'] >= bounds['cardBottom'] - 1), bounds
+                        assert bounds['footerRight'] <= bounds['cardRight'] + 1, bounds
+                        assert bounds['pageWidth'] <= bounds['width'] + 1, bounds
                     assert window.evaluate_js('document.querySelector("#password").value') == ""
                     window.evaluate_js('document.querySelector("#search").value="豆粕";'
                                        'document.querySelector("#search").dispatchEvent('

@@ -5,6 +5,8 @@ import hashlib
 import json
 from dataclasses import asdict
 
+from tqsdk.datetime import _get_trading_day_end_time, _get_trading_day_from_timestamp
+
 from qf.journal import Journal
 from qf.research_config import decimal_value, public_values
 from qf.trade_risk import RiskState
@@ -85,18 +87,23 @@ class ResearchJournal(Journal):
                                 ('last_target', json.dumps(target)))
         return True
 
-    def capture_bars(self, symbol, bar_seconds, rows):
+    def capture_bars(self, symbol, bar_seconds, rows, *, completed=True):
         values = []
         for row in rows:
             stamp = int(row['datetime'])
             fields = ('open', 'high', 'low', 'close', 'volume', 'close_oi')
             data = {k: float(row[k]) for k in fields}
-            data.update(time_ns=str(stamp))
+            data.update(time_ns=str(stamp), completed=completed)
+            end = (_get_trading_day_end_time(_get_trading_day_from_timestamp(stamp))
+                   if bar_seconds == 86400 else stamp+bar_seconds*1_000_000_000)
+            data['end_ns'] = str(end)
             if stamp <= 0 or min(data[k] for k in ('open', 'high', 'low', 'close')) <= 0:
                 raise ValueError('K线无效')
             values.append((symbol, bar_seconds, stamp, dumps(data)))
         with self.db:
-            self.db.executemany('INSERT OR IGNORE INTO research_bars VALUES (?,?,?,?)', values)
+            self.db.executemany('''INSERT INTO research_bars VALUES (?,?,?,?)
+                ON CONFLICT(symbol,bar_seconds,time_ns) DO UPDATE SET data=excluded.data
+                WHERE COALESCE(json_extract(research_bars.data,'$.completed'),1)=0''', values)
 
     def load_replay(self, *, offset, limit):
         if (type(offset) is not int or offset < 0

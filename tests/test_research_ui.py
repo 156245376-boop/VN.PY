@@ -5,11 +5,14 @@ from pathlib import Path
 import pytest
 
 
-def test_research_form_node():
+@pytest.mark.parametrize('script,marker', [('research_form_node.js', 'RESEARCH_FORM_OK'),
+    ('replay_render_node.js', 'REPLAY_RENDER_OK'),
+    ('research_results_node.js', 'RESEARCH_RESULTS_OK')])
+def test_research_form_node(script, marker):
     node = shutil.which('node')
     if not node:
         pytest.skip('Node missing')
-    result = subprocess.run([node, str(Path(__file__).with_name('research_form_node.js'))],
+    result = subprocess.run([node, str(Path(__file__).with_name(script))],
                             capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert 'RESEARCH_FORM_OK' in result.stdout
+    assert marker in result.stdout

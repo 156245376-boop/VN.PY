@@ -250,6 +250,9 @@ class ResearchLoop:
                 self.begin_exit(now, self.risk.exit_reason)
         self.reconcile_task(now, orders)
         rows = _rows(serial, self.config.bar_seconds)
+        if rows:
+            self.journal.capture_bars(self.config.symbol, self.config.bar_seconds,
+                                      [rows[-1]], completed=False)
         if len(rows) >= self.config.slow_period+2:
             completed = rows[-2]['datetime']
             if completed > self.last_bar:

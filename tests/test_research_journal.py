@@ -64,3 +64,14 @@ def test_saved_completed_bars_are_not_overwritten_by_forming_data(tmp_path):
     j.capture_bars('SHFE.rb2505', 60, [row | {'close': 999}])
     assert j.load_replay(offset=0, limit=100)['bars'][0]['close'] == 2
     j.close()
+
+
+def test_forming_snapshot_can_complete_without_overwriting_final(tmp_path):
+    j = journal(tmp_path)
+    row = dict(datetime=100, open=1, high=3, low=1, close=2, volume=10, close_oi=5)
+    j.capture_bars('SHFE.rb2505', 60, [row], completed=False)
+    j.capture_bars('SHFE.rb2505', 60, [row | {'close': 3}], completed=True)
+    j.capture_bars('SHFE.rb2505', 60, [row], completed=False)
+    saved = j.load_replay(offset=0, limit=100)['bars'][0]
+    assert saved['completed'] is True and saved['close'] == 3
+    j.close()

@@ -19,7 +19,9 @@ from qf.market import catalog_rows
 from qf.market_account import public_account
 from qf.market_session import MarketSession
 from qf.market_units import price_unit
+from qf.replay_view import ReplayView
 from qf.research_config import validate_research_config
+from qf.research_results import RUN_ID, compare_runs, read_run, run_details, summarize_run
 from qf.research_session import ResearchSession
 from qf.window_host import run_window
 from qf.workbench_store import WorkbenchStore
@@ -76,6 +78,39 @@ class WorkbenchBridge:
         self._experiments = ExperimentStore(root / 'data/workbench/experiments')
         self._research = research_session or ResearchSession(root / 'results')
         self._research_credentials = None
+        self._replay = ReplayView(root / 'results')
+
+    def list_research_runs(self):
+        root = self._root / 'results'
+        results = []
+        for path in sorted(root.iterdir(), reverse=True) if root.exists() else []:
+            if RUN_ID.fullmatch(path.name):
+                try:
+                    results.append(read_run(root, path.name))
+                except ValueError:
+                    results.append(dict(run_id=path.name, issue='旧版或损坏记录，无法按新实验复盘'))
+        return dict(ok=True, runs=results)
+
+    def get_research_result(self, run_id):
+        try:
+            return dict(ok=True, result=summarize_run(self._root/'results', run_id),
+                        details=run_details(self._root/'results', run_id))
+        except (ValueError, OSError):
+            return dict(ok=False, reason='结果缺失、版本不支持或记录不完整，未使用当前行情补造。')
+
+    def compare_research_runs(self, run_ids):
+        try:
+            return dict(ok=True, comparison=compare_runs(self._root/'results', run_ids))
+        except (ValueError, OSError):
+            return dict(ok=False, reason='请选择两个有效的新实验运行结果。')
+
+    def open_research_replay(self, run_id):
+        with self._lock:
+            try:
+                url = self._replay.open(run_id)
+                return dict(ok=True, url=url, run_id=run_id, revision=self._replay.revision)
+            except (ValueError, OSError):
+                return dict(ok=False, reason='无法打开复盘：请结束运行并核对保存的K线和结果。')
 
     def get_experiments(self):
         with self._lock:
@@ -415,6 +450,10 @@ class WorkbenchBridge:
         self._indicator_jobs.close()
         self._session.stop()
         research_closed = self._research.close()
+        try:
+            self._replay.close()
+        except ValueError:
+            return False
         if research_closed and not self._session.running:
             self._research_credentials = None
             return True

@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+require('../qf/web/native-replay.js');
+const r=globalThis.QfNativeReplay;
+const bars=[{time_ns:'1740963600000000000'},{time_ns:'1740963660000000000'},{time_ns:'1740963720000000000'}];
+assert.equal(r.barForTime(bars,'1740963660000000001',60),1);
+assert.equal(r.barForTime(bars,'1740963599999999999',60),null);
+assert.equal(r.barForTime(bars,'1740963780000000000',60),null);
+assert.equal(r.barForTime([{time_ns:'1',end_ns:'259200000000001'}],'172800000000001',86400),0);
+assert.equal(r.fillName({direction:'BUY',offset:'OPEN'}),'买开（做多）');
+assert.equal(r.fillName({direction:'BUY',offset:'CLOSETODAY'}),'买平（平空）');
+assert.equal(r.acceptMessage({source:1,origin:'http://evil',data:{run_id:'x',revision:1}},1,'http://127.0.0.1','x',1),false);
+console.log('REPLAY_RENDER_OK');

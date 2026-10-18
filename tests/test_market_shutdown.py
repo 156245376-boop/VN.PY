@@ -77,3 +77,48 @@ def test_close_releases_sdk_chart_waiter_without_server_shutdown_timeout():
         loop.run_until_complete(client.close())
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
+
+
+@pytest.mark.filterwarnings('ignore:Bare functions are deprecated:DeprecationWarning')
+def test_workspace_helper_releases_normal_browser_disconnect():
+    from qf.market_session import _close_api
+    from qf.market_web import WorkspaceWebHelper
+
+    api = TqBaseApi()
+    loop = api._loop
+    ready = asyncio.Event()
+    api.create_task = api._create_task
+    api._logger = logging.getLogger('offline-workspace-close')
+    api._auth = SimpleNamespace(_access_token='offline-fixture')
+    api._ins_url = api._md_url = ''
+    api._print = lambda *args: ready.set()
+    helper = object.__new__(WorkspaceWebHelper)
+    helper._api = api
+    helper._data = {'action': {'mode': 'run'}, 'subscribed': []}
+    helper._conn_diff_chans = set()
+    helper._http_server_host = '127.0.0.1'
+    address = chart_address()
+    helper._http_server_port = int(address.rsplit(':', 1)[1])
+    helper._web_dir = str(Path(tqsdk.__file__).parent / 'web')
+    server = api._create_task(helper.link_httpserver())
+
+    async def check():
+        await asyncio.wait_for(ready.wait(), 3)
+        async with ClientSession() as client:
+            for _ in range(3):
+                ws = await client.ws_connect(address + '/ws')
+                await ws.receive_json()
+                await ws.send_json({'aid': 'peek_message'})
+                await asyncio.sleep(.03)
+                await asyncio.wait_for(ws.close(), 1)
+                await asyncio.sleep(.03)
+                assert len(helper._conn_diff_chans) == 0
+
+    try:
+        loop.run_until_complete(check())
+    finally:
+        api.close = api._close_tasks
+        _close_api(api)
+        assert server.done()
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()

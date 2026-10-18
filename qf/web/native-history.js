@@ -234,7 +234,7 @@
       const previous = valid[index - 1];
       if (row.datetime <= previous.datetime) issues.add('time_order');
       // 尚未请求的两个稀疏缓存窗口之间不推断缺失；相邻真实 id 的日期必须可信。
-      if (chart.duration >= DAY && row.id === previous.id + 1 &&
+      if (row.id === previous.id + 1 &&
           row.datetime - previous.datetime > 31 * DAY) issues.add('long_gap');
     }
     let missing = 0;
@@ -259,6 +259,8 @@
     syncPeriod();
     const view = topView(), chart = current;
     const snapshot = {status: unsupported ? 'unsupported' : 'loading',
+      render_width:Number.isFinite(chart?.width)?chart.width:0,
+      render_height:Number.isFinite(chart?.height)?chart.height:0,
       symbol: typeof view?.instrumentId === 'string' ? view.instrumentId : '',
       period: periods.get(view?.duration) || '', duration: Number.isFinite(view?.duration) ? view.duration : 0,
       history: {valid_count: 0, first: '', last: '', years: {}, issues: []},

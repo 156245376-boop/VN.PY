@@ -107,7 +107,12 @@ def serve(initial_data=None, *, probe=False, extra_script=""):
                     const controls=[toolbar.querySelector('.title'),
                       toolbar.querySelector('.tq-button-group-durations'),
                       toolbar.querySelector('.ivu-checkbox-wrapper')];
-                    return {width:innerWidth,chartTop:chart.getBoundingClientRect().top,
+                    const view=document.querySelector('.tq-top-view')?.__vue__;
+                    const canvases=[...left.querySelectorAll('canvas')];
+                    return {width:innerWidth,
+                      plotWidth:Math.max(0,...canvases.map(c=>c.clientWidth)),
+                      rootWidth:view?.$root?.windowWidth,chartWidth:view?.chartWidth,
+                      chartTop:chart.getBoundingClientRect().top,
                       bottoms:controls.map(e=>e?.getBoundingClientRect().bottom)};
                   })()},'*'),100);
                 addEventListener('message',event=>{

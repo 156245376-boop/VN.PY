@@ -180,9 +180,20 @@ def test_workspace_requests_and_snapshot_are_whitelisted(bridge):
 
 def test_real_workbench_search_selection_favorites_chart_and_disconnect():
     result = subprocess.run(
-        [sys.executable, "-I", "-B", str(Path(__file__).with_name("workbench_smoke.py"))],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=45,
+        [sys.executable, "-I", "-B", "-X", "utf8",
+         str(Path(__file__).with_name("workbench_smoke.py"))],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90,
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "WORKBENCH_SMOKE=" in result.stdout
+
+
+def test_workspace_lifecycle_in_real_webview(tmp_path):
+    for phase in ('write', 'read'):
+        result = subprocess.run(
+            [sys.executable, '-I', '-B', '-X', 'utf8',
+             str(Path(__file__).with_name('workspace_lifecycle_smoke.py')), str(tmp_path), phase],
+            capture_output=True, text=True, encoding='utf-8', timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'WORKSPACE_LIFECYCLE_OK' in result.stdout

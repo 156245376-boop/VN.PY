@@ -7,6 +7,8 @@
       <div class="table-scroll"><table><thead></thead><tbody></tbody></table><p class="account-empty"></p></div></details>`;
     const details=root.querySelector('details');let snapshot=null,tab='positions',catalog=[];
     details.addEventListener('toggle',()=>options.onCollapse?.(!details.open));
+    root.querySelector('summary').onclick=event=>{event.preventDefault();
+      if(options.onCollapse)options.onCollapse(details.open);else details.open=!details.open;};
     const columns={positions:[['symbol','合约'],['pos_long','多头（手）'],['pos_short','空头（手）'],['float_profit','浮动盈亏（元）'],['margin','保证金（元）']],
       orders:[['symbol','合约'],['direction','方向'],['offset','开平'],['volume_orign','原始手数'],['volume_left','剩余手数'],['limit_price','委托价'],['status','状态']],
       trades:[['symbol','合约'],['direction','方向'],['offset','开平'],['volume','成交手数'],['price','成交价'],['trade_date_time','成交时间（北京时间）']]};

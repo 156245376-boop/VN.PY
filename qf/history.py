@@ -42,8 +42,8 @@ def summarize_history(serial: pd.DataFrame, duration_seconds: int) -> dict:
     intervals = observed_times.diff().dropna()
     if intervals.le(pd.Timedelta(0)).any():
         result["issues"].append("time_order")
-    # 这里只标记日线中的可疑长间隔；分钟线正常的夜间、午间及休市不按周期报缺口。
-    if duration_seconds == 86400 and intervals.gt(pd.Timedelta(days=31)).any():
+    # 各周期都核对相邻柱的可疑长间隔；正常夜间、周末及长假不会超过此阈值。
+    if intervals.gt(pd.Timedelta(days=31)).any():
         result["issues"].append("long_gap")
 
     valid_times = timestamps.loc[valid]

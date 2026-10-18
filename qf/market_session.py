@@ -14,6 +14,7 @@ from qf.chart_workspace import PERIODS, period_for, validate_panes
 from qf.history import summarize_history
 from qf.market import CONTINUOUS, catalog_rows, quote_row
 from qf.market_account import account_snapshot
+from qf.market_web import workspace_web_helper
 from qf.runtime import chart_address
 
 
@@ -228,8 +229,9 @@ class MarketSession:
             self._publish(status="connecting", chart_url=None, connected=None,
                           chart_status="loading", chart_revision=None, history=None)
             self._set_loading("connecting")
-            api = ReadOnlyApi(sdk.TqSim(), auth=sdk.TqAuth(user, password), debug=False,
-                              disable_print=True, web_gui=address)
+            with workspace_web_helper(sdk):
+                api = ReadOnlyApi(sdk.TqSim(), auth=sdk.TqAuth(user, password), debug=False,
+                                  disable_print=True, web_gui=address)
             try:
                 if self._stop.is_set():
                     break

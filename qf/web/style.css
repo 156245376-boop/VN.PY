@@ -40,7 +40,11 @@
 .workspace-expanded .chart-grid-scroll{flex:1;min-height:0}.workspace-expanded .chart-grid{height:100%}
 .chart-pane.expanded .pane-frame{min-height:260px}.chart-pane.expanded iframe{height:100%;min-height:0}.chart-pane.expanded{inset:8px}
 .chart-pane .history-summary{height:34px;margin-bottom:5px}.chart-pane .history-controls{height:32px;flex-shrink:0}
-.chart-pane .history-controls[hidden]{display:flex!important;visibility:hidden}
+.chart-pane .history-controls[hidden]{display:none!important}
+.chart-pane .section-title{flex-wrap:nowrap}.chart-pane .section-title>div:first-child{flex:1;min-width:0}
+.chart-pane h2,.chart-pane .section-title span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chart-pane .section-title span{display:block;height:14px;line-height:14px}
+.pane-frame,.chart-pane iframe{min-height:260px}
 .account-view{border-top:1px solid #dce6df;margin:8px 12px;padding:10px 0;flex-shrink:0}
 .account-view summary{font-size:13px;font-weight:600;cursor:pointer}.account-state{font-size:10px}
 .account-metrics{display:flex;flex-wrap:wrap;gap:12px;padding:10px;background:#eaf4f6;font-size:11px}

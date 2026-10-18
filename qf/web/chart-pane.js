@@ -21,13 +21,13 @@
     // 稳定 ID 便于本机辅助功能定位；各格不共享元素。
     for(const e of root.querySelectorAll('[data-role]'))e.id=e.dataset.role+(id==='pane-1'?'':'-'+id);
     for(const [value,name] of Object.entries(periods))$('period').add(new Option(name,value));
-    const frame=$('chart');let context=null,url='',reported=null,problem='',binding='',disposed=false,started=performance.now(),catalogKey='';
+    const frame=$('chart');let context=null,url='',reported=null,problem='',binding='',disposed=false,started=performance.now(),catalogKey='',lastSize='';
     function envelope(){return {pane_id:id,generation:context?.generation,revision:context?.request.revision}}
     function send(data){if(url&&!disposed)frame.contentWindow?.postMessage({...data,...envelope()},new URL(url).origin)}
     function post(command,year){send({kind:'qf-chart-command',command,year})}
     function bind(){if(!context?.runtime?.symbol||!url)return;
       send({kind:'qf-chart-labels',catalog:context.catalog,symbol:context.runtime.symbol,
-        period:QfChartState.period(context.config),compact:true});}
+        period:QfChartState.period(context.config),compact:true,width:frame.clientWidth,height:frame.clientHeight});}
     function update(next){
       if(disposed)return;
       const previous=context;context=next;
@@ -52,6 +52,8 @@
       if(next.chart_url&&next.chart_url!==url){url=next.chart_url;frame.src=url;binding='';reported=null;}
       const newBinding=JSON.stringify([next.generation,next.request.revision,symbol,QfChartState.period(next.config)]);
       if(newBinding!==binding){binding=newBinding;reported=null;problem='';started=performance.now();bind();}
+      const size=frame.clientWidth+'|'+frame.clientHeight;
+      if(size!==lastSize){lastSize=size;if(reported?.status==='ready')reported.status='loading';bind();}
       render();
     }
     function render(){if(!context)return;
@@ -68,9 +70,13 @@
         $('loading-stage').textContent='读取品种目录（'+(loading.done||0)+' / '+loading.total+'）';}
       else $('chart-progress').removeAttribute('value');
       $('loading-time').textContent='已等待 '+Math.floor((performance.now()-started)/1000)+' 秒 · 剩余时间暂无法准确估计';
-      root.dataset.light=!context.connected?'red':valid&&!bad?'green':'yellow';
-      const h=reported?.history,daily=reported?.duration===864e11;
-      $('history-controls').hidden=!daily||!valid;
+      root.dataset.light=!context.connected||reported?.md_connected===false?'red':valid&&!bad&&reported?.md_connected===true?'green':'yellow';
+      const detail=context.config.mode==='continuous'?'主力连续历史':context.runtime?.symbol?
+        labels.contractName(context.runtime.symbol,context.catalog):'当前主力等待核实';
+      $('chart-detail').textContent=detail+' · '+(root.dataset.light==='green'?'图表行情已连接':root.dataset.light==='red'?'图表行情未连接':'图表连接待确认');
+      const h=reported?.history,daily=QfChartState.period(context.config)==='1d';
+      $('history-controls').hidden=!daily;
+      $('history-year').disabled=!valid;$('history-latest').disabled=!valid;
       const years=Object.keys(h?.years||{}).filter(y=>/^\d{4}$/.test(y)).sort(),yearKey=years.join(',');
       if($('history-year').dataset.years!==yearKey){$('history-year').dataset.years=yearKey;$('history-year').replaceChildren(new Option('定位年份',''));
         for(const y of years)$('history-year').add(new Option(y+' 年',y));}
@@ -94,12 +100,18 @@
       if(d.kind!=='qf-chart-state'||!['ready','loading','invalid'].includes(d.status)||
         d.symbol!==context.runtime?.symbol||d.duration!==QfChartState.duration(QfChartState.period(context.config)))return;
       reported={status:d.status,symbol:d.symbol,duration:d.duration,history:d.history,visible:d.visible,
-        reason:d.reason,protocol:d.protocol};
+        reason:d.reason,protocol:d.protocol,md_connected:typeof d.md_connected==='boolean'?d.md_connected:null,
+        viewport_width:d.viewport_width,viewport_height:d.viewport_height};
+      if(d.status==='ready'&&(!Number.isFinite(d.viewport_width)||!Number.isFinite(d.viewport_height)||
+        Math.abs(d.viewport_width-frame.clientWidth)>2||Math.abs(d.viewport_height-frame.clientHeight)>2)){
+        reported.status='loading';reported.reason='viewport_loading';}
       problem=d.status==='invalid'?'历史数据需核实：'+(d.history?.issues||[]).map(k=>issues[k]).filter(Boolean).join('；'):
         d.status==='unsupported'?'图表适配或当前数据不足，已暂停显示。':'';
       options.onState?.(id,reported);render();
     }
     addEventListener('message',message);frame.addEventListener('load',bind);
+    const resizeObserver=typeof ResizeObserver==='function'?new ResizeObserver(bind):null;
+    resizeObserver?.observe(frame);
     root.addEventListener('pointerdown',()=>options.onActivate(id));
     $('product').onchange=()=>options.onChoose(id,$('product').value);
     $('chart-source').onchange=()=>options.onSource(id,$('chart-source').value);
@@ -109,8 +121,9 @@
     $('history-year').onchange=()=>{if($('history-year').value)post('year',$('history-year').value)};
     $('history-latest').onclick=()=>post('latest');
     return {update,post,send,setExpanded(value){root.classList.toggle('expanded',value);$('expand-chart').textContent=value?'还原 K 线（Esc）':'放大 K 线';},
-      inspect:()=>({state:reported,problem,url,request:context?.request}),
-      dispose(){if(disposed)return;post('dispose');disposed=true;removeEventListener('message',message);frame.src='about:blank';root.remove();}};
+      inspect:()=>({state:reported,problem,url,request:context?.request,
+        viewport:{width:frame.clientWidth,height:frame.clientHeight},visible:frame.style.visibility==='visible'}),
+      dispose(){if(disposed)return;post('dispose');disposed=true;resizeObserver?.disconnect();removeEventListener('message',message);frame.src='about:blank';root.remove();}};
   }
   window.QfChartPane={create};
 })();

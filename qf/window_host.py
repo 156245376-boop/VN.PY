@@ -62,7 +62,12 @@ def run_window(page: Path, bridge, request_close, *, webview_module=None):
     def finish_close():
         if window.events.loaded.is_set():
             try:
-                window.evaluate_js("window.qfPrepareExit?.()")
+                pending = window.evaluate_js("window.qfPrepareExit?.()")
+                deadline = time.monotonic() + 2
+                while pending == 'qf-exit-pending' and time.monotonic() < deadline:
+                    if window.evaluate_js('window.qfExitReady===true'):
+                        break
+                    time.sleep(.05)
             except Exception:
                 pass  # 页面尚未就绪或已销毁时，后台清理仍须继续。
         while not request_close():

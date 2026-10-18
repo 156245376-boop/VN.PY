@@ -90,4 +90,10 @@ def test_weekends_holidays_and_gaps_of_at_most_31_days_are_not_called_long_gaps(
 
 
 def test_long_interval_rule_is_not_applied_to_intraday_trading_breaks():
-    assert summarize(bars(["2025-12-01", "2026-01-05"]), 60)["issues"] == []
+    assert summarize(bars(["2026-01-09", "2026-01-12"]), 60)["issues"] == []
+
+
+@pytest.mark.parametrize("duration", [60, 300, 900, 1800, 3600, 86400])
+def test_decade_gap_is_flagged_in_every_supported_period(duration):
+    result = summarize(bars(["2016-01-15", "2026-10-16"]), duration)
+    assert result["issues"] == ["long_gap"]

@@ -538,4 +538,14 @@ test('不受支持的 SDK 资源不修改原生代码，重复 inspect 不重复
   vm.createContext(context); vm.runInContext(adapter, context);
   assert.equal(context.window.QfNativeHistory.inspect().status, 'unsupported');
 });
+test('分钟与小时图同样拒绝相邻柱跨十年的缺口', () => {
+  for(const duration of [minute, 5*minute, 15*minute, 30*minute, 60*minute]){
+    const f=fixture();f.chart.duration=duration;f.topView.duration=duration;
+    f.data({0:bar('2016-01-15T01:00:00Z'),1:bar('2026-10-16T01:00:00Z')});
+    f.chart.draw();
+    const state=f.api.inspect();
+    assert.equal(state.status,'invalid');
+    assert.ok(state.history.issues.includes('long_gap'));
+  }
+});
 console.log('NATIVE_HISTORY_OFFLINE_OK');

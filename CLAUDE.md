@@ -35,3 +35,4 @@
 连接灯、缺数据说明与报价单位按需查 `docs/market-data-display.md`。
 历史覆盖、年份定位与数据异常保护按需查 `docs/history-integrity.md`。
 价格轴、分隔条与右键画图按需查 `docs/chart-interactions.md`。
+自适应布局、独立分屏、联动、共享画线与布局恢复按需查 `docs/chart-workspace.md`。

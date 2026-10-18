@@ -5,16 +5,21 @@
   let catalog=[],scheduled=false,requestedSymbol='',pendingSymbol='',requestedPeriod='1m',revision=0;
   let paneId='',generation=0,compact=false,disposed=false,lastPeriod='';
   let sharedRequested='';
+  let repairAt=0;
+  let measuredWidth=0,measuredHeight=0;
   const periods={close:6e10,'1m':6e10,'5m':3e11,'15m':9e11,'30m':18e11,'1h':36e11,'1d':864e11};
   const emit=data=>parent.postMessage({...data,pane_id:paneId,generation,revision},qfParentOrigin);
   function configureView(){
     const view=document.querySelector('.tq-top-view')?.__vue__;
     if(!view)return;
     if(compact){
+      // WebView2 中子页可能保留旧的 innerWidth，使用可信父页测量的实际格尺寸。
+      const width=measuredWidth||innerWidth,height=measuredHeight||innerHeight;
+      view.$root.windowWidth=width;view.$root.windowHeight=height;
       document.documentElement.classList.add('qf-compact');
       view.rightClosed=true;view.rightClosedWidth=0;view.rightOpenedWidth=0;
       const home=document.querySelector('.tq-home')?.__vue__;
-      if(home){home.topHeight=Math.max(260,innerHeight);home.bottomHeight=0;home.bottomYOffset=innerHeight;}
+      if(home){home.topHeight=Math.max(260,height);home.bottomHeight=0;home.bottomYOffset=height;}
     }
     if(pendingSymbol){
       window.QfNativeTools?.cancelInteraction();
@@ -84,6 +89,8 @@
     if(nextRevision!==revision)sharedRequested='';revision=nextRevision;
     if(/^pane-[1-4]$/.test(data.pane_id||'')&&Number.isSafeInteger(data.generation)){
       paneId=data.pane_id;generation=data.generation;compact=data.compact===true;}
+    if(Number.isFinite(data.width)&&data.width>0&&data.width<=20000)measuredWidth=data.width;
+    if(Number.isFinite(data.height)&&data.height>0&&data.height<=20000)measuredHeight=data.height;
     if(paneId&&window.QfNativeTools){window.QfNativeTools.configureShared(paneId);
       window.QfNativeTools.onCommit=d=>emit({kind:'qf-drawings-commit',...d});
       window.QfNativeTools.onUndo=d=>emit({kind:'qf-drawings-undo',...d});
@@ -100,6 +107,15 @@
     try{const result=window.QfNativeHistory.inspect();
       configureView();
       const view=document.querySelector('.tq-top-view')?.__vue__;
+      const socket=view?.$tqsdk?.quotesWs?.ws;
+      result.md_connected=typeof socket?.readyState==='number'?socket.readyState===1:null;
+      result.viewport_width=result.render_width||view?.$root?.windowWidth;
+      result.viewport_height=result.render_height?result.render_height+26:view?.$root?.windowHeight;
+      // 原生组件可能在初次数据到达前初始化；仅在真实数据已存在时重新绑定。
+      if(result.status==='loading'&&result.reason==='series_loading'&&Date.now()-repairAt>1000){
+        const source=view?.$tqsdk?.get_by_path?.(['klines',requestedSymbol,periods[requestedPeriod]]);
+        if(source?.last_id>=0&&source.data?.[source.last_id]?.datetime>0){repairAt=Date.now();view.$refs?.tqChart?.updateTqChart();}
+      }
       const period=view?.mainType==='close'?'close':Object.keys(periods).find(p=>p!=='close'&&periods[p]===view?.duration);
       if(view?.instrumentId===requestedSymbol&&period&&period!==lastPeriod){lastPeriod=period;emit({kind:'qf-chart-period',period});}
       emit({kind:'qf-chart-state',...result});

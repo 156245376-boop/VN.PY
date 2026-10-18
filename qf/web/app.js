@@ -129,8 +129,9 @@ for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>
   $('page-title').textContent={home:'研究工作台',market:'行情与品种',research:'策略研究与模拟',news:'新闻与事件',settings:'设置与资源'}[view]};
 addEventListener('qf-native-labels-ready',()=>{nativeLabelsReady=true;if(api)render()});
 addEventListener('qf-native-labels-error',()=>notice('图表适配未能准备完成，请重新打开工作台。'));
-window.qfPrepareExit=()=>{exiting=true;clearInterval(pollTimer);workspace?.dispose();$('password').value='';
-  document.querySelectorAll('button,input,select').forEach(e=>e.disabled=true);notice('正在退出，请稍候…')};
+window.qfPrepareExit=()=>{if(exiting)return 'qf-exit-pending';exiting=true;clearInterval(pollTimer);$('password').value='';
+  document.querySelectorAll('button,input,select').forEach(e=>e.disabled=true);notice('正在保存布局并退出，请稍候…');
+  Promise.resolve(workspace?.flush()).finally(()=>{workspace?.dispose();window.qfExitReady=true;});return 'qf-exit-pending';};
 addEventListener('pywebviewready',async()=>{api=window.pywebview.api;
   try{await refreshLogin(true);const saved=await api.get_workspace();
     workspace=QfChartWorkspace.create($('chart-workspace'),{config:saved.workspace,

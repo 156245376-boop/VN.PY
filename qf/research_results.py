@@ -45,6 +45,7 @@ def read_run(root, run_id):
     config, state, _, _, span = _read(root, run_id)
     return dict(run_id=run_id, config=config.public(), status=state.get('status', 'created'),
                 reason=state.get('reason'), fee_multiplier=state.get('fee_multiplier', 1),
+                risk=state.get('risk_state', {}), experiment_ref=state.get('experiment_ref'),
                 cost_source=state.get('cost_source'), precision=config.precision,
                 coverage=dict(first_ns=str(span[0]) if span[0] else None,
                               last_ns=str(span[1]) if span[1] else None, bars=span[2]))

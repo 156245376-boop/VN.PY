@@ -13,9 +13,9 @@
   <nav aria-label="工作空间">
     <button class="nav active" data-view="home">◫　研究首页</button>
     <button class="nav" data-view="market">▥　行情与品种</button>
-    <button class="nav" data-view="research">⌘　策略与参数</button>
-    <button class="nav" data-view="research">↗　回测与比较</button>
-    <button class="nav" data-view="research">◎　模拟运行</button>
+    <button class="nav" data-view="strategy">⌘　策略与参数</button>
+    <button class="nav" data-view="backtests">↗　回测与比较</button>
+    <button class="nav" data-view="paper">◎　模拟运行</button>
     <button class="nav" data-view="news">◷　新闻与事件</button>
   </nav>
   <div class="nav-bottom"><button class="nav" data-view="settings">⚙　设置与资源</button>
@@ -42,10 +42,7 @@
     <button class="primary" data-resource="legacy">打开策略研究窗口 ↗</button>
   </section>
   <section id="research-panel" class="card information" hidden>
-    <span class="eyebrow">研究与模拟</span><h2>继续你的策略验证</h2>
-    <p>现有研究窗口提供固定样本回测、基准与双倍费用比较，以及快期模拟观察和显式模拟策略。</p>
-    <p>自由选择策略参数、复制实验与历史 K 线复盘尚未接入此页面。</p>
-    <button class="primary" data-resource="legacy">打开现有研究窗口</button>
+    <div id="research-content"></div>
   </section>
   <section id="news-panel" class="card information" hidden>
     <span class="eyebrow">新闻与财经日历</span><h2>关注影响交易的事件</h2>
@@ -102,5 +99,7 @@
 <script src="indicator-controller.js"></script>
 <script src="indicator-panel.js"></script>
 <script src="chart-workspace.js"></script>
+<script src="research-form.js"></script>
+<script src="research.js"></script>
 <script src="app.js"></script>
 </body></html>

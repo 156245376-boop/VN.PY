@@ -90,9 +90,16 @@ def discover_contracts(sdk, credentials, *, continuous, start, end, timeout):
         result = []
         for symbol, quote in quotes:
             if quote.expire_datetime >= first:
-                result.append(dict(symbol=symbol, name=str(quote.instrument_name),
-                                   expire_datetime=quote.expire_datetime,
-                                   coverage='上市起点与账户历史权限需回测核实'))
+                item = dict(symbol=symbol, name=str(quote.instrument_name),
+                            expire_datetime=quote.expire_datetime,
+                            coverage='上市起点与账户历史权限需回测核实')
+                for field, attr in [('price_tick', 'price_tick'),
+                                    ('volume_multiple', 'volume_multiple'),
+                                    ('margin_per_lot', 'margin'),
+                                    ('commission_per_lot', 'commission')]:
+                    value = getattr(quote, attr, float('nan'))
+                    item[field] = value if math.isfinite(value) else None
+                result.append(item)
         return sorted(result, key=lambda r: (r['expire_datetime'], r['symbol']))
     finally:
         if api:
@@ -275,11 +282,12 @@ class ResearchLoop:
 
 def execute_research(mode, config, root, credentials, *, sdk=None, activate=False, resume=None,
                      fee_multiplier=1, stop_requested=lambda: False,
-                     flatten_requested=lambda: False, progress=None):
+                     flatten_requested=lambda: False, progress=None, experiment_ref=None):
     config = validate_research_config(config.public())
     if (mode not in ('backtest', 'paper') or type(activate) is not bool
             or (mode != 'paper' and (activate or resume))
-            or fee_multiplier not in (1, 2) or (mode == 'paper' and fee_multiplier != 1)):
+            or type(fee_multiplier) is not int or fee_multiplier not in (1, 2)
+            or (mode == 'paper' and fee_multiplier != 1)):
         raise ValueError('研究运行模式无效')
     if sdk is None:
         import tqsdk as sdk
@@ -287,13 +295,16 @@ def execute_research(mode, config, root, credentials, *, sdk=None, activate=Fals
     root.mkdir(parents=True, exist_ok=True)
     with PaperLock(root) if mode == 'paper' else nullcontext():
         return _run(sdk, mode, config, root, credentials, activate, resume, fee_multiplier,
-                    stop_requested, flatten_requested, progress)
+                    stop_requested, flatten_requested, progress, experiment_ref)
 
 
 def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
-         stop_requested, flatten_requested, progress):
+         stop_requested, flatten_requested, progress, experiment_ref):
     j = (ResearchJournal.resume(run_path(root, resume), config.public()) if resume else
-         ResearchJournal.create(root, mode, config.public(), provenance()))
+         ResearchJournal.create(root, mode, config.public(),
+                                provenance() | {'experiment_ref': experiment_ref}))
+    if not resume:
+        j.set('experiment_ref', experiment_ref)
     api, loop, account = None, None, None
     paper, status, reason = mode == 'paper', 'failed', 'sdk_or_auth_or_permission_error'
     confirmed = True

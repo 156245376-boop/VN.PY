@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict');
+require('../qf/web/research-form.js');
+const f=globalThis.QfResearchForm;
+const raw=f.defaults();
+assert.equal(raw.fast_period,5);assert.equal(raw.slow_period,20);
+assert.equal(raw.risk.stop_ticks,'');
+const risk={...raw.risk,stop_ticks:30,max_lots:10,risk_budget:1000,max_margin_ratio:.5};
+const preview=f.preview(risk,{price_tick:1,volume_multiple:10,margin_per_lot:3000},100000);
+assert.equal(preview.lots,3);assert.equal(preview.initial_r,900);assert.equal(preview.take_profit,2700);
+assert.equal(f.preview(risk,null,100000),null);
+console.log('RESEARCH_FORM_OK');

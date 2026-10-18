@@ -4,11 +4,13 @@ import re
 import subprocess
 import threading
 import webbrowser
+from datetime import date
 from pathlib import Path
 
 from qf.chart_workspace import PERIODS, ChartWorkspaceStore, period_for, validate_panes
 from qf.credentials import SavedLogin
 from qf.desktop import allowed_chart_url
+from qf.experiment_store import ExperimentStore
 from qf.history import HISTORY_ISSUES
 from qf.indicator_catalog import indicator_catalog
 from qf.indicator_jobs import IndicatorJobs
@@ -17,6 +19,8 @@ from qf.market import catalog_rows
 from qf.market_account import public_account
 from qf.market_session import MarketSession
 from qf.market_units import price_unit
+from qf.research_config import validate_research_config
+from qf.research_session import ResearchSession
 from qf.window_host import run_window
 from qf.workbench_store import WorkbenchStore
 
@@ -54,7 +58,8 @@ def _history_summary(raw):
 
 
 class WorkbenchBridge:
-    def __init__(self, root: Path, session: MarketSession, *, credential_store=None):
+    def __init__(self, root: Path, session: MarketSession, *, credential_store=None,
+                 research_session=None):
         self._root, self._session = root, session
         self._lock = threading.RLock()
         self._store = WorkbenchStore(root / "data/workbench")
@@ -68,6 +73,84 @@ class WorkbenchBridge:
         self._workspace_requests = None
         self._indicator_store = IndicatorStore(root / 'data/workbench')
         self._indicator_jobs = IndicatorJobs()
+        self._experiments = ExperimentStore(root / 'data/workbench/experiments')
+        self._research = research_session or ResearchSession(root / 'results')
+        self._research_credentials = None
+
+    def get_experiments(self):
+        with self._lock:
+            return {'ok': True, 'experiments': self._experiments.list()}
+
+    def save_experiment(self, raw, experiment_id=None):
+        with self._lock:
+            try:
+                config = validate_research_config(raw)
+                return dict(ok=True, experiment=self._experiments.save(
+                    config, experiment_id=experiment_id), config=config.public())
+            except (ValueError, TypeError, KeyError, OSError):
+                return dict(ok=False, reason='实验未保存，请核对合约、周期和风险参数。')
+
+    def copy_experiment(self, experiment_id, revision, name):
+        with self._lock:
+            try:
+                ref = self._experiments.copy(experiment_id, revision, name=name)
+                return dict(ok=True, experiment=ref, config=self._experiments.load(
+                    ref['experiment_id'], ref['revision']).public())
+            except (ValueError, TypeError, KeyError, OSError):
+                return dict(ok=False, reason='实验未复制，请先保存有效实验。')
+
+    def _research_login(self):
+        if self._research_credentials:
+            return self._research_credentials
+        return self._login.resolve(self._login.info()['user'], '')
+
+    def get_research_contracts(self, continuous, start, end):
+        with self._lock:
+            try:
+                if continuous not in {r['continuous'] for r in self._catalog}:
+                    raise ValueError('未知品种')
+                first, last = date.fromisoformat(start), date.fromisoformat(end)
+                if first > last:
+                    raise ValueError('日期倒序')
+                return self._research.query_contracts(self._research_login(),
+                    continuous=continuous, start=first, end=last)
+            except Exception:
+                return dict(ok=False, reason='请先连接行情或保存快期凭证，并核对品种与日期。')
+
+    def start_research(self, experiment_id, revision, mode, activate=False, resume=None,
+                       fee_multiplier=1):
+        with self._lock:
+            try:
+                config = self._experiments.load(experiment_id, revision)
+                snapshot = self._research.snapshot()
+                expected = dict(continuous=config.continuous,
+                                start=str(config.start), end=str(config.end))
+                if (snapshot.get('contract_request') != expected
+                        or config.symbol not in {r['symbol'] for r in snapshot['contracts']}):
+                    raise ValueError('请先查询并选择当前区间实际合约')
+                return self._research.start(mode, config, self._research_login(), activate=activate,
+                    resume=resume, fee_multiplier=fee_multiplier,
+                    experiment_ref=dict(experiment_id=experiment_id, revision=revision))
+            except Exception:
+                return dict(ok=False, reason='未开始运行：请核对合约、参数和凭证；已有任务需先停止。')
+
+    def stop_research(self, flatten=False):
+        try:
+            self._research.stop(flatten=flatten)
+            return dict(ok=True, reason='正在平仓并停止，请核对成交。' if flatten
+                        else '正在停止任务；停止不代表平仓。')
+        except ValueError:
+            return dict(ok=False, reason='当前实验不可执行此停止操作。')
+
+    def get_research_state(self):
+        return self._research.snapshot()
+
+    def exit_message(self):
+        state = self._research.snapshot()
+        if state.get('running'):
+            return ('确定退出天勤策略工作台吗？研究任务将停止，持仓不会自动平仓；'
+                    '退出后本地止损保护不再运行，未确认的委托会保留为待核实状态。')
+        return '确定退出天勤策略工作台吗？'
 
     def get_indicators(self):
         with self._lock:
@@ -190,6 +273,7 @@ class WorkbenchBridge:
                 credentials = self._login.resolve(user, password)
                 self._login.prepare(*credentials, remember)
                 self._session.start(*credentials)
+                self._research_credentials = credentials
                 self._selected = None
                 self._chart_mode = "actual"
                 self._workspace_requests = None
@@ -329,7 +413,11 @@ class WorkbenchBridge:
     def _request_close(self):
         self._indicator_jobs.close()
         self._session.stop()
-        return not self._session.running
+        research_closed = self._research.close()
+        if research_closed and not self._session.running:
+            self._research_credentials = None
+            return True
+        return False
 
 
 def main():

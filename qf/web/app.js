@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
 const names = {idle:'未连接',connecting:'正在连接',ready:'已连接',waiting_data:'已连接',
   disconnected:'连接中断',stopping:'正在断开',stopped:'已断开',failed:'连接失败'};
 let api, state={catalog:[],rows:[],favorites:[]}, selected=null, page=0, favoritesOnly=false;
-let ticking=false,lastView='',exiting=false,pollTimer,workspace;
+let ticking=false,lastView='',exiting=false,pollTimer,workspace,research;
 const favoriteQueue=[];
 let favoriteSaving=false, favoriteVersion=0;
 let favoriteContextSymbol=null;
@@ -91,7 +91,7 @@ function render(){if(exiting)return;const current=workspace?.getConfig();if(curr
 async function tick(){if(exiting||ticking)return;ticking=true;const version=favoriteVersion;try{const incoming=await api.get_state();
   if(exiting)return;
   if(favoriteSaving||version!==favoriteVersion)incoming.favorites=state.favorites;
-  state=incoming;if(!selected)selected=state.selected||state.catalog.find(r=>r.product==='rb')?.continuous||state.catalog[0]?.continuous;
+  state=incoming;research?.updateCatalog(state.catalog);if(!selected)selected=state.selected||state.catalog.find(r=>r.product==='rb')?.continuous||state.catalog[0]?.continuous;
   if(loginStatus!==state.status){loginStatus=state.status;await refreshLogin()}
   $('status').textContent=names[state.status]||'状态待核实';
   $('status').dataset.light=['connecting','stopping'].includes(state.status)?'yellow':state.connected===true?'green':'red';
@@ -123,17 +123,20 @@ $('only-favorites').onclick=()=>{favoritesOnly=!favoritesOnly;$('only-favorites'
 for(const button of document.querySelectorAll('[data-resource]'))button.onclick=async()=>notice((await api.open_resource(button.dataset.resource)).reason);
 for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>{const view=button.dataset.view;
   document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b===button));
-  for(const section of ['home','research','news','settings'])$(section+'-panel').hidden=section!==view;
+  for(const section of ['home','research','news','settings'])$(section+'-panel').hidden=
+    section==='research'?!['strategy','backtests','paper'].includes(view):section!==view;
+  research?.show(view);
   const show=['home','market'].includes(view);$('market-layout').hidden=!show;
   $('chart-workspace').hidden=!show;workspace?.setVisible(show);
-  $('page-title').textContent={home:'研究工作台',market:'行情与品种',research:'策略研究与模拟',news:'新闻与事件',settings:'设置与资源'}[view]};
+  $('page-title').textContent={home:'研究工作台',market:'行情与品种',strategy:'策略与参数',backtests:'回测与比较',paper:'模拟运行',news:'新闻与事件',settings:'设置与资源'}[view]};
 addEventListener('qf-native-labels-ready',()=>{nativeLabelsReady=true;if(api)render()});
 addEventListener('qf-native-labels-error',()=>notice('图表适配未能准备完成，请重新打开工作台。'));
 window.qfPrepareExit=()=>{if(exiting)return 'qf-exit-pending';exiting=true;clearInterval(pollTimer);$('password').value='';
   document.querySelectorAll('button,input,select').forEach(e=>e.disabled=true);notice('正在保存布局并退出，请稍候…');
-  Promise.resolve(workspace?.prepareExit?.()||workspace?.flush()).finally(()=>{workspace?.dispose();window.qfExitReady=true;});return 'qf-exit-pending';};
+  Promise.all([workspace?.prepareExit?.()||workspace?.flush(),research?.prepareExit()]).finally(()=>{workspace?.dispose();research?.dispose();window.qfExitReady=true;});return 'qf-exit-pending';};
 addEventListener('pywebviewready',async()=>{api=window.pywebview.api;
   try{await refreshLogin(true);const saved=await api.get_workspace(),indicators=await api.get_indicators();
+    research=QfResearch.create($('research-content'),api);research.show('home');
     QfIndicatorState.install(indicators.catalog,indicators.defaults);
     workspace=QfChartWorkspace.create($('chart-workspace'),{config:saved.workspace,indicators,
       onIndicatorSubmit:r=>api.submit_indicator_calculation(r),onIndicatorPoll:ids=>api.poll_indicator_calculations(ids),onIndicatorSave:c=>api.save_indicators(c),

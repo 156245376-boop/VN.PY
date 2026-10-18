@@ -83,7 +83,9 @@ def run_window(page: Path, bridge, request_close, *, webview_module=None):
             return True
         if waiting.is_set():
             return False
-        if not window.create_confirmation_dialog("确认退出", "确定退出天勤策略工作台吗？"):
+        message = bridge.exit_message() if callable(getattr(bridge, 'exit_message', None)) \
+            else '确定退出天勤策略工作台吗？'
+        if not window.create_confirmation_dialog("确认退出", message):
             return False
         waiting.set()
         threading.Thread(target=finish_close, daemon=True).start()

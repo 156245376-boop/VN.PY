@@ -10,7 +10,9 @@
     if(!(i.type==='vp'?['vp','vp-fixed']:[i.type]).includes(i.id)||!keys(i.params,Object.keys(catalog[i.type].params)))fail();
     for(const [k,v] of Object.entries(i.params)){
       if(k==='periods'){if(!Array.isArray(v)||!v.length||v.length>8||new Set(v).size!==v.length||v.some(n=>!number(n,1,1000,true)))fail();}
-      else if(['n','m','m1','m2','short','long'].includes(k)){if(!number(v,1,1000,true))fail();}
+      else if(['n','m','m1','m2','short','long','mean_length','std_length'].includes(k)){if(!number(v,1,1000,true))fail();}
+      else if(k==='source'){if(!['open','high','low','close'].includes(v))fail();}
+      else if(k==='reference_lines'){if(typeof v!=='boolean')fail();}
       else if(k==='p'){if(!number(v,.01,100))fail();}
       else if(['step','max'].includes(k)){if(!number(v,.000001,1))fail();}
       else if(k==='ticks_per_row'){if(!number(v,0,10000,true))fail();}
@@ -29,7 +31,7 @@
   }
   function validate(c){
     if(!keys(c,['schema','panes'])||c.schema!==1||!keys(c.panes,['pane-1','pane-2','pane-3','pane-4']))throw Error('指标设置无效');
-    for(const p of Object.values(c.panes)){if(!keys(p,['items'])||!Array.isArray(p.items)||p.items.length>15)throw Error('指标设置无效');
+    for(const p of Object.values(c.panes)){if(!keys(p,['items'])||!Array.isArray(p.items)||p.items.length>Object.keys(catalog).length+1)throw Error('指标设置无效');
       const seen=new Set();for(const i of p.items){check(i);if(seen.has(i.id))throw Error('指标已添加');seen.add(i.id);}}
     return clone(c);
   }

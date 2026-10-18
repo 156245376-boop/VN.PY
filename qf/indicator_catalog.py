@@ -18,6 +18,8 @@ CATALOG = {
     'cci': ('顺势指标 CCI', 'sub', {'n': 14}),
     'dmi': ('趋向指标 DMI', 'sub', {'n': 14, 'm': 6}),
     'obv': ('能量潮 OBV', 'sub', {}),
+    'zscore': ('标准分数 Z-Score', 'sub', {'source': 'close', 'mean_length': 10,
+                                        'std_length': 10, 'reference_lines': True}),
     'volume': ('成交量', 'sub', {}), 'oi': ('持仓量', 'sub', {}),
 }
 COLORS = ['#dc8c32', '#377bd1', '#ac57b1', '#25896b', '#d9534f', '#73828c',
@@ -65,8 +67,12 @@ def validate_item(raw: object) -> dict:
                 raise ValueError('均线周期需要 1–8 个且不重复')
             for period in value:
                 number(period, 1, 1000, integer=True)
-        elif key in ('n', 'm', 'm1', 'm2', 'short', 'long'):
+        elif key in ('n', 'm', 'm1', 'm2', 'short', 'long', 'mean_length', 'std_length'):
             number(value, 1, 1000, integer=True)
+        elif key == 'source' and value not in ('open', 'high', 'low', 'close'):
+            raise ValueError('Z-Score 输入须为开、高、低或收盘价')
+        elif key == 'reference_lines' and type(value) is not bool:
+            raise ValueError('参考线开关无效')
         elif key == 'p':
             number(value, .01, 100)
         elif key in ('step', 'max'):

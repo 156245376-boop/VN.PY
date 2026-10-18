@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from qf.indicator_catalog import default_item, validate_item
+from qf.indicator_catalog import CATALOG, default_item, validate_item
 
 
 def default_indicators() -> dict:
@@ -22,7 +22,7 @@ def validate_indicator_config(raw: object) -> dict:
         raise ValueError('指标设置格式无效')
     for pane in raw['panes'].values():
         if (not isinstance(pane, dict) or set(pane) != {'items'}
-                or not isinstance(pane['items'], list) or len(pane['items']) > 15):
+                or not isinstance(pane['items'], list) or len(pane['items']) > len(CATALOG)+1):
             raise ValueError('每格指标设置无效')
         seen = set()
         for item in pane['items']:

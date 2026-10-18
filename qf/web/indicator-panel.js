@@ -2,6 +2,7 @@
 (() => {
   'use strict';const S=()=>QfIndicatorState;
   const labels={periods:'均线周期（逗号分隔，可增减）',n:'计算周期',m:'平滑周期',m1:'第一平滑周期',m2:'第二平滑周期',short:'短周期',long:'长周期',p:'标准差倍数',step:'加速步长',max:'加速上限',ticks_per_row:'每价格档跳数（0 为自动）'};
+  Object.assign(labels,{source:'输入价格',mean_length:'均值周期（根）',std_length:'标准差周期（根）',reference_lines:'显示 0、±1、±2 参考线'});
   function timeInput(ns){return ns?new Date(Number(BigInt(ns)/1000000n)+8*3600e3).toISOString().slice(0,19):'';}
   function timeValue(text,previous){if(previous&&text===timeInput(previous))return previous;
     if(!/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d)?$/.test(text))throw Error('请填写完整的北京时间');
@@ -9,7 +10,7 @@
   function parameters(item,values){const next=S().clone(item);
     for(const [key,value]of Object.entries(values)){
       if(key==='periods')next.params[key]=String(value).split(/[,，\s]+/).filter(Boolean).map(Number);
-      else if(key==='mode')next.params.mode=value;else next.params[key]=Number(value);}
+      else if(['mode','source','reference_lines'].includes(key))next.params[key]=value;else next.params[key]=Number(value);}
     return S().check(next);
   }
   function create(root,options){let pane=null,config=null;root.className='indicator-panel';root.hidden=true;
@@ -30,13 +31,16 @@
         function field(label,input){const l=el('label',label);l.append(input);box.append(l);return input;}
         const inputs={};for(const [key,value]of Object.entries(item.params)){
           if(key==='range')continue;
-          const input=el(key==='mode'?'select':'input');input.dataset.param=key;
+          const input=el(['mode','source'].includes(key)?'select':'input');input.dataset.param=key;
           if(key==='mode'){input.add(new Option('当前屏幕范围','screen'));input.add(new Option('自己选择固定区间','fixed'));input.value=value;}
+          else if(key==='source'){for(const [id,name]of Object.entries({close:'收盘／最新价',open:'开盘价',high:'最高价',low:'最低价'}))input.add(new Option(name,id));input.value=value;}
+          else if(key==='reference_lines'){input.type='checkbox';input.checked=value;}
           else{input.type=key==='periods'?'text':'number';input.value=Array.isArray(value)?value.join(', '):value;input.step=['step','max','p'].includes(key)?'any':'1';}
+          if(['mean_length','std_length'].includes(key)){input.min=1;input.max=1000;}
           inputs[key]=field(key==='mode'?'统计范围':labels[key]||key,input);
         }
         const style=S().clone(item.style),colors=[];
-        for(let n=0;n<Math.min(item.type==='ma'||item.type==='ema'?item.params.periods.length:3,8);n++){
+        for(let n=0;n<Math.min(item.type==='ma'||item.type==='ema'?item.params.periods.length:item.type==='zscore'?1:3,8);n++){
           const input=el('input');input.type='color';input.value=style.colors[n%style.colors.length];input.dataset.color=String(n);
           field((item.params.periods?.[n]??['第一','第二','第三'][n])+'线颜色',input);colors.push(input);}
         const width=el('input');width.type='number';width.min=1;width.max=6;width.value=style.width;field('线宽（像素）',width);
@@ -59,7 +63,7 @@
         const apply=el('button','应用参数');apply.type='submit';actions.append(apply,
           button('恢复默认',()=>{const next=S().item(item.type,item.id);if(item.id==='vp-fixed')next.params.mode='fixed';change({type:'change',item:next});}),
           button('上移',()=>change({type:'move',id:item.id,delta:-1})),button('下移',()=>change({type:'move',id:item.id,delta:1})));box.append(actions);
-        box.onsubmit=e=>{e.preventDefault();try{const next=parameters(item,Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.value])));
+        box.onsubmit=e=>{e.preventDefault();try{const next=parameters(item,Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.type==='checkbox'?v.checked:v.value])));
           next.style.colors=colors.map(c=>c.value);next.style.width=Number(width.value);next.height=Number(height.value);
           if(side){next.style.side=side.value;next.style.width_pct=Number(percent.value);next.style.transparency=Number(transparency.value);next.style.poc=poc.checked;}
           if(startInput&&(startInput.value||endInput.value)){next.params.range={symbol:options.symbol?.(pane)||item.params.range?.symbol||'',start_ns:timeValue(startInput.value,item.params.range?.start_ns),end_ns:timeValue(endInput.value,item.params.range?.end_ns)};}

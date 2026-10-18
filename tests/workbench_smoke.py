@@ -168,10 +168,21 @@ def exercise():
                         document.querySelector('.indicator-kind').value=kind;
                         [...document.querySelectorAll('.indicator-panel button')]
                           .find(b=>b.textContent==='添加指标').click();};
-                      addIndicator('ma');addIndicator('macd');addIndicator('vp');
+                      addIndicator('ma');addIndicator('macd');addIndicator('vp');addIndicator('zscore');
+                      const z=document.querySelector('[data-indicator="zscore"]');
+                      z.querySelector('[data-param="source"]').value='high';
+                      z.querySelector('[data-param="mean_length"]').value='7';
+                      z.querySelector('[data-param="std_length"]').value='13';
+                      z.querySelector('[data-param="reference_lines"]').checked=false;
+                      z.requestSubmit();
                     """)
                     check("chartObservations['pane-1']?.indicatorPlots?.some(k=>k.startsWith('qf_ma_'))")
                     check("chartObservations['pane-1']?.indicatorPlots?.some(k=>k.startsWith('qf_macd_'))")
+                    check("chartObservations['pane-1']?.indicatorPlots?.includes('qf_zscore_zscore')")
+                    stored = bridge.get_indicators()['config']['panes']['pane-1']['items']
+                    assert next(i for i in stored if i['type'] == 'zscore')['params'] == {
+                        'source': 'high', 'mean_length': 7, 'std_length': 13,
+                        'reference_lines': False}
                     # 仅切换离线模拟 socket 状态；缓存仍存在时断线也要撤下指标。
                     socket = "document.querySelector('#chart').contentWindow.postMessage"
                     window.evaluate_js(socket+"({kind:'offline-socket-state',connected:false},'*')")

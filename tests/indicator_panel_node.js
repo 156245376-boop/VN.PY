@@ -8,4 +8,14 @@ assert.deepEqual(changed.params.periods,[5,20,120]);assert.deepEqual(ma.params.p
 assert.throws(()=>QfIndicatorPanel.parameters(ma,{periods:'5,0'}));
 const macd=QfIndicatorState.item('macd');
 assert.throws(()=>QfIndicatorPanel.parameters(macd,{short:'30',long:'26',m:'9'}));
+const zscore=QfIndicatorState.item('zscore');
+const z=QfIndicatorPanel.parameters(zscore,{source:'high',mean_length:'7',std_length:'13',reference_lines:false});
+assert.deepEqual(z.params,{source:'high',mean_length:7,std_length:13,reference_lines:false});
+assert.throws(()=>QfIndicatorPanel.parameters(zscore,{mean_length:'0'}));
+assert.throws(()=>QfIndicatorPanel.parameters(zscore,{source:'expression'}));
+assert.throws(()=>QfIndicatorState.check({...zscore,params:{...zscore.params,reference_lines:'true'}}));
+let all=QfIndicatorState.defaults();all.panes['pane-1'].items=[];
+for(const kind of Object.keys(meta))all=QfIndicatorState.reduce(all,{type:'add',pane:'pane-1',kind});
+all=QfIndicatorState.reduce(all,{type:'add',pane:'pane-1',kind:'vp'});
+assert.equal(all.panes['pane-1'].items.length,Object.keys(meta).length+1);
 console.log('INDICATOR_PANEL_OK');

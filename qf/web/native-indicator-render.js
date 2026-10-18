@@ -2,6 +2,7 @@
 (() => {
   'use strict';const attached=new WeakMap();
   const names={ma:'简单均线',ema:'指数均线',boll:'布林带',sar:'抛物线',macd:'MACD',kdj:'KDJ',rsi:'RSI',atr:'真实波幅',cci:'CCI',dmi:'DMI',obv:'能量潮',volume:'成交量',oi:'持仓量'};
+  names.zscore='标准分数 Z-Score';
   const periodName=p=>({'1m':'1分钟','5m':'5分钟','15m':'15分钟','30m':'30分钟','1h':'1小时','1d':'日线',close:'分时'}[p]||p);
   const timeName=stamp=>{if(!/^\d{16,20}$/.test(stamp||''))return '尚未计算';const d=new Date(Number(BigInt(stamp)/1000000n)+8*3600000);return Number.isFinite(d.getTime())?d.toISOString().slice(0,19).replace('T',' '):'时间超出显示范围';};
   function dataNote(result,period){return ((result.profiles||[]).length?'VP 估算 · 按收盘价归集 · '+periodName(period)+'；':'')+
@@ -28,6 +29,7 @@
     const handles=new Map(),legends=new Map();let hoverId=null;
     function legendText(item,series){
       const p=item.params,kind=item.type.toUpperCase();
+      if(item.type==='zscore')return 'Z-Score('+p.mean_length+','+p.std_length+'；'+({close:'收盘／最新价',open:'开盘价',high:'最高价',low:'最低价'}[p.source])+')';
       const keys={boll:['n','p'],sar:['n','step','max'],macd:['short','long','m'],kdj:['n','m1','m2'],rsi:['n'],atr:['n'],cci:['n'],dmi:['n','m']};
       const parameters=['ma','ema'].includes(item.type)?series.name:(keys[item.type]||[]).map(k=>p[k]).join(',');
       const output={diff:'DIF',dea:'DEA',bar:'柱',mid:'中轨',top:'上轨',bottom:'下轨',upper:'上轨',lower:'下轨'}[series.name]||series.name.toUpperCase();
@@ -95,10 +97,14 @@
       for(const pair of pairs)for(const node of pair)table.table.dom.insertBefore(node,table.timeAxisBoard._rootElement.dom);
       table.update();
     }
-    function patchPlot(plot,bars){
-      plot.getYDomain=function(left,right,data){const values=data.slice(left,right+1).filter(Boolean).map(p=>p.value);if(!values.length)return [Infinity,-Infinity];
+    function patchPlot(plot,bars,references=[]){
+      plot.getYDomain=function(left,right,data){const values=data.slice(left,right+1).filter(Boolean).map(p=>p.value).concat(references);if(!values.length)return [Infinity,-Infinity];
         let lo=Math.min(...values),hi=Math.max(...values);if(bars){lo=Math.min(0,lo);hi=Math.max(0,hi);}const pad=(hi-lo)*.1||Math.max(1,Math.abs(hi)*.01);return [lo-pad,hi+pad];};
-      plot.draw=function(ctx,left,right,input){const data=input||this.data,dpr=window.devicePixelRatio||1;ctx.save();ctx.strokeStyle=this.color;ctx.fillStyle=this.color;ctx.lineWidth=this.width*dpr;ctx.beginPath();let last=null;
+      plot.draw=function(ctx,left,right,input){const data=input||this.data,dpr=window.devicePixelRatio||1;
+        if(references.length){ctx.save();ctx.lineWidth=dpr;ctx.setLineDash([4*dpr,4*dpr]);
+          for(const level of references){ctx.strokeStyle=level===0?'#697b73':'#a2afa8';const y=this.yScale(level)*dpr;
+            ctx.beginPath();ctx.moveTo(left*chart.bar.step*dpr,y);ctx.lineTo((right+1)*chart.bar.step*dpr,y);ctx.stroke();}ctx.restore();}
+        ctx.save();ctx.strokeStyle=this.color;ctx.fillStyle=this.color;ctx.lineWidth=this.width*dpr;ctx.beginPath();let last=null;
         for(let id=left;id<=right;id++){const p=data[id];if(!p||!Number.isFinite(p.value)){last=null;continue;}
           const x=(id*chart.bar.step+chart.bar.barWidth/2)*dpr,y=this.yScale(p.value)*dpr;
           if(bars){ctx.fillStyle=p.value>=0?'#d9504e':'#2c936b';const base=this.yScale(0)*dpr;ctx.fillRect(id*chart.bar.step*dpr,Math.min(y,base),Math.max(1,chart.bar.barWidth*dpr),Math.max(1,Math.abs(base-y)));}
@@ -116,7 +122,7 @@
         chart.addSeries(id,{type:'SERIAL',board,style:'LINE',yAlign:item.type==='oi'?'left':'right',data,
           color:item.style.colors[index%item.style.colors.length],width:item.style.width});
         const plot=chart.plots[id];if(!plot)continue;plot.data=data;plot.plotId=(names[item.type]||item.type.toUpperCase())+' '+series.name+'（'+(series.unit==='价格'?info.priceUnit:series.unit==='指标值'?'无量纲':series.unit)+'）';
-        patchPlot(plot,item.type==='volume'||item.type==='macd'&&series.name==='bar');managed.add(id);
+        patchPlot(plot,item.type==='volume'||item.type==='macd'&&series.name==='bar',item.type==='zscore'&&item.params.reference_lines?[-2,-1,0,1,2]:[]);managed.add(id);
       }
       trimBoards(wanted);orderBoards();layout();
     }finally{busy=false;}chart.draw();}

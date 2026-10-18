@@ -31,6 +31,9 @@ def exercise():
                          ('volume', 'oi', 'ma', 'boll', 'macd', 'rsi', 'vp')]}
     result = calculate_indicators(dict(rows=rows, items=settings['items'], price_tick=1,
         symbol='SHFE.rb2701', period='1m', visible=[0, 219]))
+    z_config = {'items': [*settings['items'], default_item('zscore')]}
+    z_output = calculate_indicators(dict(rows=rows, items=z_config['items'], price_tick=1,
+        symbol='SHFE.rb2701', period='1m', visible=[0, 219]))
     probe = """
       let tested=false;const timer=setInterval(()=>{
         if(tested||!window.QfNativeIndicatorRender||QfNativeHistory.inspect().status!=='ready')return;
@@ -124,12 +127,30 @@ def exercise():
             const vp=document.querySelectorAll('.qf-vp rect').length;
             if(!vp)throw Error('VP 未绘制');
             assertAuto();
+            r.apply(Z_OUTPUT,Z_CONFIG);
+            let zplot=chart.plots.qf_zscore_zscore;
+            if(!zplot||![...document.querySelectorAll('.qf-indicator-legend')]
+              .some(el=>el.textContent.includes('Z-Score(10,10')))
+              throw Error('Z-Score 副图或参数图例缺失');
+            function dashedCount(plot){let dash=[],count=0;
+              const ctx={save(){},restore(){},beginPath(){},moveTo(){},lineTo(){},
+                setLineDash(value){dash=value;},stroke(){if(dash.length)count++;}};
+              plot.draw(ctx,0,219,plot.data);return count;}
+            if(dashedCount(zplot)<5)throw Error('Z-Score 参考线未绘制');
+            const domain=zplot.getYDomain(0,219,zplot.data);
+            if(domain[0]>-2||domain[1]<2)throw Error('参考线未纳入副图价格域');
+            const zOff=JSON.parse(JSON.stringify(Z_CONFIG));
+            zOff.items.find(i=>i.type==='zscore').params.reference_lines=false;
+            r.configure(zOff,true);r.apply(Z_OUTPUT,zOff);zplot=chart.plots.qf_zscore_zscore;
+            if(dashedCount(zplot))throw Error('关闭参考线后仍在绘制');
             parent.postMessage({kind:'indicator-smoke',boards,plots:plots.length,vp,
               bridge:!!window.pywebview?.api,moved:chart.chartCtrl.pixelLeft!==before},'*');
           }catch(e){parent.postMessage({kind:'indicator-smoke',error:String(e)},'*');}},400);
         }catch(e){parent.postMessage({kind:'indicator-smoke',error:String(e)},'*');}
       },100);
     """.replace('SETTINGS', json.dumps(settings)).replace('RESULT', json.dumps(result))
+    probe = (probe.replace('Z_CONFIG', json.dumps(z_config))
+             .replace('Z_OUTPUT', json.dumps(z_output)))
     server = threading.Thread(target=lambda: serve({'klines': klines,
         'subscribed': [{'symbol': 'SHFE.rb2701', 'dur_nano': 60_000_000_000}]},
         probe=True, extra_script=probe), daemon=True)

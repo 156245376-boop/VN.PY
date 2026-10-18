@@ -2,8 +2,31 @@ import copy
 
 import pytest
 
-from qf.indicator_catalog import default_item
+from qf.indicator_catalog import CATALOG, default_item, validate_item
 from qf.indicator_store import IndicatorStore, default_indicators, validate_indicator_config
+
+
+def test_zscore_can_be_saved_alongside_entire_catalog_and_second_profile(tmp_path):
+    from test_indicator_jobs import job
+
+    from qf.indicator_jobs import validate_request
+
+    config = default_indicators()
+    items = [default_item(kind) for kind in CATALOG] + [default_item('vp', 'vp-fixed')]
+    config['panes']['pane-1']['items'] = items
+    store = IndicatorStore(tmp_path)
+    store.save(config)
+    assert store.load()['config'] == config
+    assert len(validate_request(job() | {'items': items})['items']) == len(CATALOG)+1
+
+
+@pytest.mark.parametrize('key,value', [('mean_length', 0), ('std_length', True),
+    ('std_length', 1001), ('source', 'arbitrary_expression'), ('reference_lines', 1)])
+def test_zscore_parameters_are_strictly_validated(key, value):
+    item = default_item('zscore')
+    item['params'][key] = value
+    with pytest.raises(ValueError):
+        validate_item(item)
 
 
 def test_defaults_and_roundtrip(tmp_path):

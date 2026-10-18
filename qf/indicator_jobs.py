@@ -7,7 +7,7 @@ import uuid
 from collections import OrderedDict
 
 from qf.indicator_calculation import calculate_indicators, validate_rows
-from qf.indicator_catalog import number, validate_item
+from qf.indicator_catalog import CATALOG, number, validate_item
 
 IDENTITY = ('pane_id', 'generation', 'chart_revision', 'settings_revision',
             'symbol', 'period', 'data_revision', 'request_id')
@@ -33,7 +33,7 @@ def validate_request(raw):
     if (not isinstance(raw['visible'], list) or len(raw['visible']) != 2
             or any(type(v) is not int for v in raw['visible'])
             or not rows[0]['id'] <= raw['visible'][0] <= raw['visible'][1] <= rows[-1]['id']
-            or not isinstance(raw['items'], list) or len(raw['items']) > 15):
+            or not isinstance(raw['items'], list) or len(raw['items']) > len(CATALOG)+1):
         raise ValueError('指标计算范围无效')
     seen = set()
     for item in raw['items']:

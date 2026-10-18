@@ -4,7 +4,7 @@ import math
 import re
 
 import pandas as pd
-from tqsdk import ta
+from tqsdk import ta, tafunc
 
 from qf.indicator_catalog import CATALOG, number, validate_item
 from qf.volume_profile import calculate_volume_profile
@@ -87,7 +87,18 @@ def calculate_indicators(request: dict) -> dict:
                     'end_ns': str(wanted['end_ns'] if wanted else
                                   intervals[selected[-1]['id']-rows[0]['id']][1]), **value})
                 continue
-            if kind in ('volume', 'oi'):
+            if kind == 'zscore':
+                values = frame[p['source']]
+                mean = tafunc.ma(values, p['mean_length'])
+                # Sierra 使用总体标准差（分母 N），tafunc.std 默认分母 N-1。
+                window = values.rolling(p['std_length'])
+                # 滚动移除旧值可能留下正方差残差；只屏蔽真正恒价窗，不用 epsilon。
+                deviation = window.std(ddof=0).mask(window.min() == window.max(), 0)
+                output = pd.DataFrame({'zscore': (values-mean)/deviation.where(deviation > 0)})
+                if (deviation == 0).any():
+                    result['issues'].append({'item_id': item['id'], 'reason':
+                        'Z-Score：标准差为零的柱留空；数据不足的预热段同样不绘制'})
+            elif kind in ('volume', 'oi'):
                 output = pd.DataFrame({kind: frame['volume' if kind == 'volume' else 'close_oi']})
             elif kind in ('ma', 'ema'):
                 output = pd.DataFrame({str(n): getattr(ta, kind.upper())(frame, n).iloc[:, 0]

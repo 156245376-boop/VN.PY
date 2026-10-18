@@ -5,6 +5,16 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.parametrize('script', ['indicator_state_node.js'])
+def test_indicator_javascript_behaviors(script):
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node missing')
+    result = subprocess.run([node, str(Path(__file__).with_name(script))],
+                            capture_output=True, text=True, encoding='utf-8', timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_chart_pane_message_identity_and_lifecycle():
     node = shutil.which('node')
     if not node:

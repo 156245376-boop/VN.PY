@@ -1,0 +1,20 @@
+'use strict';
+const assert=require('node:assert/strict'),cp=require('node:child_process');
+global.window=global;
+require('../qf/web/indicator-state.js');
+const data=JSON.parse(cp.execFileSync('.venv-tqsdk/Scripts/python.exe',['-c',
+  'import json;from qf.indicator_catalog import indicator_catalog;from qf.indicator_store import default_indicators;print(json.dumps([indicator_catalog(),default_indicators()]))'],{encoding:'utf8'}));
+const S=QfIndicatorState;S.install(...data);let config=S.defaults();
+config=S.reduce(config,{type:'add',pane:'pane-1',kind:'ma'});
+assert.equal(config.panes['pane-1'].items.length,3);
+assert.equal(config.panes['pane-2'].items.length,2);
+const ma=config.panes['pane-1'].items[2];ma.params.periods=[5,20,120];
+config=S.reduce(config,{type:'change',pane:'pane-1',item:ma});
+assert.deepEqual(config.panes['pane-1'].items[2].params.periods,[5,20,120]);
+assert.throws(()=>S.reduce(config,{type:'change',pane:'pane-1',item:{...ma,params:{periods:[0]}}}));
+config=S.reduce(config,{type:'add',pane:'pane-1',kind:'vp'});
+config=S.reduce(config,{type:'add',pane:'pane-1',kind:'vp'});
+assert.throws(()=>S.reduce(config,{type:'add',pane:'pane-1',kind:'vp'}));
+config=S.reduce(config,{type:'remove',pane:'pane-1',id:'ma'});
+assert.equal(config.panes['pane-1'].items.some(i=>i.id==='ma'),false);
+console.log('INDICATOR_STATE_OK');

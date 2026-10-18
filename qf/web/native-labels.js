@@ -131,7 +131,8 @@
       emit({kind:'qf-chart-state',...result});
       const chart=window.QfNativeHistory.getChart?.();
       if(indicatorConfig&&chart&&chart.symbol===requestedSymbol&&indicatorConfig.enabled){
-        if(window.QfNativeIndicatorRender&&indicatorRenderer?.chart!==chart){indicatorRenderer?.dispose();indicatorRenderer=window.QfNativeIndicatorRender.attach(chart);indicatorRenderer.configure(indicatorConfig.settings,true,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});}
+        if(window.QfNativeIndicatorRender&&indicatorRenderer?.chart!==chart){indicatorRenderer?.dispose();indicatorRenderer=window.QfNativeIndicatorRender.attach(chart);indicatorRenderer.configure(indicatorConfig.settings,true,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});
+          indicatorRenderer.onHeight=(item_id,height)=>emit({kind:'qf-indicator-height',chart_revision:revision,symbol:requestedSymbol,period:requestedPeriod,settings_revision:indicatorConfig.settings_revision,item_id,height});}
         const data=result.status==='ready'?window.QfNativeIndicatorData.snapshot(chart,indicatorConfig):{issue:'行情或图表数据正在核实'};
         const encoded=JSON.stringify(data);
         if(encoded!==indicatorEncoded){indicatorEncoded=encoded;indicatorSeq++;

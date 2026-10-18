@@ -41,17 +41,21 @@ def exercise():
             chart.draw();const boards=Object.keys(chart.boards).filter(k=>k.startsWith('qf_'));
             const plots=Object.keys(chart.plots).filter(k=>k.startsWith('qf_'));
             if(boards.length<2||plots.length<7)throw Error('指标主副图缺失 '+boards+'/'+plots);
-            const initialDomain=chart.mainBoard.rightYAxis.scale.domain();
-            const initialValues=RESULT.series.filter(s=>s.board==='main').flatMap(s=>s.points.filter(p=>p.id>=chart.range.leftId&&p.id<=chart.range.rightId&&Number.isFinite(p.value)).map(p=>p.value));
-            if(initialValues.some(v=>v<initialDomain[0]||v>initialDomain[1]))throw Error('首次自动价格域未包含主图指标 '+initialDomain);
+            const assertAuto=()=>{
+              const domain=chart.mainBoard.rightYAxis.scale.domain();
+              const shown=points=>points.filter(p=>p.id>=chart.range.leftId&&
+                p.id<=chart.range.rightId&&Number.isFinite(p.value));
+              const values=RESULT.series.filter(s=>s.board==='main')
+                .flatMap(s=>shown(s.points).map(p=>p.value));
+              if(values.some(v=>v<domain[0]||v>domain[1]))
+                throw Error('自动价格域未包含主图指标 '+domain);
+            };
+            assertAuto();
             const before=chart.chartCtrl.pixelLeft;
             chart.chartCtrl.move(-20);chart.draw();
             const vp=document.querySelectorAll('.qf-vp rect').length;
             if(!vp)throw Error('VP 未绘制');
-            const domain=chart.mainBoard.rightYAxis.scale.domain();
-            const shown=resultPoints=>resultPoints.filter(p=>p.id>=chart.range.leftId&&p.id<=chart.range.rightId&&Number.isFinite(p.value));
-            const mainValues=RESULT.series.filter(s=>s.board==='main').flatMap(s=>shown(s.points).map(p=>p.value));
-            if(mainValues.some(v=>v<domain[0]||v>domain[1]))throw Error('自动价格域未包含主图指标 '+domain);
+            assertAuto();
             parent.postMessage({kind:'indicator-smoke',boards,plots:plots.length,vp,
               bridge:!!window.pywebview?.api,moved:chart.chartCtrl.pixelLeft!==before},'*');
           }catch(e){parent.postMessage({kind:'indicator-smoke',error:String(e)},'*');}},400);

@@ -20,7 +20,7 @@
     function clear(id,reason){send(id,{kind:'qf-indicator-result',...identity(id),result:{series:[],profiles:[],issues:[{item_id:'all',reason}]}});}
     function onMessage(event){const d=event.data,id=d?.pane_id,s=panes.get(id),p=options.getPane(id);
       if(!alive||!s?.visible||!p||event.source!==p.source||event.origin!==p.origin||!valid(id,d))return;
-      if(d.kind==='qf-vp-range-change'){options.onRange?.(id,d);return;}
+      if(['qf-vp-range-change','qf-indicator-height'].includes(d.kind)){options.onRange?.(id,d);return;}
       if(d.kind!=='qf-indicator-data')return;
       if(d.issue){s.job=null;s.token='';clear(id,d.issue);return;}
       if(d.data_revision===s.token)return;s.token=d.data_revision;clearTimeout(s.timer);
@@ -41,6 +41,7 @@
       }catch(_){}finally{polling=false;}}
     const timer=setInterval(poll,200);
     return {configure,sync,onMessage,poll,getConfig:()=>clone(config),setVisible(id,value){const s=panes.get(id);if(!s||s.visible===value)return;s.visible=value;s.sent='';s.job=null;s.token='';clearTimeout(s.timer);sync();},
+      command(id,command,item_id){if(['begin','locate','cancel'].includes(command))send(id,{kind:'qf-vp-range-command',...identity(id),command,item_id});},
       async flush(){await save();},dispose(){alive=false;clearInterval(timer);for(const s of panes.values())clearTimeout(s.timer);pendingSave=null;},
       invalidate(id){const s=panes.get(id);if(s){s.sent='';s.token='';s.job=null;clearTimeout(s.timer);sync();}}};
   }

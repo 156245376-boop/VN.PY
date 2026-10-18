@@ -133,11 +133,14 @@ window.qfPrepareExit=()=>{if(exiting)return 'qf-exit-pending';exiting=true;clear
   document.querySelectorAll('button,input,select').forEach(e=>e.disabled=true);notice('正在保存布局并退出，请稍候…');
   Promise.resolve(workspace?.flush()).finally(()=>{workspace?.dispose();window.qfExitReady=true;});return 'qf-exit-pending';};
 addEventListener('pywebviewready',async()=>{api=window.pywebview.api;
-  try{await refreshLogin(true);const saved=await api.get_workspace();
-    workspace=QfChartWorkspace.create($('chart-workspace'),{config:saved.workspace,
+  try{await refreshLogin(true);const saved=await api.get_workspace(),indicators=await api.get_indicators();
+    QfIndicatorState.install(indicators.catalog,indicators.defaults);
+    workspace=QfChartWorkspace.create($('chart-workspace'),{config:saved.workspace,indicators,
+      onIndicatorSubmit:r=>api.submit_indicator_calculation(r),onIndicatorPoll:ids=>api.poll_indicator_calculations(ids),onIndicatorSave:c=>api.save_indicators(c),
       onConfig:config=>api.save_workspace(config),onView:panes=>{const all=filtered(),rows=all.slice(page*40,page*40+40);return api.set_workspace(rows.map(r=>r.continuous),panes)},
       onFavorite:toggleFavorite,onNotice:notice,onSelection:symbol=>{selected=symbol;render();}});
     if(saved.issue)notice(saved.issue);
+    if(indicators.issue)notice(indicators.issue);
   }catch(_){notice('工作区暂时无法读取，请重新打开软件。');}
   if(!exiting){tick();pollTimer=setInterval(tick,700)}
 });

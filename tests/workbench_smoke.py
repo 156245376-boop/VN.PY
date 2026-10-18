@@ -161,6 +161,21 @@ def exercise():
                     )
                     native_data["_fixture_revision"] = 1
                     check('document.querySelector("#chart-loading").hidden===true')
+                    before_indicators = window.evaluate_js('document.querySelector("#chart").src')
+                    window.evaluate_js("""
+                      document.querySelector('#indicators').click();
+                      const addIndicator=kind=>{
+                        document.querySelector('.indicator-kind').value=kind;
+                        [...document.querySelectorAll('.indicator-panel button')]
+                          .find(b=>b.textContent==='添加指标').click();};
+                      addIndicator('ma');addIndicator('macd');addIndicator('vp');
+                    """)
+                    check("chartObservations['pane-1']?.indicatorPlots?.some(k=>k.startsWith('qf_ma_'))")
+                    check("chartObservations['pane-1']?.indicatorPlots?.some(k=>k.startsWith('qf_macd_'))")
+                    assert (window.evaluate_js('document.querySelector("#chart").src')
+                            == before_indicators)
+                    window.evaluate_js(
+                        "document.querySelector('.indicator-panel-head button').click()")
                     check('document.querySelector("#status").dataset.light==="green"')
                     check(
                         'document.querySelector(".account-metrics").textContent.inclu'

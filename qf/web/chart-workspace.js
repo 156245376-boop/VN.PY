@@ -7,6 +7,19 @@
     let expanded=null,workspaceExpanded=false,viewKey='',pending=null,sending=false,drag=null;
     let viewPromise=null,regularHeight=null,expandedHeight=null;
     const panes=new Map(),revisions=new Map(config.panes.map(p=>[p.id,1]));
+    let indicators=null,indicatorPanel=null,indicatorConfig=options.indicators?.config;
+    if(options.indicators){
+      const node=document.createElement('section');document.body.append(node);
+      function changeIndicator(a){indicatorConfig=QfIndicatorState.reduce(indicatorConfig,a);indicators.configure(a.pane,indicatorConfig.panes[a.pane]);indicatorPanel.open(a.pane,indicatorConfig.panes[a.pane]);}
+      indicatorPanel=QfIndicatorPanel.create(node,{onChange:changeIndicator,
+        onSelectRange:(id,item)=>indicators.command(id,'begin',item),onLocateRange:(id,item)=>indicators.command(id,'locate',item)});
+      indicators=QfIndicatorController.create({config:indicatorConfig,getPane:id=>panes.get(id)?.indicatorContext(),
+        submit:options.onIndicatorSubmit,poll:options.onIndicatorPoll,save:options.onIndicatorSave,onNotice:options.onNotice,
+        onRange(id,data){const item=indicatorConfig.panes[id]?.items.find(i=>i.id===data.item_id);if(!item)return;
+          const next=QfIndicatorState.clone(item);if(data.kind==='qf-indicator-height')next.height=data.height;else{next.params.mode='fixed';next.params.range=data.range;}
+          indicatorConfig=QfIndicatorState.reduce(indicatorConfig,{type:'change',pane:id,item:next});indicators.configure(id,indicatorConfig.panes[id]);}});
+      addEventListener('message',indicators.onMessage);
+    }
     const drawingBook=QfDrawingBook.create();
     root.innerHTML=`<div class="section-title"><div><h2>行情图工作区</h2><span id="active-pane-label"></span></div>
       <div class="chart-actions"><label>布局 <select id="chart-layout"><option value="single">单图</option><option value="columns">左右双图</option><option value="rows">上下双图</option><option value="quad">四宫格</option></select></label>
@@ -92,6 +105,8 @@
       for(const [id,p] of panes)if(!ids.includes(id)){p.dispose();panes.delete(id);}
       for(const id of ids){if(!panes.has(id)){const node=document.createElement('section');grid.append(node);
           panes.set(id,QfChartPane.create(node,{id,onActivate:activate,onChoose:choose,
+            onIndicators:id=>indicatorPanel?.open(id,indicatorConfig.panes[id]),
+            onIndicatorReady:id=>indicators?.invalidate(id),
             onSource:(id,value)=>{activate(id);action({type:'source',value});},
             onPeriod:(id,value)=>{activate(id);action({type:'period',value});},onExpand:expand,
             onEscape:escape,onFavorite:options.onFavorite,onState:options.onState,onDrawing:drawing}));}
@@ -140,6 +155,7 @@
       root.classList.toggle('workspace-expanded',workspaceExpanded);
       root.querySelector('#expand-workspace').textContent=workspaceExpanded?'还原工作区（Esc）':'放大工作区';
       document.body.classList.toggle('chart-expanded',workspaceExpanded||!!expanded);
+      if(indicators){for(const id of ['pane-1','pane-2','pane-3','pane-4'])indicators.setVisible(id,ids.includes(id)&&(!expanded||expanded===id));indicators.sync();}
     }
     root.querySelector('#chart-layout').onchange=e=>{finish();expanded=null;action({type:'layout',value:e.target.value});};
     root.querySelector('#link-products').onchange=e=>action({type:'link',value:e.target.checked});
@@ -153,9 +169,10 @@
             config=S.reduce(config,{type:'choose',symbol});for(const id of S.visibleIds(config)){const p=config.panes.find(p=>p.id===id);if(!p.continuous)p.continuous=symbol;}}}
         render();sendView();},choose(symbol){action({type:'choose',symbol});},getConfig:()=>S.clone(config),
       setVisible(value){visible=value;finish();if(!value){expanded=null;workspaceExpanded=false;}render();viewKey='';sendView();},
-      async flush(){if(viewPromise)await viewPromise;await saves.flush();},
-      inspect:()=>({config:S.clone(config),panes:Object.fromEntries([...panes].map(([id,p])=>[id,p.inspect()]))}),
+      async flush(){if(viewPromise)await viewPromise;await Promise.all([saves.flush(),indicators?.flush()]);},
+      inspect:()=>({config:S.clone(config),indicators:indicators?.getConfig(),panes:Object.fromEntries([...panes].map(([id,p])=>[id,p.inspect()]))}),
       dispose(){if(!alive)return;finish();alive=false;pending=null;for(const p of panes.values())p.dispose();panes.clear();
+        if(indicators){removeEventListener('message',indicators.onMessage);indicators.dispose();indicatorPanel.dispose();}
         removeEventListener('pointermove',move);removeEventListener('pointerup',finish);removeEventListener('pointercancel',finish);removeEventListener('blur',finish);removeEventListener('keydown',keydown);removeEventListener('resize',render);
         document.body.classList.remove('chart-expanded');}};
   }

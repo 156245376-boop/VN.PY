@@ -8,7 +8,7 @@
     root.className='card chart-card chart-pane';root.dataset.pane=id;
     root.id='chart-card'+(id==='pane-1'?'':'-'+id);
     root.innerHTML=`<div class="section-title"><div><h2 data-role="chart-title"></h2><span data-role="chart-detail"></span></div>
-      <div class="chart-actions"><button data-role="chart-favorite">☆ 添加自选</button><button data-role="expand-chart">放大 K 线</button></div></div>
+      <div class="chart-actions"><button data-role="indicators">指标</button><button data-role="chart-favorite">☆ 添加自选</button><button data-role="expand-chart">放大 K 线</button></div></div>
       <div class="pane-selects"><label>品种<select data-role="product" aria-label="品种"></select></label>
       <label>来源<select data-role="chart-source"><option value="actual">当前主力合约</option><option value="continuous">主力连续历史</option></select></label>
       <label>周期<select data-role="period"><option value="">默认周期</option></select></label></div>
@@ -89,7 +89,7 @@
     function message(event){
       if(disposed||!context||!url||event.source!==frame.contentWindow||event.origin!==new URL(url).origin)return;
       const d=event.data||{};
-      if(d.kind==='qf-chart-ready'){bind();return;}
+      if(d.kind==='qf-chart-ready'){bind();options.onIndicatorReady?.(id);return;}
       if(d.pane_id!==id||d.generation!==context.generation||d.revision!==context.request.revision)return;
       if(['qf-drawings-request','qf-drawings-commit','qf-drawings-undo','qf-drawings-conflict'].includes(d.kind)&&d.symbol===context.runtime?.symbol){options.onDrawing?.(id,d);return;}
       if(d.kind==='qf-chart-activate'){options.onActivate(id);return;}
@@ -120,6 +120,7 @@
     $('chart-source').onchange=()=>options.onSource(id,$('chart-source').value);
     $('period').onchange=()=>options.onPeriod(id,$('period').value||null);
     $('chart-favorite').onclick=()=>options.onFavorite(context.config.continuous);
+    $('indicators').onclick=()=>options.onIndicators?.(id);
     $('expand-chart').onclick=()=>options.onExpand(id);
     $('history-year').onchange=()=>{if($('history-year').value)post('year',$('history-year').value)};
     $('history-latest').onclick=()=>post('latest');

@@ -99,6 +99,8 @@ def serve(initial_data=None, *, probe=False, extra_script=""):
                 setInterval(()=>parent.postMessage({kind:'offline-native-probe',
                   text:document.body.innerText, bridge:!!window.pywebview?.api,
                   selected:document.querySelector('.tq-top-view .title')?.textContent,
+                  indicatorPlots:Object.keys(window.QfNativeHistory?.getChart?.()?.plots||{})
+                    .filter(k=>k.startsWith('qf_')),
                   original:document.querySelector('.tq-top-view .title')?.title,
                   layout:(()=>{
                     const left=document.querySelector('.tq-top-view .left-view');

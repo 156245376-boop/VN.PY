@@ -39,6 +39,23 @@ def bridge(tmp_path):
     return module.WorkbenchBridge(tmp_path, Session(), credential_store=MemoryStore())
 
 
+def test_bridge_marks_retained_contract_separately_from_new_main(bridge):
+    request = dict(id='pane-1', continuous='KQ.m@SHFE.rb', mode='actual',
+                   period='1m', revision=4)
+    raw = {**request, 'symbol': 'SHFE.rb2701', 'duration': 60_000_000_000,
+           'status': 'ready', 'reason': 'main_contract_capacity',
+           'mapping_stale': True, 'mapped_symbol': 'SHFE.rb2705'}
+    rows = [{'continuous': 'KQ.m@SHFE.rb', 'underlying': 'SHFE.rb2705'}]
+    panes = bridge._public_panes([raw], rows)
+    assert len(panes) == 1
+    assert panes[0]['symbol'] == 'SHFE.rb2701' and panes[0]['mapping_stale'] is True
+    assert panes[0]['mapped_symbol'] == 'SHFE.rb2705'
+    assert '容量' in panes[0]['reason']
+    assert bridge._public_panes([{**raw, 'mapped_symbol': 'DCE.m2701'}], rows) == []
+    assert bridge._public_panes([{**raw, 'mapping_stale': False}], rows) == []
+    assert bridge._public_panes([{**raw, 'symbol': 'DCE.m2701'}], rows) == []
+
+
 def test_bridge_serializes_only_public_fields(bridge):
     bridge._session.state["reason"] = "private-error"
     result = bridge.get_state()

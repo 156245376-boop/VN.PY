@@ -70,10 +70,13 @@
         $('loading-stage').textContent='读取品种目录（'+(loading.done||0)+' / '+loading.total+'）';}
       else $('chart-progress').removeAttribute('value');
       $('loading-time').textContent='已等待 '+Math.floor((performance.now()-started)/1000)+' 秒 · 剩余时间暂无法准确估计';
-      root.dataset.light=!context.connected||reported?.md_connected===false?'red':valid&&!bad&&reported?.md_connected===true?'green':'yellow';
+      root.dataset.light=!context.connected||reported?.md_connected===false?'red':runtime?.mapping_stale?'yellow':valid&&!bad&&reported?.md_connected===true?'green':'yellow';
       const detail=context.config.mode==='continuous'?'主力连续历史':context.runtime?.symbol?
         labels.contractName(context.runtime.symbol,context.catalog):'当前主力等待核实';
-      $('chart-detail').textContent=detail+' · '+(root.dataset.light==='green'?'图表行情已连接':root.dataset.light==='red'?'图表行情未连接':'图表连接待确认');
+      if(runtime?.mapping_stale)$('history-note').textContent='容量不足，保留旧合约走势；该图已不代表当前主力。';
+      $('chart-detail').textContent=runtime?.mapping_stale?
+        '保留旧合约：'+detail+'；当前主力：'+labels.contractName(runtime.mapped_symbol,context.catalog)+' · '+runtime.reason:
+        detail+' · '+(root.dataset.light==='green'?'图表行情已连接':root.dataset.light==='red'?'图表行情未连接':'图表连接待确认');
       const h=reported?.history,daily=QfChartState.period(context.config)==='1d';
       $('history-controls').hidden=!daily;
       $('history-year').disabled=!valid;$('history-latest').disabled=!valid;

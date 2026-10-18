@@ -21,6 +21,7 @@ REASONS = {
     "connection_auth_or_data_failed": "连接、认证或目录数据未完成，请核对账号与权限后重新连接。",
     "connection_lost": "行情连接中断，当前显示最后收到的数据。",
     "main_contract_changed": "主力合约发生变化，正在重新核实图表。",
+    "main_contract_capacity": "主力已换月，但订阅容量不足；保留旧合约图，请勿视为当前主力。",
     "unknown_selection": "所选品种不在当前市场目录中。",
     "catalog_loading": "行情服务已连接，正在读取品种目录。",
     "chart_data_unavailable": "当前合约K线未返回或读取失败，其他行情仍可查看。",
@@ -113,12 +114,20 @@ class WorkbenchBridge:
             expected = (request['continuous'] if request['mode'] == 'continuous' else
                         mappings.get(request['continuous']))
             symbol = value.get('symbol')
-            if symbol is not None and symbol != expected:
+            stale = (value.get('mapping_stale') is True and request['mode'] == 'actual'
+                     and value.get('reason') == 'main_contract_capacity'
+                     and value.get('mapped_symbol') == expected and isinstance(expected, str)
+                     and isinstance(symbol, str) and symbol != expected
+                     and isinstance(request['continuous'], str)
+                     and re.fullmatch(re.escape(request['continuous'][5:]) + r'\d{3,4}',
+                                      symbol) is not None)
+            if symbol is not None and symbol != expected and not stale:
                 continue
             duration = PERIODS[period_for(request)] * 1_000_000_000
             if value.get('duration') != duration:
                 continue
             output.append({**request, 'symbol': symbol, 'duration': duration,
+                           'mapping_stale': stale, 'mapped_symbol': expected if stale else None,
                            'history': _history_summary(value.get('history')),
                            'status': value.get('status') if value.get('status') in
                            ('idle', 'loading', 'ready', 'unavailable') else 'unavailable',

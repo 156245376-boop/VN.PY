@@ -33,5 +33,14 @@ listeners.get('message')({...correct,data:{...correct.data,viewport_width:600}})
 assert.equal(pane.inspect().state.status,'loading','尺寸未同步的旧绘制不能结束加载');
 listeners.get('message')({...correct,data:{...correct.data,md_connected:false}});
 assert.equal(root.dataset.light,'red','图表自己的行情断开，不能借后台绿灯显示已连接');
+listeners.get('message')({...correct,data:{...correct.data,md_connected:true}});
+pane.update({generation:2,status:'ready',connected:true,chart_url:'http://127.0.0.1:5',
+  rows:[],favorites:[],catalog:[{continuous:'KQ.m@SHFE.rb'}],active:true,
+  config:{continuous:'KQ.m@SHFE.rb',mode:'actual',period:'1m'},request:{revision:10},
+  runtime:{symbol:'SHFE.rb2701',status:'ready',mapping_stale:true,mapped_symbol:'SHFE.rb2705',reason:'容量不足'}});
+assert.equal(root.dataset.light,'yellow');
+assert.ok(roles.get('chart-detail').textContent.includes('SHFE.rb2701'));
+assert.ok(roles.get('chart-detail').textContent.includes('SHFE.rb2705'));
+assert.equal(pane.inspect().visible,true,'容量不足换月应保留旧图');
 pane.dispose();assert.equal(listeners.has('message'),false);
 console.log('CHART_WORKSPACE_OK');

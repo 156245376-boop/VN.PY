@@ -46,11 +46,18 @@
     function sendView(){if(!alive||!state.catalog.length||!['connecting','ready','waiting_data','disconnected'].includes(state.status))return;
       const req=requests(),key=JSON.stringify([state.generation,state.visible_symbols,req]);if(key===viewKey)return;viewKey=key;
       pending={key,req,snapshot:S.clone(config)};if(!sending)viewPromise=drain();}
+    function rollback(){
+      const previous=config,next=S.clone(accepted);
+      for(const field of ['linked','split','account_collapsed'])next[field]=S.clone(previous[field]);
+      if(S.visibleIds(next).includes(previous.active))next.active=previous.active;
+      config=next;viewKey='';options.onSelection?.(config.panes.find(p=>p.id===config.active)?.continuous);
+      render();save();
+    }
     async function drain(){if(sending)return;sending=true;
       try{while(pending&&alive){const job=pending;pending=null;const result=await options.onView(job.req);
         if(!alive)return;
-        if(result.ok){if(job.key===viewKey){accepted=job.snapshot;save();}}
-        else if(job.key===viewKey){options.onNotice?.(result.reason);config=S.clone(accepted);viewKey='';render();}
+        if(result.ok){accepted=job.snapshot;if(job.key===viewKey)save();}
+        else if(job.key===viewKey){options.onNotice?.(result.reason);rollback();}
       }}catch(_){viewKey='';options.onNotice?.('图表设置未应用，请检查连接。');}finally{sending=false;}}
     function activate(id){if(id!==config.active)action({type:'activate',id});}
     function choose(id,symbol,mode){activate(id);if(mode)config=S.reduce(config,{type:'source',value:mode});action({type:'choose',symbol});}

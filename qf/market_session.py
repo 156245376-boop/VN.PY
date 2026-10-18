@@ -274,6 +274,7 @@ class MarketSession:
         quotes, seen, serials, failures = {}, set(), {}, set()
         connections = {}
         account = None
+        last_ready = {}
         while not self._stop.is_set():
             with self._lock:
                 version, requested, _, _ = self._view
@@ -296,7 +297,15 @@ class MarketSession:
                     with self._lock:
                         capacity = len(self._subscribed | {target}) <= 100
                     if not capacity:
-                        state.update(status="unavailable", reason="subscription_limit")
+                        old = last_ready.get(pane['id'])
+                        if (old and all(old[k] == pane[k] for k in
+                                ('continuous', 'mode', 'period', 'revision'))
+                                and old['symbol'] != target):
+                            state = {**copy.deepcopy(old), 'mapping_stale': True,
+                                     'mapped_symbol': target, 'reason': 'main_contract_capacity'}
+                            key = (state['symbol'], duration)
+                        else:
+                            state.update(status="unavailable", reason="subscription_limit")
                     else:
                         attempt = (key, pane["revision"])
                         if key not in serials and attempt not in failures:
@@ -342,14 +351,19 @@ class MarketSession:
             for state, key in prepared:
                 current = (state["continuous"] if state["mode"] == "continuous" else
                            self._mappings.get(state["continuous"]))
-                if current != state["symbol"]:
+                if current != state["symbol"] and not state.get('mapping_stale'):
                     state.update(symbol=None, history=None, status="loading",
                                  reason="main_contract_changed")
                 elif key in serials and api.is_serial_ready(serials[key]):
                     history = summarize_history(serials[key], key[1])
                     state.update(history=history, status="unavailable" if history["issues"] else
                                  "ready" if chart_ready.is_set() else "loading",
-                                 reason="chart_data_unavailable" if history["issues"] else "")
+                                 reason="chart_data_unavailable" if history["issues"] else
+                                 'main_contract_capacity' if state.get('mapping_stale') else '')
+                if state.get('mapping_stale'):
+                    state['mapped_symbol'] = current
+                if state['status'] == 'ready':
+                    last_ready[state['id']] = copy.deepcopy(state)
                 published.append(state)
             first = next((p for p in published if p["id"] == "pane-1"), {})
             ready = any(p["status"] == "ready" for p in published)

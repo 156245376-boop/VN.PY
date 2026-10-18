@@ -174,6 +174,24 @@ def test_workspace_capacity_rejection_keeps_previous_view(session):
     assert session.snapshot()['panes'] == before
 
 
+def test_capacity_blocked_rollover_keeps_last_ready_contract(session):
+    session.start('u', 'p')
+    until(lambda: session.snapshot()['chart_status'] == 'ready')
+    before = session.snapshot()['panes'][0]
+    with session._lock:
+        session._subscribed.update(f'SHFE.test{i}' for i in range(
+            100 - len(session._subscribed)))
+    FakeApi.mapping = 'SHFE.rb2705'
+    until(lambda: session.snapshot()['panes'][0].get('reason') in
+          ('subscription_limit', 'main_contract_capacity'))
+    pane = session.snapshot()['panes'][0]
+    assert pane['symbol'] == before['symbol']
+    assert pane['status'] == 'ready' and pane['history'] == before['history']
+    assert pane['mapping_stale'] is True and pane['mapped_symbol'] == 'SHFE.rb2705'
+    assert len(FakeApi.instances) == 1
+    assert 'SHFE.rb2705' not in FakeApi.instances[0].klines
+
+
 def test_pane_failure_and_main_mapping_are_isolated(session):
     session.start('u', 'p')
     until(lambda: bool(session.snapshot()['chart_url']))

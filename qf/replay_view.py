@@ -4,6 +4,7 @@ import asyncio
 import json
 import sqlite3
 import threading
+from contextlib import closing
 from importlib import metadata
 from pathlib import Path
 
@@ -49,7 +50,9 @@ class ReplayView:
         return self.url
 
     def _read(self, offset=0, limit=10000):
-        with sqlite3.connect((self.path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+        with closing(
+            sqlite3.connect((self.path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)
+        ) as db:
             rows = [
                 json.loads(r[0])
                 for r in db.execute(
@@ -61,7 +64,9 @@ class ReplayView:
         return dict(bars=rows, total_bars=count, offset=offset, next_offset=offset + len(rows))
 
     def _payload(self):
-        with sqlite3.connect((self.path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+        with closing(
+            sqlite3.connect((self.path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)
+        ) as db:
             events = [
                 dict(time_ns=str(r[0]), kind=r[1], payload=json.loads(r[2]), risk=json.loads(r[3]))
                 for r in db.execute(

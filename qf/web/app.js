@@ -129,6 +129,7 @@ for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>
   const show=['home','market'].includes(view);$('market-layout').hidden=!show;
   $('chart-workspace').hidden=!show;workspace?.setVisible(show);
   $('page-title').textContent={home:'研究工作台',market:'行情与品种',strategy:'策略与参数',backtests:'回测与比较',paper:'模拟运行',news:'新闻与事件',settings:'设置与资源'}[view]};
+document.querySelector('[data-open-research]').onclick=()=>document.querySelector('[data-view=strategy]').click();
 addEventListener('qf-native-labels-ready',()=>{nativeLabelsReady=true;if(api)render()});
 addEventListener('qf-native-labels-error',()=>notice('图表适配未能准备完成，请重新打开工作台。'));
 window.qfPrepareExit=()=>{if(exiting)return 'qf-exit-pending';exiting=true;clearInterval(pollTimer);$('password').value='';

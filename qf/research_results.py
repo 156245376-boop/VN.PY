@@ -3,6 +3,7 @@
 import json
 import re
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from qf.research_config import decimal_value, public_values, validate_research_config
@@ -25,7 +26,9 @@ def run_path(root, run_id):
 def _read(root, run_id):
     path = run_path(root, run_id)
     try:
-        with sqlite3.connect((path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+        with closing(
+            sqlite3.connect((path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)
+        ) as db:
             state = {k: json.loads(v) for k, v in db.execute("SELECT * FROM state")}
             if state.get("research_schema") != 1:
                 raise ValueError("不支持的实验版本")
@@ -34,6 +37,32 @@ def _read(root, run_id):
                 risk_from_dict(state["risk_state"])
             fills = list(db.execute("SELECT * FROM fills ORDER BY time_ns,rowid"))
             equity = list(db.execute("SELECT * FROM equity ORDER BY time_ns"))
+            actual = state.get("final_positions")
+            if actual is not None and (
+                not isinstance(actual, dict)
+                or any(
+                    not isinstance(pair, list)
+                    or len(pair) != 2
+                    or any(type(value) is not int or value < 0 for value in pair)
+                    for pair in actual.values()
+                )
+            ):
+                raise ValueError("持仓记录无效")
+            for fill in fills:
+                if (
+                    fill[2] != config.symbol
+                    or fill[3] not in ("BUY", "SELL")
+                    or fill[4] not in ("OPEN", "CLOSE", "CLOSETODAY")
+                    or type(fill[5]) is not int
+                    or fill[5] <= 0
+                    or decimal_value(fill[6]) <= 0
+                    or fill[7] <= 0
+                ):
+                    raise ValueError("成交记录无效")
+            for row in equity:
+                decimal_value(row[1])
+                if decimal_value(row[2]) < 0:
+                    raise ValueError("费用记录无效")
             span = db.execute(
                 "SELECT min(time_ns),max(time_ns),count(*) FROM research_bars"
             ).fetchone()
@@ -86,6 +115,12 @@ def summarize_run(root, run_id):
         if previous and not position:
             closed += 1
     measured = bool(equity) or bool(state.get("sdk_statistics"))
+    actual = state.get("final_positions")
+    actual_net = (
+        actual.get(config.symbol, [0, 0])[0] - actual.get(config.symbol, [0, 0])[1]
+        if isinstance(actual, dict)
+        else None
+    )
     return public_values(
         dict(
             **read_run(root, run_id),
@@ -96,7 +131,11 @@ def summarize_run(root, run_id):
             max_drawdown_pct=max_pct.normalize() if equity else None,
             fill_count=len(fills),
             closed_trade_count=closed,
-            open_position=position,
+            open_position=actual_net
+            if actual_net is not None
+            else (position if fills and state.get("mode") == "backtest" else None),
+            account_positions=actual,
+            position_source="account" if actual_net is not None else "local_fills_unconfirmed",
             final_equity=final if measured else None,
         )
     )
@@ -120,7 +159,7 @@ def compare_runs(root, run_ids):
 def run_details(root, run_id):
     read_run(root, run_id)
     path = run_path(root, run_id)
-    with sqlite3.connect((path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True) as db:
+    with closing(sqlite3.connect((path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)) as db:
         fills = [
             dict(
                 zip(

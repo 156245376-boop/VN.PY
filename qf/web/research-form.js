@@ -30,7 +30,7 @@
       input.addEventListener('change',()=>{if(key==='continuous'){contracts=[];setContracts([]);}update();options.onChange?.(key);});
       input.addEventListener('input',update);return input;
     }
-    field('name','实验名称',null,'text');field('continuous','品种',[]);field('symbol','实际月份合约（先查询）',[]);
+    field('name','实验名称',null,'text');field('strategy_id','策略模板',[['ma_cross','双均线交叉（简单均线）']]);field('continuous','品种',[]);field('symbol','实际月份合约（先查询）',[]);
     field('bar_seconds','K线周期',[[60,'1分钟'],[300,'5分钟'],[900,'15分钟'],[1800,'30分钟'],[3600,'1小时'],[86400,'日线']]);
     field('fast_period','快均线周期（根）');field('slow_period','慢均线周期（根）');
     field('start','起始交易日',null,'date');field('end','结束交易日',null,'date');

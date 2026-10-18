@@ -101,6 +101,26 @@ def test_empty_backtest_never_claims_completed_or_zero_profit(tmp_path):
     assert result['summary']['net_pnl'] is None
 
 
+def test_dirty_account_freezes_and_preserves_actual_exposure(tmp_path):
+    result = execute_research('paper', config(), tmp_path, ('u', 'p'), sdk=sdk_for('dirty'),
+                              stop_requested=lambda: True)
+    assert result['status'] == 'frozen'
+    assert result['summary']['open_position'] == 2
+    assert result['summary']['account_positions']['SHFE.rb2505'] == [2, 0]
+
+
+def test_auth_failure_does_not_claim_known_flat_account(tmp_path):
+    sdk = sdk_for()
+    class Denied(Api):
+        def __init__(self, **kwargs):
+            raise RuntimeError('private-auth-response')
+    sdk.TqApi = Denied
+    result = execute_research('paper', config(), tmp_path, ('u', 'p'), sdk=sdk)
+    assert result['status'] == 'failed'
+    assert result['summary']['open_position'] is None
+    assert 'private-auth-response' not in str(result)
+
+
 def test_provenance_hash_includes_research_frontend(tmp_path):
     (tmp_path/'qf/web').mkdir(parents=True)
     for name in ('pyproject.toml', 'uv.lock'):

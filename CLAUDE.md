@@ -37,3 +37,5 @@
 价格轴、分隔条与右键画图按需查 `docs/chart-interactions.md`。
 自适应布局、独立分屏、联动、共享画线与布局恢复按需查 `docs/chart-workspace.md`。
 可选主图/副图指标、参数保存和估算 VP 按需查 `docs/chart-indicators.md`。
+双均线实验、阶梯保护、回测比较与成交复盘的点击说明见 `docs/research-paper-guide.md`。
+新实验入口在现有工作台“策略与参数 / 回测与比较 / 模拟运行”；旧研究窗口继续保留固定样例。

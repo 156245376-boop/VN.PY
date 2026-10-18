@@ -40,7 +40,7 @@
   }
   globalThis.QfNativeReplay={attach,barForTime,fillName,acceptMessage};
   if(typeof window==='undefined'||!window.__qfReplay)return;
-  let layer=null,payload=null,loaded=false,chart=null;
+  let layer=null,payload=null,loaded=false,chart=null,dataInstalled=false,lastRequestKey='';
   const banner=document.createElement('div');banner.className='qf-replay-banner';banner.textContent='离线复盘 · 正在读取本机结果（不是实时行情）';document.body.prepend(banner);
   let parentOrigin=null;try{parentOrigin=new URL(document.referrer).origin;}catch(_){}
   const emit=f=>{if(parentOrigin)parent.postMessage({kind:'qf-replay-fill',run_id:payload.run_id,revision:payload.revision,fill:f},parentOrigin);};
@@ -51,10 +51,15 @@
   load().catch(()=>{banner.textContent='离线复盘读取失败；没有使用当前行情补造数据。';});
   const timer=setInterval(()=>{if(!loaded)return;const view=document.querySelector('.tq-top-view')?.__vue__,sdk=view?.$tqsdk;if(!sdk)return;
     const symbol=payload.symbol,duration=payload.bar_seconds*1e9,request=window.__replayRequests.web_chart;
-    if(view.instrumentId!==symbol){view.instrumentId=symbol;view.duration=duration;return;}
-    if(request&&request.ins_list===symbol){const data={};for(const [i,row]of payload.bars.entries())data[i]={...row,datetime:Number(BigInt(row.time_ns))};
-      const existing=sdk.get_by_path(['klines',symbol,duration]);if(existing?.last_id!==payload.bars.length-1||!chart){
-        sdk.dm.mergeData({klines:{[symbol]:{[duration]:{data,last_id:payload.bars.length-1}}},charts:{web_chart:{state:{...request},more_data:false,left_id:0,right_id:payload.bars.length-1}}});}}
+    if(view.instrumentId!==symbol||view.duration!==duration){view.instrumentId=symbol;view.duration=duration;return;}
+    if(request&&request.ins_list===symbol&&request.duration===duration){
+      const existing=sdk.get_by_path(['klines',symbol,duration]),needData=!dataInstalled||existing?.last_id!==payload.bars.length-1,key=JSON.stringify(request);
+      if(needData||key!==lastRequestKey){const state={...request},previous=sdk.getChart('web_chart')?.state||{};
+        for(const field of ['ins_list','duration','view_width','left_kline_id','focus_datetime','focus_position','trading_day_start','trading_day_count'])if(!(field in request)&&field in previous)state[field]=null;
+        const diff={charts:{web_chart:{state,more_data:false,left_id:0,right_id:payload.bars.length-1}}};
+        if(needData){const data={};for(const [i,row]of payload.bars.entries())data[i]={...row,datetime:Number(BigInt(row.time_ns))};
+          diff.klines={[symbol]:{[duration]:{data,last_id:payload.bars.length-1}}};dataInstalled=true;}
+        lastRequestKey=key;sdk.dm.mergeData(diff);}}
     const next=window.QfNativeHistory?.getChart?.();if(!next||next.symbol!==symbol||next.duration!==duration)return;
     if(next!==chart){layer?.dispose();chart=next;layer=attach(chart,{onFill:emit});layer.apply(payload);
       if(parentOrigin)parent.postMessage({kind:'qf-replay-ready',run_id:payload.run_id,revision:payload.revision},parentOrigin);

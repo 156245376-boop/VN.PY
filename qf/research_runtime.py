@@ -403,6 +403,10 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
             loop.guard.enabled = False
         if api:
             try:
+                j.set('final_positions', positions_snapshot(api.get_position()))
+            except Exception:
+                j.set('positions_unconfirmed', True)
+            try:
                 if loop:
                     if not paper:
                         if loop.task:

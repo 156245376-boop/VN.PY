@@ -56,3 +56,16 @@ def test_compare_exposes_precision_and_cost_differences(tmp_path):
     comparison = compare_runs(tmp_path, [first, second])
     assert comparison['config_differences']['fast_period'] == [5, 10]
     assert comparison['comparability_warnings']
+
+
+@pytest.mark.parametrize('corruption', ['positions', 'negative_fill'])
+def test_corrupt_positions_or_fill_are_rejected(tmp_path, corruption):
+    j = journal(tmp_path)
+    if corruption == 'positions':
+        j.set('final_positions', {'SHFE.rb2505': ['not-a-lot', 0]})
+    else:
+        j.fill(fill(volume=-1))
+    identity = j.path.name
+    j.close()
+    with pytest.raises(ValueError):
+        summarize_run(tmp_path, identity)

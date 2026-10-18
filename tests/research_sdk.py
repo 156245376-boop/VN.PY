@@ -47,6 +47,8 @@ class Api:
         self.instances.append(self)
         if self.scenario == 'expired':
             self.quote.expired = True
+        if self.scenario == 'dirty':
+            self.positions['SHFE.rb2505'] = NS(pos_long=2, pos_short=0)
         if self.scenario == 'empty':
             self.serial['id'] = [-6, -5, -4, -3, -2, -1]
             self.serial['datetime'] = 0

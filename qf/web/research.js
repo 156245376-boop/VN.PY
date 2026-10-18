@@ -13,14 +13,16 @@
     position_trade_mismatch:'实际持仓与本地成交记录不一致',unexpected_position:'发现超限、双向或其他合约持仓',execution_timeout:'执行等待超时，已冻结后续执行',
     contract_query_or_permission_failed:'合约查询未完成，请核对认证和权限',research_start_or_record_failed:'研究任务或本地记录未能启动',shutdown_unconfirmed:'退出清理超时，状态保留为待核实'};
   function create(root,api){
-    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null;
+    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false;
     const el=(tag,text,cls)=>{const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e;};
     const heading=el('h2','双均线交叉 · 策略实验'),intro=el('p','金叉做多、死叉做空；使用已完成K线，反向时先平仓。');
     const picker=el('select');picker.setAttribute('aria-label','已保存实验');
     const formRoot=el('div'),actions=el('div',null,'research-actions'),notice=el('p'),state=el('p',null,'research-status'),risk=el('p');
     root.replaceChildren(heading,intro,picker,formRoot,actions,notice,state,risk);
     const form=QfResearchForm.create(formRoot);
-    const button=(text,fn)=>{const b=el('button',text);b.onclick=async()=>{try{await fn();}catch(_){notice.textContent='操作未完成，请核对参数、凭证和当前任务。';}};actions.append(b);return b;};
+    const button=(text,fn)=>{const b=el('button',text);b.onclick=async()=>{if(commandPending)return;commandPending=true;b.disabled=true;
+      try{await fn();}catch(_){notice.textContent='操作未完成，请核对参数、凭证和当前任务。';}
+      finally{commandPending=false;b.disabled=false;await poll();}};actions.append(b);return b;};
     async function refresh(){const result=await api.get_experiments();picker.replaceChildren(new Option('新建实验',''));
       for(const item of result.experiments||[]){if(!item.config)continue;const option=new Option(item.config.name+' · 修订'+item.revision,item.experiment_id);option._experiment=item;picker.add(option);}
       if(ref)picker.value=ref.experiment_id;
@@ -29,7 +31,7 @@
       if(!response.ok)throw Error(response.reason);ref=response.experiment;await refresh();notice.textContent='实验已保存 · 修订'+ref.revision;return ref;}
     const query=button('查询区间实际合约',async()=>{const c=form.read(),response=await api.get_research_contracts(c.continuous,c.start,c.end);notice.textContent=response.reason;if(response.ok)contractKey='';});
     const saveButton=button('保存实验',save);
-    const copy=button('复制实验',async()=>{await save();const response=await api.copy_experiment(ref.experiment_id,ref.revision,form.read().name+' · 副本');
+    const copy=button('复制实验',async()=>{await save();const name=Array.from(form.read().name).slice(0,72).join('')+' · 副本';const response=await api.copy_experiment(ref.experiment_id,ref.revision,name);
       if(!response.ok)throw Error();ref=response.experiment;form.render(response.config);await refresh();notice.textContent='已复制，可修改均线或风险参数后另行回测。';});
     const costLabel=el('label','附加独立双倍费用回放 '),cost=el('input');cost.type='checkbox';costLabel.prepend(cost);actions.append(costLabel);
     const activateLabel=el('label','允许本实验产生快期模拟委托 '),activate=el('input');activate.type='checkbox';activateLabel.prepend(activate);actions.append(activateLabel);
@@ -49,7 +51,7 @@
     async function poll(){if(disposed||polling)return;polling=true;try{const s=await api.get_research_state();if(disposed)return;
       const busy=s.running;form.setRunning(busy);for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
       state.textContent=(labels[s.status]||'状态待核实')+(s.reason?' · '+(reasons[s.reason]||'运行状态需要核实'):'');state.dataset.light=['failed','frozen'].includes(s.status)?'red':busy?'green':'yellow';
-      const r=s.risk||{};risk.textContent=`实际持仓：${r.side===-1?'空':r.side===1?'多':'无方向'} ${r.quantity||0} 手；初始R：${r.initial_r??'—'} 元；保护价：${r.stop_price??'—'}；阶梯：${r.stage??'—'}；权益：${s.equity??'—'} 元；费用：${s.commission??'—'} 元。`;
+      const r=s.risk||{};risk.textContent=`本实验已核实持仓：${r.side===-1?'空':r.side===1?'多':'无方向'} ${r.quantity||0} 手；初始R：${r.initial_r??'—'} 元；保护价：${r.stop_price??'—'}；阶梯：${r.stage??'—'}；权益：${s.equity??'—'} 元；费用：${s.commission??'—'} 元。`;
       const key=JSON.stringify([s.contract_request,s.contracts]);if(key!==contractKey&&s.status==='contracts_ready'){
         contractKey=key;form.setContracts(s.contracts,form.read().symbol);notice.textContent=s.contracts.length?'已返回实际合约，请核对月份与历史覆盖。':'区间内未返回实际合约，请核对权限与日期。';}
       if(s.result?.run_id&&s.result.run_id!==lastResult){lastResult=s.result.run_id;await results?.refresh();

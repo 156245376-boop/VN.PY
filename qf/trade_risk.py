@@ -111,6 +111,17 @@ def seal_entry(state):
     return replace(state, sealed=True)
 
 
+def close_trade_fills(state, fills):
+    for fill in fills:
+        if (fill['offset'] not in ('CLOSE', 'CLOSETODAY')
+                or fill['direction'] != ('SELL' if state.side == 1 else 'BUY')
+                or type(fill['volume']) is not int or not 0 < fill['volume'] <= state.quantity):
+            raise ValueError('平仓成交与实际持仓不一致')
+        state = replace(state, quantity=state.quantity-fill['volume'],
+                        last_fill_ns=max(state.last_fill_ns, int(fill['time_ns'])))
+    return state
+
+
 def protect(state, *, price, time_ns, risk, spec):
     price = decimal_value(price)
     if type(time_ns) is not int or price <= 0:

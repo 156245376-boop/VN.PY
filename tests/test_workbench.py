@@ -39,6 +39,15 @@ def bridge(tmp_path):
     return module.WorkbenchBridge(tmp_path, Session(), credential_store=MemoryStore())
 
 
+def test_indicator_bridge_separates_config_from_credentials_and_rejects_foreign_job(bridge):
+    saved = bridge.get_indicators()
+    assert saved['config']['schema'] == 1
+    assert bridge.save_indicators(saved['config'])['ok']
+    assert bridge.submit_indicator_calculation({'token': 'private'})['ok'] is False
+    assert 'private-' not in str(saved)
+    assert 'password' not in str(saved)
+
+
 def test_bridge_marks_retained_contract_separately_from_new_main(bridge):
     request = dict(id='pane-1', continuous='KQ.m@SHFE.rb', mode='actual',
                    period='1m', revision=4)

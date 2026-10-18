@@ -10,6 +10,9 @@ from qf.chart_workspace import PERIODS, ChartWorkspaceStore, period_for, validat
 from qf.credentials import SavedLogin
 from qf.desktop import allowed_chart_url
 from qf.history import HISTORY_ISSUES
+from qf.indicator_catalog import indicator_catalog
+from qf.indicator_jobs import IndicatorJobs
+from qf.indicator_store import IndicatorStore, default_indicators
 from qf.market import catalog_rows
 from qf.market_account import public_account
 from qf.market_session import MarketSession
@@ -63,6 +66,37 @@ class WorkbenchBridge:
         self._login = SavedLogin(root, store=credential_store)
         self._workspace_store = ChartWorkspaceStore(root / 'data/workbench')
         self._workspace_requests = None
+        self._indicator_store = IndicatorStore(root / 'data/workbench')
+        self._indicator_jobs = IndicatorJobs()
+
+    def get_indicators(self):
+        with self._lock:
+            return {**self._indicator_store.load(), 'catalog': indicator_catalog(),
+                    'defaults': default_indicators()}
+
+    def save_indicators(self, config):
+        with self._lock:
+            try:
+                self._indicator_store.save(config)
+                return {'ok': True, 'reason': '指标设置已保存。'}
+            except (ValueError, TypeError, OSError):
+                return {'ok': False, 'reason': '指标设置未保存，原文件已保留。'}
+
+    def submit_indicator_calculation(self, request):
+        if not isinstance(request, dict):
+            return {'ok': False, 'reason': '指标请求无效。'}
+        state = self.get_state()
+        pane = next((p for p in state.get('panes', [])
+                     if p['id'] == request.get('pane_id')), None)
+        if (not pane or state.get('generation') != request.get('generation')
+                or pane.get('revision') != request.get('chart_revision')
+                or pane.get('symbol') != request.get('symbol')
+                or period_for(pane) != request.get('period')):
+            return {'ok': False, 'reason': '指标目标已变化，请等待当前图表就绪。'}
+        return self._indicator_jobs.submit(request)
+
+    def poll_indicator_calculations(self, job_ids):
+        return self._indicator_jobs.poll(job_ids)
 
     def get_workspace(self):
         with self._lock:
@@ -293,6 +327,7 @@ class WorkbenchBridge:
         return {"ok": True, "reason": "正在断开行情连接。"}
 
     def _request_close(self):
+        self._indicator_jobs.close()
         self._session.stop()
         return not self._session.running
 

@@ -345,7 +345,7 @@
     current.setRange(first, last);
     return true;
   }
-  window.QfNativeHistory = {inspect,
+  window.QfNativeHistory = {inspect,getChart:()=>current,
     jumpToYear: year => /^\d{4}$/.test(String(year)) && navigate(String(year)),
     navigateLatest: () => navigate(null)};
   queueInstall();

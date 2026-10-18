@@ -7,6 +7,8 @@
   let sharedRequested='';
   let repairAt=0;
   let measuredWidth=0,measuredHeight=0;
+  let indicatorConfig=null,indicatorEncoded='',indicatorSeq=0,indicatorRenderer=null;
+  const indicatorSession=Math.random().toString(36).slice(2,12);
   const periods={close:6e10,'1m':6e10,'5m':3e11,'15m':9e11,'30m':18e11,'1h':36e11,'1d':864e11};
   const emit=data=>parent.postMessage({...data,pane_id:paneId,generation,revision},qfParentOrigin);
   function configureView(){
@@ -65,13 +67,21 @@
   addEventListener('message',event=>{
     if(event.source!==parent||event.origin!==qfParentOrigin)return;
     const data=event.data;
+    if(['qf-indicator-config','qf-indicator-result'].includes(data?.kind)&&data.pane_id===paneId&&
+      data.generation===generation&&data.chart_revision===revision&&data.symbol===requestedSymbol&&data.period===requestedPeriod){
+      if(data.kind==='qf-indicator-config'){
+        if(!indicatorConfig||indicatorConfig.settings_revision!==data.settings_revision)indicatorEncoded='';
+        indicatorConfig=data;indicatorRenderer?.configure(data.settings,data.enabled);
+      }else if(indicatorConfig?.settings_revision===data.settings_revision)indicatorRenderer?.apply(data.result,indicatorConfig.settings);
+      return;
+    }
     if(data?.kind==='qf-drawings-state'&&data.pane_id===paneId&&data.generation===generation&&data.revision===revision&&data.symbol===requestedSymbol){
       window.QfNativeTools?.applyDrawings(data.symbol,data.version,data.drawings,data.source_pane===paneId,data.ok);return;
     }
     if(data?.kind==='qf-chart-command'&&data.revision===revision&&
       (!paneId||(data.pane_id===paneId&&data.generation===generation))){
       const command=event.data.command;
-      if(command==='dispose'){disposed=true;clearInterval(timer);observer.disconnect();window.QfNativeTools?.dispose();return}
+      if(command==='dispose'){disposed=true;clearInterval(timer);observer.disconnect();indicatorRenderer?.dispose();window.QfNativeTools?.dispose();return}
       if(command==='cancel'){window.QfNativeTools?.cancelInteraction();return}
       const ok=command==='year'&&/^\d{4}$/.test(event.data.year||'')?
         window.QfNativeHistory?.jumpToYear(event.data.year):command==='latest'?
@@ -119,6 +129,15 @@
       const period=view?.mainType==='close'?'close':Object.keys(periods).find(p=>p!=='close'&&periods[p]===view?.duration);
       if(view?.instrumentId===requestedSymbol&&period&&period!==lastPeriod){lastPeriod=period;emit({kind:'qf-chart-period',period});}
       emit({kind:'qf-chart-state',...result});
+      const chart=window.QfNativeHistory.getChart?.();
+      if(indicatorConfig&&chart&&chart.symbol===requestedSymbol&&indicatorConfig.enabled){
+        if(window.QfNativeIndicatorRender&&indicatorRenderer?.chart!==chart){indicatorRenderer?.dispose();indicatorRenderer=window.QfNativeIndicatorRender.attach(chart);indicatorRenderer.configure(indicatorConfig.settings,true);}
+        const data=result.status==='ready'?window.QfNativeIndicatorData.snapshot(chart,indicatorConfig):{issue:'行情或图表数据正在核实'};
+        const encoded=JSON.stringify(data);
+        if(encoded!==indicatorEncoded){indicatorEncoded=encoded;indicatorSeq++;
+          emit({kind:'qf-indicator-data',...data,chart_revision:revision,symbol:requestedSymbol,period:requestedPeriod,
+            settings_revision:indicatorConfig.settings_revision,request_id:indicatorSeq,data_revision:indicatorSession+':'+indicatorSeq});}
+      }
       const key=requestedSymbol+'|'+revision;
       if(paneId&&result.status==='ready'&&result.symbol===requestedSymbol&&sharedRequested!==key){
         sharedRequested=key;emit({kind:'qf-drawings-request',symbol:requestedSymbol});}

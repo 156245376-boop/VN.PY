@@ -464,6 +464,6 @@
     if(interrupted)window.QfNativeTools.onConflict?.();
     if(symbol===active.symbol)render(active);return true;
   }
-  window.QfNativeTools = {attach, render, select, restore, undo, clear, inspect,cancelInteraction,dispose,
+  window.QfNativeTools = {attach, render, select, restore, undo, clear, inspect,cancelInteraction,dispose,intervals,
     exportDrawings,applyDrawings,configureShared(prefix){if(!sharedPrefix)sharedPrefix=prefix+'-'+Math.random().toString(36).slice(2,10);}};
 })();

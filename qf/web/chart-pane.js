@@ -124,6 +124,8 @@
     $('history-year').onchange=()=>{if($('history-year').value)post('year',$('history-year').value)};
     $('history-latest').onclick=()=>post('latest');
     return {update,post,send,setExpanded(value){root.classList.toggle('expanded',value);$('expand-chart').textContent=value?'还原 K 线（Esc）':'放大 K 线';},
+      indicatorContext(){return url&&context?.runtime?.symbol?{source:frame.contentWindow,origin:new URL(url).origin,send,
+        identity:{pane_id:id,generation:context.generation,chart_revision:context.request.revision,symbol:context.runtime.symbol,period:QfChartState.period(context.config)}}:null;},
       inspect:()=>({state:reported,problem,url,request:context?.request,
         viewport:{width:frame.clientWidth,height:frame.clientHeight},visible:frame.style.visibility==='visible'}),
       dispose(){if(disposed)return;post('dispose');disposed=true;resizeObserver?.disconnect();removeEventListener('message',message);frame.src='about:blank';root.remove();}};

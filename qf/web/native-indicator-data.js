@@ -20,5 +20,10 @@
     return {rows,visible:[visible[0].id,visible.at(-1).id],price_tick:chart.price_ticks,
       coverage_end_ns:String(Math.trunc(all[last].end))};
   }
-  window.QfNativeIndicatorData={snapshot};
+  function checkedSnapshot(chart,request,state){
+    if(state.md_connected!==true)return {issue:'图表行情连接未确认，指标已暂停'};
+    if(state.status!=='ready')return {issue:'行情或图表数据正在核实'};
+    return snapshot(chart,request);
+  }
+  window.QfNativeIndicatorData={snapshot,checkedSnapshot};
 })();

@@ -3,6 +3,10 @@
   'use strict';const attached=new WeakMap();
   const names={ma:'简单均线',ema:'指数均线',boll:'布林带',sar:'抛物线',macd:'MACD',kdj:'KDJ',rsi:'RSI',atr:'真实波幅',cci:'CCI',dmi:'DMI',obv:'能量潮',volume:'成交量',oi:'持仓量'};
   const periodName=p=>({'1m':'1分钟','5m':'5分钟','15m':'15分钟','30m':'30分钟','1h':'1小时','1d':'日线',close:'分时'}[p]||p);
+  const timeName=stamp=>{if(!/^\d{16,20}$/.test(stamp||''))return '尚未计算';const d=new Date(Number(BigInt(stamp)/1000000n)+8*3600000);return Number.isFinite(d.getTime())?d.toISOString().slice(0,19).replace('T',' '):'时间超出显示范围';};
+  function dataNote(result,period){return ((result.profiles||[]).length?'VP 估算 · 按收盘价归集 · '+periodName(period)+'；':'')+
+    (result.calculation_start_ns?'计算起点：'+timeName(result.calculation_start_ns)+'（北京时间）；':'')+
+    (result.warmup||'')+'；末根可能为未收盘柱，随行情变化';}
   function lineData(points,source){const data=[];for(const p of points||[])
     if(Number.isFinite(p.value)&&String(Math.trunc(source[p.id]?.datetime))===p.time_ns)
       data[p.id]={value:p.value,datetime:source[p.id].datetime};return data;}
@@ -71,13 +75,14 @@
     }finally{busy=false;}chart.draw();}
     function paint(){if(!alive)return;svg.replaceChildren();const canvas=chart.mainBoard._centerTopCanvas.dom,w=canvas.clientWidth,h=canvas.clientHeight;
       svg.setAttribute('width',w);svg.setAttribute('height',h);
-      label.textContent=enabled?(result.issues||[]).map(i=>i.reason).join('；')||((result.profiles||[]).length?'VP 估算 · 按收盘价归集 · '+chart.duration/1e9+'秒；':'')+(result.warmup||''):'';
+      const period=Object.entries({'1m':60,'5m':300,'15m':900,'30m':1800,'1h':3600,'1d':86400}).find(([,s])=>s===chart.duration/1e9)?.[0]||'close';
+      label.textContent=enabled?[(result.issues||[]).map(i=>i.reason).join('；'),dataNote(result,period)].filter(Boolean).join('；'):'';
       if(key!==chart.symbol+'|'+chart.duration)return;
       const scale=chart.mainBoard.rightYAxis.scale;
       for(const profile of result.profiles||[]){const item=settings.items.find(i=>i.id===profile.item_id&&i.visible);if(!item)continue;
         for(const b of profileGeometry(profile,item.style,w,scale)){
           const rect=document.createElementNS(ns,'rect');for(const k of ['x','y','width','height','fill','opacity'])rect.setAttribute(k,b[k]);
-          const title=document.createElementNS(ns,'title');title.textContent=`VP 估算 · ${periodName(profile.period)} · ${b.low}–${b.high} ${info.priceUnit} · ${b.volume} 手 · ${(b.share*100).toFixed(2)}%`;
+          const title=document.createElementNS(ns,'title');title.textContent=`VP 估算 · ${periodName(profile.period)} · ${timeName(profile.start_ns)} 至 ${timeName(profile.end_ns)}（北京时间） · ${b.low}–${b.high} ${info.priceUnit} · ${b.volume} 手 · ${(b.share*100).toFixed(2)}%`;
           rect.append(title);rect.style.pointerEvents='visiblePainted';svg.append(rect);}
         if(item.style.poc){const line=document.createElementNS(ns,'line');for(const [k,v]of Object.entries({x1:0,x2:w,y1:scale(profile.poc),y2:scale(profile.poc),stroke:'#d9504e','stroke-dasharray':'4 3'}))line.setAttribute(k,v);svg.append(line);}
       }
@@ -86,7 +91,10 @@
     chart.draw=function(...args){if(busy)return;layout();const values=[];for(const id of managed){const p=chart.plots[id];if(p?.boardId==='main')for(let i=chart.chartCtrl.range.leftId;i<=chart.chartCtrl.range.rightId;i++)if(Number.isFinite(p.data[i]?.value))values.push(p.data[i].value);}
       QfNativeTools.setIndicatorPriceExtent?.(chart,values.length?[Math.min(...values),Math.max(...values)]:null);
       const value=originalDraw.apply(this,args);paint();return value;};
-    const api={chart,onHeight:null,configure(next,on=true,metadata){settings=JSON.parse(JSON.stringify(next));if(metadata)info=metadata;enabled=on;if(!enabled)result={series:[],profiles:[],issues:[]};build();},
+    const api={chart,onHeight:null,configure(next,on=true,metadata){
+      const changed=new Set(next.items.filter(i=>{const old=settings.items.find(p=>p.id===i.id);return !old||JSON.stringify([old.type,old.params,old.visible])!==JSON.stringify([i.type,i.params,i.visible]);}).map(i=>i.id));
+      result={...result,series:(result.series||[]).filter(s=>!changed.has(s.item_id)),profiles:(result.profiles||[]).filter(s=>!changed.has(s.item_id))};
+      settings=JSON.parse(JSON.stringify(next));if(metadata)info=metadata;enabled=on;if(!enabled)result={series:[],profiles:[],issues:[]};build();},
       apply(next,nextSettings){result=next||{series:[],profiles:[],issues:[]};settings=JSON.parse(JSON.stringify(nextSettings));key=chart.symbol+'|'+chart.duration;build();},
       clear(id){result.series=(result.series||[]).filter(s=>s.item_id!==id);result.profiles=(result.profiles||[]).filter(s=>s.item_id!==id);build();},
       dispose(){if(!alive)return;alive=false;removePlots();for(const {handle,down}of handles.values())handle.removeEventListener('pointerdown',down);handles.clear();
@@ -94,5 +102,5 @@
         if(!chart.boards.sub&&originalSub){chart.boards.sub=originalSub;table.addBoard(originalSub);}Object.assign(chart.plots,originalPlots);svg.remove();label.remove();attached.delete(chart);}};
     attached.set(chart,api);return api;
   }
-  window.QfNativeIndicatorRender={attach,profileGeometry,lineData};
+  window.QfNativeIndicatorRender={attach,profileGeometry,lineData,dataNote};
 })();

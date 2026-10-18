@@ -36,3 +36,4 @@
 历史覆盖、年份定位与数据异常保护按需查 `docs/history-integrity.md`。
 价格轴、分隔条与右键画图按需查 `docs/chart-interactions.md`。
 自适应布局、独立分屏、联动、共享画线与布局恢复按需查 `docs/chart-workspace.md`。
+可选主图/副图指标、参数保存和估算 VP 按需查 `docs/chart-indicators.md`。

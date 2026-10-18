@@ -96,6 +96,19 @@ def exercise(root, phase):
                         'ncludes("已保存")'
                     )
                     restored = bridge.get_workspace()["workspace"]
+                    window.evaluate_js("""
+                      document.querySelector('#indicators-pane-2').click();
+                      document.querySelector('.indicator-kind').value='ma';
+                      [...document.querySelectorAll('.indicator-panel button')]
+                        .find(b=>b.textContent==='添加指标').click();
+                      document.querySelector('.indicator-panel-head button').click();
+                    """)
+                    check("workspace.inspect().indicators.panes['pane-2'].items.some(i=>i.type==='ma')")
+                    window.evaluate_js('window.indicatorFlushDone=false;'
+                                       'workspace.flush().then(()=>window.indicatorFlushDone=true)')
+                    check('window.indicatorFlushDone===true')
+                    assert any(i['type'] == 'ma' for i in
+                               bridge.get_indicators()['config']['panes']['pane-2']['items'])
                     assert restored["layout"] == "quad" and restored["active"] == "pane-2"
                     pane = next(p for p in restored["panes"] if p["id"] == "pane-2")
                     assert pane["period"] == "1h" and pane["mode"] == "continuous"
@@ -113,6 +126,8 @@ def exercise(root, phase):
                         'ute("src")?.startsWith("http"))'
                     )
                     assert counters["calls"] == 0
+                    assert window.evaluate_js(
+                        "workspace.inspect().indicators.panes['pane-2'].items.some(i=>i.type==='ma')")
             except Exception as exc:
                 errors.append(str(exc))
             finally:

@@ -51,6 +51,14 @@ def exercise():
                 throw Error('自动价格域未包含主图指标 '+domain);
             };
             assertAuto();
+            const edited=JSON.parse(JSON.stringify(SETTINGS));
+            edited.items.find(i=>i.type==='ma').params.periods=[7,20];
+            r.configure(edited,true);
+            if(Object.keys(chart.plots).some(k=>k.startsWith('qf_ma_')))
+              throw Error('改参后仍将旧均线当作新参数结果');
+            if(!Object.keys(chart.plots).some(k=>k.startsWith('qf_macd_')))
+              throw Error('修改均线影响了无关 MACD');
+            r.apply(RESULT,SETTINGS);
             if(!window.QfNativeVpRange)throw Error('固定 VP 选区未接入');
             let selected=null;
             const ranges=QfNativeVpRange.attach(chart,{onChange:(id,r)=>selected=r});

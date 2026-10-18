@@ -15,6 +15,10 @@ const before=QfNativeIndicatorData.snapshot(chart,{symbol:identity.symbol,settin
 chart.mainSeries.data[1].volume=7;
 const after=QfNativeIndicatorData.snapshot(chart,{symbol:identity.symbol,settings:{items:[]}});
 assert.equal(before.rows[1].volume,3);assert.equal(after.rows[1].volume,7);
+assert.match(QfNativeIndicatorData.checkedSnapshot(chart,{symbol:identity.symbol,settings:{items:[]}},
+  {status:'ready',md_connected:false}).issue,/连接/);
+assert.equal(QfNativeIndicatorData.checkedSnapshot(chart,{symbol:identity.symbol,settings:{items:[]}},
+  {status:'ready',md_connected:true}).rows.length,2);
 (async()=>{
   c.sync();
   c.onMessage({source:{},origin:view.origin,data:payload});
@@ -28,5 +32,8 @@ assert.equal(before.rows[1].volume,3);assert.equal(after.rows[1].volume,7);
   await c.poll();assert.equal(painted,0,'旧设置结果不能画回');
   c.setVisible('pane-1',false);c.onMessage({source,origin:view.origin,data:payload});
   await new Promise(r=>setTimeout(r,20));assert.equal(submits,1);
+  c.setVisible('pane-1',true);c.quiesce();
+  c.onMessage({source,origin:view.origin,data:{...payload,settings_revision:2,request_id:2,data_revision:'b'}});
+  await new Promise(r=>setTimeout(r,600));assert.equal(submits,1,'退出准备后不得再提交计算');
   await c.flush();c.dispose();console.log('INDICATOR_PROTOCOL_OK');
 })().catch(e=>{c.dispose();console.error(e);process.exitCode=1;});

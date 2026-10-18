@@ -12,4 +12,6 @@ const data=R.lineData([{id:3,time_ns:'1700000000000000000',value:null},
   {id:4,time_ns:'1700000060000000000',value:3}],source);
 assert.equal(data[3],undefined);assert.equal(data[4].value,3);
 assert.equal(R.lineData([{id:4,time_ns:'1800000000000000000',value:3}],source)[4],undefined);
+const note=R.dataNote({calculation_start_ns:'1700000000000000000',warmup:'预热说明',profiles:[{}]},'1h');
+assert.match(note,/1小时/);assert.match(note,/2023-11-15/);assert.match(note,/未收盘柱/);
 console.log('INDICATOR_RENDER_OK');

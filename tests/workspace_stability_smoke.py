@@ -18,6 +18,8 @@ from window_smoke import address, fixture_klines, ready, serve, stop  # noqa: E4
 
 import qf.market_session as market_module  # noqa: E402
 from qf.chart_workspace import ChartWorkspaceStore, default_workspace  # noqa: E402
+from qf.indicator_catalog import default_item  # noqa: E402
+from qf.indicator_store import IndicatorStore, default_indicators  # noqa: E402
 from qf.window_host import run_window  # noqa: E402
 from qf.workbench import WorkbenchBridge  # noqa: E402
 
@@ -41,6 +43,12 @@ def exercise():
         config['panes'][0]['continuous'] = 'KQ.m@SHFE.rb'
         config['panes'][1].update(continuous='KQ.m@DCE.m', mode='continuous')
         ChartWorkspaceStore(Path(temp) / 'data/workbench').save(config)
+        indicator_config = default_indicators()
+        for index, pane in enumerate(indicator_config['panes'].values()):
+            pane['items'] += [default_item(k) for k in ('ma', 'boll', 'macd', 'rsi', 'vp')]
+            pane['items'][2]['params']['periods'] = [5+index, 20+index]
+            pane['items'][4]['params']['short'] = 8+index
+        IndicatorStore(Path(temp) / 'data/workbench').save(indicator_config)
         credentials = MemoryStore()
         credentials.save('offline-user', 'offline-pass')
         session = market_module.MarketSession(sdk=sdk)
@@ -64,8 +72,13 @@ def exercise():
                 try:
                     wait("typeof workspace!=='undefined'&&!!workspace&&nativeLabelsReady")
                     window.evaluate_js("""
-                      window.stabilityRaw=[];
+                      window.stabilityRaw=[];window.indicatorObserved={};
                       addEventListener('message',e=>{const d=e.data;
+                        if(d?.kind==='offline-native-probe'){
+                          const f=[...document.querySelectorAll('.chart-pane iframe')]
+                            .find(f=>f.contentWindow===e.source);
+                          if(f)indicatorObserved[f.closest('[data-pane]').dataset.pane]
+                            =d.indicatorPlots||[];}
                         if(d?.kind==='qf-chart-state')stabilityRaw.push({
                           id:d.pane_id,status:d.status,reason:d.reason,
                           width:d.viewport_width,height:d.viewport_height,
@@ -74,6 +87,7 @@ def exercise():
                     """)
                     wait("Object.keys(workspace.inspect().panes).length===2&&"
                          "Object.values(workspace.inspect().panes).every(p=>p.visible)")
+                    wait("Object.values(indicatorObserved).filter(p=>p.length>=8).length===2")
                     for width, height, layout, expanded in [
                         (1280, 820, 'columns', True), (1800, 1050, 'columns', False),
                         (2540, 1320, 'columns', True), (2540, 1320, 'quad', True),
@@ -112,6 +126,14 @@ def exercise():
                             f'来回调整产生偏移：{width}/{layout}/{expanded}/{before}/{restored}')
                         # 尺寸变化后允许收敛，然后完整采样持续状态，不能只等到一次 ready。
                         time.sleep(3)
+                        wait("Object.keys(workspace.inspect().panes).every(id=>"
+                             "indicatorObserved[id]?.length>=8)")
+                        expected = {'pane-1': 'qf_ma_5', 'pane-2': 'qf_ma_6',
+                                    'pane-3': 'qf_ma_7', 'pane-4': 'qf_ma_8'}
+                        for pane in window.evaluate_js('Object.keys(workspace.inspect().panes)'):
+                            assert window.evaluate_js(
+                                f'indicatorObserved[{json.dumps(pane)}].includes('
+                                f'{json.dumps(expected[pane])})'), f'参数串格：{pane}'
                         phase = []
                         for _ in range(60):
                             sample = window.evaluate_js("""(()=>{

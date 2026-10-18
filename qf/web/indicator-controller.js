@@ -3,7 +3,7 @@
   'use strict';const clone=v=>JSON.parse(JSON.stringify(v));
   const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
   const mathKey=items=>JSON.stringify(items.map(({id,type,visible,params})=>({id,type,visible,params})));
-  function create(options){let config=clone(options.config),alive=true,polling=false,saving=null,pendingSave=null;
+  function create(options){let config=clone(options.config),alive=true,accepting=true,polling=false,saving=null,pendingSave=null;
     const panes=new Map(Object.entries(config.panes).map(([id,p])=>[id,{settings:clone(p),revision:1,visible:true,token:'',sent:'',job:null,timer:null,lastSubmit:0}]));
     function identity(id){const p=options.getPane(id);return p?.identity?{...p.identity,settings_revision:panes.get(id).revision}:null;}
     function send(id,data){options.getPane(id)?.send(data);}
@@ -19,7 +19,7 @@
     function valid(id,d){const i=identity(id);return i&&Object.entries(i).every(([k,v])=>d[k]===v);}
     function clear(id,reason){send(id,{kind:'qf-indicator-result',...identity(id),result:{series:[],profiles:[],issues:[{item_id:'all',reason}]}});}
     function onMessage(event){const d=event.data,id=d?.pane_id,s=panes.get(id),p=options.getPane(id);
-      if(!alive||!s?.visible||!p||event.source!==p.source||event.origin!==p.origin||!valid(id,d))return;
+      if(!alive||!accepting||!s?.visible||!p||event.source!==p.source||event.origin!==p.origin||!valid(id,d))return;
       if(['qf-vp-range-change','qf-indicator-height'].includes(d.kind)){options.onRange?.(id,d);return;}
       if(d.kind!=='qf-indicator-data')return;
       if(d.issue){s.job=null;s.token='';clear(id,d.issue);return;}
@@ -32,8 +32,8 @@
           if(result.ok)s.job={id:result.job_id,data_revision:d.data_revision,request_id:d.request_id};else clear(id,result.reason);
         }catch(_){clear(id,'指标计算暂不可用。');}
       },Math.max(options.delay??250,500-(Date.now()-s.lastSubmit)));}
-    async function poll(){if(!alive||polling)return;const ids=[...panes.values()].map(s=>s.job?.id).filter(Boolean);if(!ids.length)return;
-      polling=true;try{const results=await options.poll(ids);if(!alive)return;
+    async function poll(){if(!alive||!accepting||polling)return;const ids=[...panes.values()].map(s=>s.job?.id).filter(Boolean);if(!ids.length)return;
+      polling=true;try{const results=await options.poll(ids);if(!alive||!accepting)return;
         for(const [id,s]of panes){const job=s.job,r=job&&results[job.id];if(!r||['queued','running'].includes(r.status))continue;s.job=null;
           if(!s.visible||!r.identity||!valid(id,r.identity)||r.identity.data_revision!==s.token||r.identity.request_id!==job.request_id)continue;
           if(r.status==='ready'){send(id,{kind:'qf-indicator-result',...r.identity,result:r.result});options.onResult?.(id,r.result);}
@@ -42,6 +42,7 @@
     const timer=setInterval(poll,200);
     return {configure,sync,onMessage,poll,getConfig:()=>clone(config),setVisible(id,value){const s=panes.get(id);if(!s||s.visible===value)return;s.visible=value;s.sent='';s.job=null;s.token='';clearTimeout(s.timer);sync();},
       command(id,command,item_id){if(['begin','locate','cancel'].includes(command))send(id,{kind:'qf-vp-range-command',...identity(id),command,item_id});},
+      quiesce(){accepting=false;clearInterval(timer);for(const s of panes.values()){s.visible=false;s.job=null;s.sent='';clearTimeout(s.timer);}sync();},
       async flush(){await save();},dispose(){alive=false;clearInterval(timer);for(const s of panes.values())clearTimeout(s.timer);pendingSave=null;},
       invalidate(id){const s=panes.get(id);if(s){s.sent='';s.token='';s.job=null;clearTimeout(s.timer);sync();}}};
   }

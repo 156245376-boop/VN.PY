@@ -162,6 +162,7 @@
     root.querySelector('#expand-workspace').onclick=()=>{workspaceExpanded=!workspaceExpanded;render();};
     function keydown(e){if(e.key==='Escape')escape();}
     addEventListener('pointermove',move);addEventListener('pointerup',finish);addEventListener('pointercancel',finish);addEventListener('blur',finish);addEventListener('keydown',keydown);addEventListener('resize',render);
+    async function flush(){if(viewPromise)await viewPromise;await Promise.all([saves.flush(),indicators?.flush()]);}
     render();
     return {update(next){state=next;if(!alive)return;
         if(state.catalog.length){const active=config.panes.find(p=>p.id===config.active);
@@ -169,7 +170,7 @@
             config=S.reduce(config,{type:'choose',symbol});for(const id of S.visibleIds(config)){const p=config.panes.find(p=>p.id===id);if(!p.continuous)p.continuous=symbol;}}}
         render();sendView();},choose(symbol){action({type:'choose',symbol});},getConfig:()=>S.clone(config),
       setVisible(value){visible=value;finish();if(!value){expanded=null;workspaceExpanded=false;}render();viewKey='';sendView();},
-      async flush(){if(viewPromise)await viewPromise;await Promise.all([saves.flush(),indicators?.flush()]);},
+      flush,async prepareExit(){indicators?.quiesce();await flush();},
       inspect:()=>({config:S.clone(config),indicators:indicators?.getConfig(),panes:Object.fromEntries([...panes].map(([id,p])=>[id,p.inspect()]))}),
       dispose(){if(!alive)return;finish();alive=false;pending=null;for(const p of panes.values())p.dispose();panes.clear();
         if(indicators){removeEventListener('message',indicators.onMessage);indicators.dispose();indicatorPanel.dispose();}

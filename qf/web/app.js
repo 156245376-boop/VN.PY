@@ -131,7 +131,7 @@ addEventListener('qf-native-labels-ready',()=>{nativeLabelsReady=true;if(api)ren
 addEventListener('qf-native-labels-error',()=>notice('图表适配未能准备完成，请重新打开工作台。'));
 window.qfPrepareExit=()=>{if(exiting)return 'qf-exit-pending';exiting=true;clearInterval(pollTimer);$('password').value='';
   document.querySelectorAll('button,input,select').forEach(e=>e.disabled=true);notice('正在保存布局并退出，请稍候…');
-  Promise.resolve(workspace?.flush()).finally(()=>{workspace?.dispose();window.qfExitReady=true;});return 'qf-exit-pending';};
+  Promise.resolve(workspace?.prepareExit?.()||workspace?.flush()).finally(()=>{workspace?.dispose();window.qfExitReady=true;});return 'qf-exit-pending';};
 addEventListener('pywebviewready',async()=>{api=window.pywebview.api;
   try{await refreshLogin(true);const saved=await api.get_workspace(),indicators=await api.get_indicators();
     QfIndicatorState.install(indicators.catalog,indicators.defaults);

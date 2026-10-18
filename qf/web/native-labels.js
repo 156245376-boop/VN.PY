@@ -137,7 +137,7 @@
         if(window.QfNativeIndicatorRender&&indicatorRenderer?.chart!==chart){vpRanges?.dispose();indicatorRenderer?.dispose();indicatorRenderer=window.QfNativeIndicatorRender.attach(chart);indicatorRenderer.configure(indicatorConfig.settings,true,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});
           vpRanges=window.QfNativeVpRange.attach(chart,{onChange:(item_id,range)=>emit({kind:'qf-vp-range-change',chart_revision:revision,symbol:requestedSymbol,period:requestedPeriod,settings_revision:indicatorConfig.settings_revision,item_id,range})});vpRanges.configure(indicatorConfig.settings.items);
           indicatorRenderer.onHeight=(item_id,height)=>emit({kind:'qf-indicator-height',chart_revision:revision,symbol:requestedSymbol,period:requestedPeriod,settings_revision:indicatorConfig.settings_revision,item_id,height});}
-        const data=result.status==='ready'?window.QfNativeIndicatorData.snapshot(chart,indicatorConfig):{issue:'行情或图表数据正在核实'};
+        const data=window.QfNativeIndicatorData.checkedSnapshot(chart,indicatorConfig,result);
         const encoded=JSON.stringify(data);
         if(encoded!==indicatorEncoded){indicatorEncoded=encoded;indicatorSeq++;
           emit({kind:'qf-indicator-data',...data,chart_revision:revision,symbol:requestedSymbol,period:requestedPeriod,

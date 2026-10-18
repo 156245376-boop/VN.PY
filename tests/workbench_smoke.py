@@ -172,6 +172,12 @@ def exercise():
                     """)
                     check("chartObservations['pane-1']?.indicatorPlots?.some(k=>k.startsWith('qf_ma_'))")
                     check("chartObservations['pane-1']?.indicatorPlots?.some(k=>k.startsWith('qf_macd_'))")
+                    # 仅切换离线模拟 socket 状态；缓存仍存在时断线也要撤下指标。
+                    socket = "document.querySelector('#chart').contentWindow.postMessage"
+                    window.evaluate_js(socket+"({kind:'offline-socket-state',connected:false},'*')")
+                    check("chartObservations['pane-1']?.indicatorPlots?.length===0")
+                    window.evaluate_js(socket+"({kind:'offline-socket-state',connected:true},'*')")
+                    check("chartObservations['pane-1']?.indicatorPlots?.some(k=>k.startsWith('qf_ma_'))")
                     assert (window.evaluate_js('document.querySelector("#chart").src')
                             == before_indicators)
                     window.evaluate_js(

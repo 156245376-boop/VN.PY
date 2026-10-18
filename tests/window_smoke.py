@@ -60,10 +60,14 @@ def serve(initial_data=None, *, probe=False, extra_script=""):
                 window.WebSocket=function(url,protocols){
                   if(new URL(url,location.href).hostname==='127.0.0.1')
                     return protocols?new NativeSocket(url,protocols):new NativeSocket(url);
-                  return Object.assign(new EventTarget(),{readyState:0,
+                  return Object.assign(new EventTarget(),{readyState:1,
                     send(){},close(){this.readyState=3}});
                 };
                 Object.assign(window.WebSocket,{CONNECTING:0,OPEN:1,CLOSING:2,CLOSED:3});
+                addEventListener('message',e=>{if(e.source===parent&&
+                  e.data?.kind==='offline-socket-state'){
+                    const ws=document.querySelector('.tq-top-view')?.__vue__?.$tqsdk?.quotesWs?.ws;
+                    if(ws)ws.readyState=e.data.connected?1:3;}});
                 (window.webpackJsonp=window.webpackJsonp||[]).push([['offline-chart-wire'],{
                   'offline-chart-wire':function(module,exports,require){
                     const proto=require('0977').a.prototype,original=proto.setChart;

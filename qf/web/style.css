@@ -51,3 +51,8 @@
 .account-tabs{display:flex;gap:6px;margin:8px 0}.account-tabs button{padding:5px 12px;font-size:11px}
 .account-tabs .selected{background:#e7f2ec}.account-view .table-scroll{min-height:0;max-height:180px}
 .account-empty{padding:8px}.account-view th{text-align:left}.account-view td{text-align:left}
+.account-split{height:12px;min-height:12px;flex-shrink:0;margin:0 12px;cursor:row-resize;touch-action:none;position:relative;border-radius:4px}
+.account-split::before{content:'';position:absolute;left:0;right:0;top:5px;height:2px;background:#c8d9d0}
+.account-split::after{content:'';position:absolute;left:calc(50% - 24px);width:48px;top:3px;height:6px;border-radius:3px;background:#8eafa0}
+.account-split:hover,.account-split:focus{background:#e5f0ea;outline:2px solid #9bc2b5;outline-offset:-2px}
+.workspace-account-sized .account-view{flex:1;min-height:100px;overflow:auto}

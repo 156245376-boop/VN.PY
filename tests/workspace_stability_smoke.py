@@ -89,6 +89,27 @@ def exercise():
                           if(active!==EXPANDED)document.querySelector('#expand-workspace').click();
                         })()""".replace('LAYOUT', json.dumps(layout))
                              .replace('EXPANDED', json.dumps(expanded)))
+                        before = window.evaluate_js("""(()=>{
+                          const bar=document.querySelector('.account-split');
+                          return bar&&!bar.hidden?bar.getBoundingClientRect().top:null;
+                        })()""")
+                        assert before is not None, '图表与账户之间缺少拖动分界'
+                        # 上移边界应让出更多账户空间；普通/放大与双/四格均适用。
+                        window.evaluate_js("""
+                          for(let i=0;i<2;i++)document.querySelector('.account-split')
+                            .dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp'}));
+                        """)
+                        after = window.evaluate_js(
+                            "document.querySelector('.account-split').getBoundingClientRect().top")
+                        assert after < before - 40, f'账户分界未上移：{before}/{after}'
+                        window.evaluate_js("""
+                          for(let i=0;i<2;i++)document.querySelector('.account-split')
+                            .dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown'}));
+                        """)
+                        restored = window.evaluate_js(
+                            "document.querySelector('.account-split').getBoundingClientRect().top")
+                        assert abs(restored - before) < 2, (
+                            f'来回调整产生偏移：{width}/{layout}/{expanded}/{before}/{restored}')
                         # 尺寸变化后允许收敛，然后完整采样持续状态，不能只等到一次 ready。
                         time.sleep(3)
                         phase = []

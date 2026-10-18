@@ -1,7 +1,9 @@
 'use strict';
 const assert=require('node:assert/strict');
 global.window=global;
-global.addEventListener=()=>{};global.removeEventListener=()=>{};
+const events=new Map();
+global.addEventListener=(name,handler)=>events.set(name,handler);
+global.removeEventListener=(name,handler)=>{if(events.get(name)===handler)events.delete(name);};
 class E{
   constructor(){this.style={};this.dataset={};this.children=[];this.nodes=new Map();
     this.clientWidth=1100;this.clientHeight=900;
@@ -9,9 +11,11 @@ class E{
   append(...nodes){this.children.push(...nodes);}
   get offsetWidth(){return this.boxWidth??this.clientWidth;}
   get offsetHeight(){return this.boxHeight??this.clientHeight;}
-  getBoundingClientRect(){return {width:this.rectWidth??this.clientWidth,
-    height:this.rectHeight??this.clientHeight};}
+  getBoundingClientRect(){return {width:this.rectWidth??(parseFloat(this.style.width)||this.clientWidth),
+    height:this.rectHeight??(parseFloat(this.style.height)||this.clientHeight)};}
   setAttribute(){}
+  setPointerCapture(){}
+  releasePointerCapture(){}
   querySelector(selector){
     if(selector.startsWith('[data-pane='))return this.children.find(
       n=>n.dataset.pane===selector.match(/"([^"]+)"/)[1]);
@@ -41,6 +45,21 @@ async function fixture(layout='quad'){
   return {root,workspace,calls,saved};
 }
 (async()=>{
+  const accountFixture=await fixture('columns');
+  const accountBar=accountFixture.root.children.find(n=>n.className==='account-split');
+  assert.ok(accountBar,'图表与账户区之间必须有可拖动分隔条');
+  const accountGrid=accountFixture.root.querySelector('.chart-grid');
+  // 窗口切换时滚动条可能短暂计入容器尺寸；拖动应以实际网格为准。
+  accountFixture.root.querySelector('.chart-grid-scroll').clientHeight=586;
+  accountBar.onpointerdown({button:0,pointerId:1,clientY:500,preventDefault(){}});
+  events.get('pointermove')({buttons:1,clientY:620});
+  assert.equal(parseFloat(accountGrid.style.height),680,'下拉账户分界应增加图表高度');
+  events.get('pointerup')();
+  events.get('pointermove')({buttons:0,clientY:700});
+  assert.equal(parseFloat(accountGrid.style.height),680,'松开后不能继续改变高度');
+  accountBar.onkeydown({key:'ArrowUp',preventDefault(){}});
+  assert.ok(parseFloat(accountGrid.style.height)<680,'方向键也可缩小图表高度');
+  accountFixture.workspace.dispose();
   const fractional=await fixture('columns'),scroll=fractional.root.querySelector('.chart-grid-scroll');
   Object.assign(scroll,{clientWidth:2509,clientHeight:905,boxWidth:2509,boxHeight:905,
     rectWidth:2508.6667,rectHeight:904.3125});

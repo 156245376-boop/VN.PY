@@ -5,7 +5,7 @@
     const S=QfChartState;
     let config=S.clone(options.config),accepted=S.clone(config),state={catalog:[],rows:[],favorites:[]},alive=true,visible=true;
     let expanded=null,workspaceExpanded=false,viewKey='',pending=null,sending=false,drag=null;
-    let viewPromise=null;
+    let viewPromise=null,regularHeight=null,expandedHeight=null;
     const panes=new Map(),revisions=new Map(config.panes.map(p=>[p.id,1]));
     const drawingBook=QfDrawingBook.create();
     root.innerHTML=`<div class="section-title"><div><h2>行情图工作区</h2><span id="active-pane-label"></span></div>
@@ -13,12 +13,27 @@
       <label><input id="link-products" type="checkbox"> 品种联动</label><button id="expand-workspace">放大工作区</button></div></div>
       <p id="workspace-save-note" class="chart-units"></p><div class="chart-grid-scroll"><div class="chart-grid"></div></div>`;
     const grid=root.querySelector('.chart-grid'),scroll=root.querySelector('.chart-grid-scroll');
+    const accountBar=document.createElement('div');accountBar.className='account-split';
+    accountBar.tabIndex=0;accountBar.role='separator';
+    accountBar.setAttribute('aria-label','上下拖动调整图表与账户区域高度');
+    accountBar.setAttribute('aria-orientation','horizontal');
+    accountBar.title='上下拖动调整图表与账户区域高度（也可用上下方向键）';root.append(accountBar);
     const accountRoot=document.createElement('section');root.append(accountRoot);
     const account=QfAccountView.create(accountRoot,{onCollapse:value=>{if(config.account_collapsed!==value)action({type:'collapse-account',value});}});
     const saves=QfLayoutSaves.create(options.onConfig,result=>{
       if(alive)root.querySelector('#workspace-save-note').textContent=result.ok?'布局已保存':result.reason||'布局未保存';
     });
     const column=document.createElement('div'),row=document.createElement('div');
+    const accountSize=()=>Math.floor((workspaceExpanded?scroll:grid).getBoundingClientRect().height);
+    function resizeAccount(height){
+      if(workspaceExpanded)expandedHeight=height;else regularHeight=height;
+      render();
+    }
+    accountBar.onpointerdown=e=>{if(e.button!==0)return;e.preventDefault();endDrag();
+      drag={axis:'account',bar:accountBar,id:e.pointerId,y:e.clientY,height:accountSize()};
+      accountBar.setPointerCapture(e.pointerId);root.classList.add('resizing-charts');};
+    accountBar.onkeydown=e=>{if(!['ArrowUp','ArrowDown'].includes(e.key))return;
+      e.preventDefault();resizeAccount(accountSize()+(e.key==='ArrowDown'?32:-32));};
     for(const [bar,axis] of [[column,'column'],[row,'row']]){bar.className='chart-split split-'+axis;bar.tabIndex=0;bar.role='separator';
       bar.setAttribute('aria-label',axis==='column'?'调整左右分屏比例':'调整上下分屏比例');
       bar.setAttribute('aria-orientation',axis==='column'?'vertical':'horizontal');
@@ -30,10 +45,11 @@
     }
     function endDrag(){if(!drag)return;try{drag.bar.releasePointerCapture(drag.id)}catch(_){}drag=null;root.classList.remove('resizing-charts');}
     function move(e){if(!drag)return;if(!(e.buttons&1)){endDrag();return;}
+      if(drag.axis==='account'){resizeAccount(drag.height+e.clientY-drag.y);return;}
       const box=grid.getBoundingClientRect(),axis=drag.axis;
       const value=axis==='column'?(e.clientX-box.left)/box.width:(e.clientY-box.top)/box.height;
       config=S.reduce(config,{type:'split',axis,value});render();}
-    function finish(){if(drag){endDrag();save();}}
+    function finish(){if(drag){const accountDrag=drag.axis==='account';endDrag();if(!accountDrag)save();}}
     function save(){if(alive){root.querySelector('#workspace-save-note').textContent='正在保存布局…';saves.submit(config);}}
     function action(a){if(!alive)return;const before=config;config=S.reduce(config,a);
       for(const p of config.panes){const old=before.panes.find(x=>x.id===p.id);
@@ -92,6 +108,15 @@
       const twoColumns=['columns','quad'].includes(config.layout),twoRows=['rows','quad'].includes(config.layout);
       root.classList.toggle('workspace-expanded',workspaceExpanded);
       account.update(state.account,state.catalog);account.setCollapsed(config.account_collapsed);
+      accountBar.hidden=config.account_collapsed||!!expanded||!visible;
+      const sizedAccount=workspaceExpanded&&expandedHeight!==null&&!config.account_collapsed;
+      root.classList.toggle('workspace-account-sized',sizedAccount);
+      if(sizedAccount){
+        // 先分配区域，再测量网格；账户区保留可访问高度，窄窗口在图表内部滚动。
+        const room=root.getBoundingClientRect().bottom-scroll.getBoundingClientRect().top;
+        expandedHeight=Math.max(180,Math.min(expandedHeight,Math.max(180,room-140)));
+        scroll.style.flex=`0 0 ${Math.floor(expandedHeight)}px`;
+      }else scroll.style.flex='';
       const rowMinimum=ids=>ids.some(id=>S.period(config.panes.find(p=>p.id===id))==='1d')?480:448;
       const topMin=rowMinimum(config.layout==='rows'?ids.slice(0,1):ids.slice(0,2));
       const bottomMin=rowMinimum(config.layout==='rows'?ids.slice(1,2):ids.slice(2,4));
@@ -101,7 +126,8 @@
       const availableWidth=Math.floor(bounds.width-scroll.offsetWidth+scroll.clientWidth)-10;
       const availableHeight=Math.floor(bounds.height-scroll.offsetHeight+scroll.clientHeight)-10;
       const width=Math.max(twoColumns?852:420,availableWidth),minimum=twoRows?topMin+bottomMin+12:Math.max(480,topMin);
-      const height=workspaceExpanded?Math.max(minimum,availableHeight):twoRows?Math.max(960,minimum):560;
+      const height=workspaceExpanded?Math.max(minimum,availableHeight):Math.max(minimum,regularHeight??(twoRows?960:560));
+      if(!workspaceExpanded&&regularHeight!==null)regularHeight=height;
       const firstColumn=Math.max(420,Math.min(width-432,(width-12)*config.split.column));
       const firstRow=Math.max(topMin,Math.min(height-12-bottomMin,(height-12)*config.split.row));
       grid.style.width=width+'px';grid.style.height=height+'px';grid.style.minHeight=minimum+'px';

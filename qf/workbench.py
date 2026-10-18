@@ -132,7 +132,8 @@ class WorkbenchBridge:
                     resume=resume, fee_multiplier=fee_multiplier,
                     experiment_ref=dict(experiment_id=experiment_id, revision=revision))
             except Exception:
-                return dict(ok=False, reason='未开始运行：请核对合约、参数和凭证；已有任务需先停止。')
+                return dict(ok=False,
+                            reason='未开始运行：请核对合约、参数和凭证；已有任务需先停止。')
 
     def stop_research(self, flatten=False):
         try:

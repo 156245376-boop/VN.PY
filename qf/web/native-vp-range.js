@@ -23,7 +23,7 @@
         const rect=document.createElementNS(ns,'rect');for(const [k,v]of Object.entries({x:Math.min(a,b),y:1,width:Math.abs(b-a),height:Math.max(0,canvas.clientHeight-2),fill:'#418dab',opacity:.12,stroke:'#377a99'}))rect.setAttribute(k,v);svg.append(rect);
         if(id==='preview')continue;
         for(const [endpoint,x]of [['start_ns',a],['end_ns',b]]){const handle=document.createElementNS(ns,'circle');handle.setAttribute('cx',x);handle.setAttribute('cy',28);handle.setAttribute('r',6);handle.setAttribute('fill','#287a90');handle.style.pointerEvents='all';handle.style.cursor='ew-resize';
-          handle.addEventListener('mousedown',e=>{if(e.button!==0)return;e.preventDefault();e.stopPropagation();QfNativeTools.cancelInteraction();editing={id,endpoint,before:{...r}};});svg.append(handle);}
+          handle.addEventListener('mousedown',e=>{if(e.button!==0)return;e.preventDefault();e.stopPropagation();QfNativeTools.cancelInteraction();editing={id,endpoint,before:{...r}};QfNativeTools.setExternalInteraction(chart,{cancel});});svg.append(handle);}
       }
     }
     function stop(){selecting=null;first=null;preview=null;badge.hidden=true;canvas.style.cursor='';QfNativeTools.setExternalInteraction(chart,null);paint();}
@@ -36,7 +36,7 @@
     const move=e=>{if(!editing)return;if(!(e.buttons&1)){cancel();return;}const row=rowAt(e.clientX);if(!row)return;
       const next={...ranges.get(editing.id)},value=String(Math.trunc(editing.endpoint==='start_ns'?row.start:row.end));next[editing.endpoint]=value;
       if(BigInt(next.start_ns)<BigInt(next.end_ns)){ranges.set(editing.id,next);paint();}};
-    const up=()=>{if(!editing)return;const {id}=editing,r=ranges.get(id);editing=null;commit(id,r);};
+    const up=()=>{if(!editing)return;const {id}=editing,r=ranges.get(id);editing=null;QfNativeTools.setExternalInteraction(chart,null);commit(id,r);};
     document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);addEventListener('blur',cancel);badge.onclick=cancel;
     const draw=chart.draw;chart.draw=function(...args){const value=draw.apply(this,args);paint();return value;};
     const api={chart,onChange:options.onChange,begin,cancel,setRange(id,r){if(r)ranges.set(id,{...r});else ranges.delete(id);paint();},

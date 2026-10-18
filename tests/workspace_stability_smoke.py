@@ -93,7 +93,20 @@ def exercise():
                         (2540, 1320, 'columns', True), (2540, 1320, 'quad', True),
                         (2540, 1320, 'rows', True),
                     ]:
-                        window.resize(width, height)
+                        # Windows 可能在跨显示器/DPI调整后将超屏隐藏窗口恢复成旧宽度。
+                        # 显式设置并核对 CSS 视口，再做持续采样，避免把未达到的目标当作覆盖。
+                        from System import Action
+
+                        window.resize(min(width, 1800), min(height, 1050))
+                        metrics = {'width': width, 'height': height, 'mobile': False,
+                                   'deviceScaleFactor': 1.25 if width == 2540 else 1}
+                        tasks = []
+                        window.native.Invoke(Action(
+                            lambda output=tasks, value=metrics: output.append(
+                            window.native.webview.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                                'Emulation.setDeviceMetricsOverride', json.dumps(value)))))
+                        assert tasks[0].Wait(5000)
+                        wait(f'innerWidth==={width}&&innerHeight==={height}')
                         window.evaluate_js("""(()=>{
                           const layout=document.querySelector('#chart-layout');
                           if(layout.value!==LAYOUT){layout.value=LAYOUT;

@@ -450,8 +450,9 @@
   }
   function cancelInteraction(){
     const s=states.get(active);if(!s)return false;
+    const externalUsed=!!s.external;
     if(s.external){const external=s.external;s.external=null;external.cancel?.();}
-    const used=s.mode!=='pan'||!!s.edit||!!s.pending||!!s.focus||!!s.navigation;
+    const used=externalUsed||s.mode!=='pan'||!!s.edit||!!s.pending||!!s.focus||!!s.navigation;
     stopFocus(s);s.navigation='';cancelEdit(s);s.pending=null;s.preview=null;s.mode='pan';
     hideMenu(s);finishNative(active);render(active);return used;
   }

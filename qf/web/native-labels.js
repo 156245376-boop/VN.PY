@@ -72,7 +72,7 @@
     if(['qf-indicator-config','qf-indicator-result'].includes(data?.kind)&&data.pane_id===paneId&&
       data.generation===generation&&data.chart_revision===revision&&data.symbol===requestedSymbol&&data.period===requestedPeriod){
       if(data.kind==='qf-indicator-config'){
-        if(!indicatorConfig||indicatorConfig.settings_revision!==data.settings_revision)indicatorEncoded='';
+        if(!indicatorConfig||indicatorConfig.settings_revision!==data.settings_revision||indicatorConfig.enabled!==data.enabled)indicatorEncoded='';
         indicatorConfig=data;indicatorRenderer?.configure(data.settings,data.enabled,{priceUnit:QfLabels.quoteUnit(requestedSymbol,catalog)});
         vpRanges?.configure(data.enabled?data.settings.items:[]);
       }else if(indicatorConfig?.settings_revision===data.settings_revision)indicatorRenderer?.apply(data.result,indicatorConfig.settings);

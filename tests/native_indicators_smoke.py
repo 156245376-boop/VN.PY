@@ -41,6 +41,30 @@ def exercise():
             chart.draw();const boards=Object.keys(chart.boards).filter(k=>k.startsWith('qf_'));
             const plots=Object.keys(chart.plots).filter(k=>k.startsWith('qf_'));
             if(boards.length<2||plots.length<7)throw Error('指标主副图缺失 '+boards+'/'+plots);
+            const reordered=JSON.parse(JSON.stringify(SETTINGS));
+            reordered.items.reverse();r.configure(reordered,true);
+            const orderedBoards=chart.tableContainer.boards.filter(b=>b.boardId.startsWith('qf_'));
+            if(orderedBoards.map(b=>b.boardId).join(',')!=='qf_rsi,qf_macd,qf_volume_oi')
+              throw Error('副图顺序未跟随配置');
+            if(orderedBoards.some((b,i)=>i&&orderedBoards[i-1]._rootElement.dom
+              .compareDocumentPosition(b._rootElement.dom)!==Node.DOCUMENT_POSITION_FOLLOWING))
+              throw Error('副图 DOM 顺序与配置不符');
+            r.configure(SETTINGS,true);
+            const legends=[...document.querySelectorAll('.qf-indicator-legend')];
+            const mainLegend=legends.find(el=>el.dataset.board==='main');
+            if(!mainLegend?.textContent.includes('MA(5)')||!mainLegend.textContent.includes('BOLL(20,2)')||
+              !legends.some(el=>el.textContent.includes('MACD(12,26,9)'))||
+              !mainLegend.querySelector('[data-series-color]')||!mainLegend.textContent.includes('='))
+              throw Error('图例缺少名称、参数、颜色或读数');
+            const maLegend=mainLegend.querySelector('[data-item="ma"]');
+            const legendBefore=maLegend.textContent;
+            const plotCanvas=chart.mainBoard._centerTopCanvas.dom;
+            const plotBox=plotCanvas.getBoundingClientRect();
+            plotCanvas.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,
+              clientX:plotBox.left+70,clientY:plotBox.top+100}));
+            const legendAfter=document.querySelector('.qf-indicator-legend [data-item="ma"]');
+            if(legendAfter.textContent===legendBefore)
+              throw Error('图例未显示光标对应柱的读数');
             const assertAuto=()=>{
               const domain=chart.mainBoard.rightYAxis.scale.domain();
               const shown=points=>points.filter(p=>p.id>=chart.range.leftId&&
@@ -60,8 +84,8 @@ def exercise():
               throw Error('修改均线影响了无关 MACD');
             r.apply(RESULT,SETTINGS);
             if(!window.QfNativeVpRange)throw Error('固定 VP 选区未接入');
-            let selected=null;
-            const ranges=QfNativeVpRange.attach(chart,{onChange:(id,r)=>selected=r});
+            let selected=null,commits=0;
+            const ranges=QfNativeVpRange.attach(chart,{onChange:(id,r)=>{selected=r;commits++;}});
             const canvas=chart.mainBoard._centerTopCanvas.dom,box=canvas.getBoundingClientRect();
             ranges.begin('vp-fixed');
             for(const x of [60,140])canvas.dispatchEvent(new MouseEvent('mousedown',
@@ -78,6 +102,19 @@ def exercise():
               clientX:hr.left+30,clientY:hr.top+3}));
             document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
             if(selected.start_ns===old)throw Error('VP 端点编辑没有改变时间');
+            const beforeCancel=JSON.stringify(selected),savedCount=commits;
+            const cancelHandle=document.querySelector('.qf-vp-range circle');
+            const cancelBox=cancelHandle.getBoundingClientRect();
+            const cancelX=cancelHandle.getAttribute('cx');
+            cancelHandle.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,
+              buttons:1,clientX:cancelBox.left+3,clientY:cancelBox.top+3}));
+            document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,buttons:1,
+              clientX:cancelBox.left+30,clientY:cancelBox.top+3}));
+            document.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Escape'}));
+            document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0}));
+            if(commits!==savedCount||JSON.stringify(selected)!==beforeCancel||
+              document.querySelector('.qf-vp-range circle').getAttribute('cx')!==cancelX)
+              throw Error('Esc 未回滚 VP 端点，或松鼠标后仍保存');
             ranges.configure([{id:'vp-fixed',type:'vp',visible:true,params:{mode:'screen'}}]);
             if(document.querySelectorAll('.qf-vp-range circle').length)
               throw Error('屏幕模式仍保留固定区间端点');

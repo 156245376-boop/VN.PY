@@ -24,8 +24,46 @@
     Object.assign(svg.style,{position:'absolute',inset:'0',pointerEvents:'none',zIndex:'2',overflow:'hidden'});
     const parent=chart.mainBoard._centerTopCanvas.dom.parentElement;parent.style.position='relative';parent.append(svg);
     const label=document.createElement('div');label.className='qf-indicator-note';
-    Object.assign(label.style,{position:'absolute',top:'3px',left:'5px',zIndex:'3',fontSize:'10px',color:'#577064',pointerEvents:'none',maxWidth:'95%',background:'#ffffffbb'});parent.append(label);
-    const handles=new Map();
+    Object.assign(label.style,{position:'absolute',bottom:'3px',left:'5px',zIndex:'3',fontSize:'10px',color:'#577064',maxWidth:'95%',background:'#ffffffdd'});parent.append(label);
+    const handles=new Map(),legends=new Map();let hoverId=null;
+    function legendText(item,series){
+      const p=item.params,kind=item.type.toUpperCase();
+      const keys={boll:['n','p'],sar:['n','step','max'],macd:['short','long','m'],kdj:['n','m1','m2'],rsi:['n'],atr:['n'],cci:['n'],dmi:['n','m']};
+      const parameters=['ma','ema'].includes(item.type)?series.name:(keys[item.type]||[]).map(k=>p[k]).join(',');
+      const output={diff:'DIF',dea:'DEA',bar:'柱',mid:'中轨',top:'上轨',bottom:'下轨',upper:'上轨',lower:'下轨'}[series.name]||series.name.toUpperCase();
+      return (['volume','oi'].includes(item.type)?names[item.type]:kind+(parameters?'('+parameters+')':''))+
+        (['ma','ema','volume','oi'].includes(item.type)?'':' '+output);
+    }
+    function paintLegends(){
+      const groups=new Map();
+      if(enabled&&key===chart.symbol+'|'+chart.duration)for(const series of result.series||[]){
+        const item=settings.items.find(i=>i.id===series.item_id&&i.visible);if(!item)continue;
+        const board=series.board==='main'?'main':['volume','oi'].includes(item.type)?'qf_volume_oi':'qf_'+item.id;
+        if(!groups.has(board))groups.set(board,[]);groups.get(board).push({series,item});
+      }
+      for(const [id,element]of legends)if(!groups.has(id)){element.remove();legends.delete(id);}
+      for(const [id,entries]of groups){const board=chart.boards[id],canvas=board?._centerTopCanvas.dom;if(!canvas)continue;
+        let element=legends.get(id);if(!element){element=document.createElement('div');element.className='qf-indicator-legend';element.dataset.board=id;
+          Object.assign(element.style,{position:'absolute',left:'5px',right:'5px',top:'20px',zIndex:'3',display:'flex',flexWrap:'wrap',gap:'2px 10px',fontSize:'11px',lineHeight:'15px',background:'#ffffffcc',pointerEvents:'none'});
+          canvas.parentElement.style.position='relative';canvas.parentElement.append(element);legends.set(id,element);}
+        element.replaceChildren();
+        for(const {series,item}of entries){const outputIndex=(result.series||[]).filter(s=>s.item_id===item.id).indexOf(series);
+          const color=item.type==='volume'?'#d9504e':item.type==='macd'&&series.name==='bar'?
+            'linear-gradient(90deg,#d9504e 50%,#2c936b 50%)':item.style.colors[outputIndex%item.style.colors.length];
+          const point=hoverId===null?series.points.findLast(p=>p.id<=Math.floor(chart.chartCtrl.range.rightId)):series.points.find(p=>p.id===hoverId);
+          const unit=series.unit==='价格'?info.priceUnit:series.unit==='指标值'?'无量纲':series.unit;
+          const span=document.createElement('span');span.dataset.item=item.id;
+          const swatch=document.createElement('span');swatch.dataset.seriesColor=color;
+          Object.assign(swatch.style,{display:'inline-block',width:'12px',height:'3px',background:color,verticalAlign:'middle',marginRight:'4px'});
+          span.append(swatch,document.createTextNode(legendText(item,series)+' = '+(Number.isFinite(point?.value)?Number(point.value.toFixed(4)):'—')+' '+unit));
+          element.append(span);
+        }
+      }
+    }
+    function hover(event){const canvas=event.target?.closest?.('canvas');if(!canvas||!chart.rootContainer.contains(canvas))return;
+      const box=canvas.getBoundingClientRect();hoverId=Math.floor((event.clientX-box.left+chart.chartCtrl.pixelLeft)/chart.bar.step);paintLegends();}
+    function leave(){hoverId=null;paintLegends();}
+    chart.rootContainer.addEventListener('mousemove',hover,true);chart.rootContainer.addEventListener('mouseleave',leave);
     function removePlots(){for(const id of managed)delete chart.plots[id];managed.clear();}
     function layout(){if(!alive)return;const boards=table.boards,sub=boards.filter(b=>b.boardId!=='main');
       const heights=sub.map(b=>{const id=b.boardId.replace(/^qf_/,''),item=settings.items.find(i=>i.id===id||id==='volume_oi'&&['volume','oi'].includes(i.type));return item?.height||160;});
@@ -48,6 +86,15 @@
     }
     function trimBoards(wanted){for(const name of Object.keys(chart.boards))if(name.startsWith('qf_')&&!wanted.has(name)){
       const b=chart.boards[name],h=handles.get(b);if(h){h.handle.removeEventListener('pointerdown',h.down);handles.delete(b);}table.deleteBoard(name);delete chart.boards[name];}}
+    function orderBoards(){
+      const ids=['main',...new Set(settings.items.filter(i=>i.visible).map(i=>['volume','oi'].includes(i.type)?'qf_volume_oi':'qf_'+i.id))];
+      const ordered=[...table.boards].sort((a,b)=>{const rank=b=>ids.includes(b.boardId)?ids.indexOf(b.boardId):ids.length;return rank(a)-rank(b);});
+      if(ordered.every((b,i)=>b===table.boards[i]))return;
+      const pairs=ordered.filter(b=>b.boardId!=='main').map(b=>[b._rootElement.dom.previousSibling,b._rootElement.dom]);
+      table.boards.splice(0,table.boards.length,...ordered);
+      for(const pair of pairs)for(const node of pair)table.table.dom.insertBefore(node,table.timeAxisBoard._rootElement.dom);
+      table.update();
+    }
     function patchPlot(plot,bars){
       plot.getYDomain=function(left,right,data){const values=data.slice(left,right+1).filter(Boolean).map(p=>p.value);if(!values.length)return [Infinity,-Infinity];
         let lo=Math.min(...values),hi=Math.max(...values);if(bars){lo=Math.min(0,lo);hi=Math.max(0,hi);}const pad=(hi-lo)*.1||Math.max(1,Math.abs(hi)*.01);return [lo-pad,hi+pad];};
@@ -71,12 +118,14 @@
         const plot=chart.plots[id];if(!plot)continue;plot.data=data;plot.plotId=(names[item.type]||item.type.toUpperCase())+' '+series.name+'（'+(series.unit==='价格'?info.priceUnit:series.unit==='指标值'?'无量纲':series.unit)+'）';
         patchPlot(plot,item.type==='volume'||item.type==='macd'&&series.name==='bar');managed.add(id);
       }
-      trimBoards(wanted);layout();
+      trimBoards(wanted);orderBoards();layout();
     }finally{busy=false;}chart.draw();}
     function paint(){if(!alive)return;svg.replaceChildren();const canvas=chart.mainBoard._centerTopCanvas.dom,w=canvas.clientWidth,h=canvas.clientHeight;
       svg.setAttribute('width',w);svg.setAttribute('height',h);
       const period=Object.entries({'1m':60,'5m':300,'15m':900,'30m':1800,'1h':3600,'1d':86400}).find(([,s])=>s===chart.duration/1e9)?.[0]||'close';
-      label.textContent=enabled?[(result.issues||[]).map(i=>i.reason).join('；'),dataNote(result,period)].filter(Boolean).join('；'):'';
+      const details=[(result.issues||[]).map(i=>i.reason).join('；'),dataNote(result,period)].filter(Boolean).join('；');
+      label.title=details;label.textContent=enabled?[(result.issues||[]).map(i=>i.reason).join('；'),(result.profiles||[]).length?'VP 估算 · 按收盘价归集 · '+periodName(period):'', '数据说明（悬停查看）'].filter(Boolean).join('；'):'';
+      paintLegends();
       if(key!==chart.symbol+'|'+chart.duration)return;
       const scale=chart.mainBoard.rightYAxis.scale;
       for(const profile of result.profiles||[]){const item=settings.items.find(i=>i.id===profile.item_id&&i.visible);if(!item)continue;
@@ -98,6 +147,7 @@
       apply(next,nextSettings){result=next||{series:[],profiles:[],issues:[]};settings=JSON.parse(JSON.stringify(nextSettings));key=chart.symbol+'|'+chart.duration;build();},
       clear(id){result.series=(result.series||[]).filter(s=>s.item_id!==id);result.profiles=(result.profiles||[]).filter(s=>s.item_id!==id);build();},
       dispose(){if(!alive)return;alive=false;removePlots();for(const {handle,down}of handles.values())handle.removeEventListener('pointerdown',down);handles.clear();
+        chart.rootContainer.removeEventListener('mousemove',hover,true);chart.rootContainer.removeEventListener('mouseleave',leave);for(const element of legends.values())element.remove();legends.clear();
         chart.draw=originalDraw;table.update=originalUpdate;trimBoards(new Set());
         if(!chart.boards.sub&&originalSub){chart.boards.sub=originalSub;table.addBoard(originalSub);}Object.assign(chart.plots,originalPlots);svg.remove();label.remove();attached.delete(chart);}};
     attached.set(chart,api);return api;

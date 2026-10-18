@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.13.11、TqSdk 3.10.2、MarketProfile 0.2.0、已锁定 pandas/numpy/scipy、原生 JavaScript、WebView2/pywebview。
 
-**Spec:** `docs/superpowers/specs/2026-10-18-chart-indicators-design.md`（已确认）。用户已确认本会话顺序执行；八项实现与离线检查已完成，整段更改进入最终独立审查。
+**Spec:** `docs/superpowers/specs/2026-10-18-chart-indicators-design.md`（已确认）。用户已确认本会话顺序执行；八项实现、一次独立审查及其四项修复已完成，最终 tools/check.ps1 全通过（223 项测试）。
 
 ## Global Constraints
 

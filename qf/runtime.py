@@ -27,12 +27,15 @@ def emit_progress(progress, stage, **fields):
             pass
 
 
-def provenance():
-    root = Path(__file__).resolve().parent.parent
+def provenance(*, source_root=None):
+    repository = Path(__file__).resolve().parent.parent
+    root = Path(source_root) if source_root else repository
     digest = hashlib.sha256()
     manifest = {}
     for folder in (root / "qf", root / "tools", root / "experiments"):
-        for path in sorted(folder.glob("*")):
+        for path in sorted(folder.rglob("*")):
+            if '__pycache__' in path.parts:
+                continue
             if path.is_file():
                 digest.update(str(path.relative_to(root)).encode())
                 digest.update(path.read_bytes())
@@ -41,11 +44,11 @@ def provenance():
     for name in ("pyproject.toml", "uv.lock"):
         digest.update((root / name).read_bytes())
     process_options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
-    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repository, capture_output=True,
                             text=True, check=True, **process_options).stdout.strip()
-    changed = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True,
+    changed = subprocess.run(["git", "status", "--porcelain"], cwd=repository, capture_output=True,
                              check=True, **process_options).stdout
-    summary = subprocess.run(["git", "diff", "HEAD", "--stat"], cwd=root,
+    summary = subprocess.run(["git", "diff", "HEAD", "--stat"], cwd=repository,
                              capture_output=True, check=True,
                              **process_options).stdout.decode("utf-8", "replace")
     return {"commit": commit, "dirty": bool(changed), "source_sha256": digest.hexdigest(),

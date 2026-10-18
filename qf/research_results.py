@@ -71,11 +71,14 @@ def summarize_run(root, run_id):
         position += fill[5] if fill[3] == 'BUY' else -fill[5]
         if previous and not position:
             closed += 1
+    measured = bool(equity) or bool(state.get('sdk_statistics'))
     return public_values(dict(**read_run(root, run_id),
-                       gross_pnl=net+fee if fee is not None else None,
-                       net_pnl=net, commission=fee, max_drawdown_amount=max_amount.normalize(),
-                       max_drawdown_pct=max_pct.normalize(), fill_count=len(fills),
-                       closed_trade_count=closed, open_position=position, final_equity=final))
+                       gross_pnl=net+fee if fee is not None and measured else None,
+                       net_pnl=net if measured else None, commission=fee,
+                       max_drawdown_amount=max_amount.normalize() if equity else None,
+                       max_drawdown_pct=max_pct.normalize() if equity else None,
+                       fill_count=len(fills), closed_trade_count=closed, open_position=position,
+                       final_equity=final if measured else None))
 
 
 def compare_runs(root, run_ids):

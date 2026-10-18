@@ -1,4 +1,5 @@
 import time
+from dataclasses import dataclass
 from datetime import date
 
 
@@ -6,10 +7,23 @@ class Frozen(ValueError):
     """只允许预定义业务原因，禁止传入 SDK 原始异常。"""
 
 
+@dataclass(frozen=True)
+class ExecutionScope:
+    max_lots: int
+    allow_short: bool
+
+    def __post_init__(self):
+        if (type(self.max_lots) is not int or self.max_lots < 1
+                or type(self.allow_short) is not bool):
+            raise ValueError('执行范围无效')
+
+
 class Guard:
-    def __init__(self, journal, symbol):
+    def __init__(self, journal, symbol, *, scope=None, fill_handler=None):
         self.journal = journal
         self.symbol = symbol
+        self.scope = scope
+        self.fill_handler = fill_handler
         self.enabled = False
         self.positions = {}
         self.orders = {}
@@ -48,7 +62,10 @@ class Guard:
     def check(self, positions, orders):
         self.positions, self.orders = positions, orders
         for symbol, (long, short) in positions.items():
-            if short or long < 0 or long > 1 or (symbol != self.symbol and long):
+            maximum = self.scope.max_lots if self.scope else 1
+            if (long < 0 or short < 0 or long > maximum or short > maximum
+                    or (short and not (self.scope and self.scope.allow_short))
+                    or (long and short) or (symbol != self.symbol and (long or short))):
                 self.freeze("unexpected_position")
         owned = self.journal.owned()
         for oid, order in orders.items():
@@ -64,6 +81,8 @@ class Guard:
     def before_order(self, symbol, direction, offset, volume):
         if not self.enabled:
             self.freeze("execution_disabled")
+        if self.scope:
+            return self._scoped_order(symbol, direction, offset, volume)
         if (symbol != self.symbol or type(volume) is not int or volume != 1
                 or (direction, offset) not in
                 {("BUY", "OPEN"), ("SELL", "CLOSE"), ("SELL", "CLOSETODAY")}):
@@ -74,12 +93,35 @@ class Guard:
         if any(o.status != "FINISHED" for o in self.orders.values()):
             self.freeze("order_still_pending")
 
+    def _scoped_order(self, symbol, direction, offset, volume):
+        if (symbol != self.symbol or direction not in ('BUY', 'SELL')
+                or offset not in ('OPEN', 'CLOSE', 'CLOSETODAY')
+                or type(volume) is not int or not 1 <= volume <= self.scope.max_lots):
+            self.freeze('order_outside_scope')
+        if any(o.status != 'FINISHED' for o in self.orders.values()):
+            self.freeze('order_still_pending')
+        long, short = self.positions.get(symbol, (0, 0))
+        if offset == 'OPEN':
+            side = 1 if direction == 'BUY' else -1
+            existing, opposite = (long, short) if side > 0 else (short, long)
+            target = self.journal.get('last_target')
+            if (opposite or existing+volume > self.scope.max_lots
+                    or (side < 0 and not self.scope.allow_short)
+                    or (target is not None and
+                        (target*side <= 0 or existing+volume > abs(target)))):
+                self.freeze('order_position_limit')
+        elif volume > (long if direction == 'SELL' else short):
+            self.freeze('order_position_limit')
+
     def accept_fill(self, fill):
         if fill["key"] in self.baseline:
             return
         if fill["order_id"] not in self.journal.owned():
             self.freeze("external_trade")
-        self.journal.fill(fill)
+        if self.fill_handler:
+            self.fill_handler(fill)
+        else:
+            self.journal.fill(fill)
 
 
 def settle_stop(api, task, orders, owned, timeout):

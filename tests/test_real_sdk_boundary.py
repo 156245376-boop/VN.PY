@@ -3,11 +3,12 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
 from tqsdk.lib.target_pos_task import InsertOrderTask
 
 from qf.journal import Journal
 from qf.runtime import tracked_api
-from qf.safety import Guard
+from qf.safety import ExecutionScope, Guard
 
 
 class Order(dict):
@@ -64,6 +65,32 @@ def test_real_sdk_insert_task_preserves_positional_limit_price(tmp_path):
     task._order_chan, task._trade_chan, task._trade_objs_chan = Chan(), None, None
     asyncio.run(task._run())
     assert len(api.orders) == 1
+    assert next(iter(api.orders.values())).limit_price == 3301.
+    assert journal.owned() == set(api.orders)
+    journal.close()
+
+
+@pytest.mark.parametrize('direction,offset,position', [
+    ('SELL', 'OPEN', 0), ('SELL', 'CLOSETODAY', 1), ('BUY', 'CLOSE', -1)])
+def test_real_sdk_research_insert_task_uses_scoped_multiside_guard(
+        tmp_path, direction, offset, position):
+    journal = Journal.create(tmp_path, 'paper', {})
+    api = tracked_api(SimpleNamespace(TqApi=BoundaryApi), journal)
+    guard = Guard(journal, 'SHFE.rb2505', scope=ExecutionScope(3, True))
+    guard.start({}, {}, activate=True)
+    api.execution_guard = guard
+    if position:
+        journal.fill(dict(key='initial', order_id='past', symbol='SHFE.rb2505',
+            direction='BUY' if position > 0 else 'SELL', offset='OPEN', volume=1,
+            price=3300, time_ns=1))
+        api.get_position = lambda: {'SHFE.rb2505': SimpleNamespace(
+            pos_long=max(position, 0), pos_short=max(-position, 0))}
+    task = object.__new__(InsertOrderTask)
+    task._api, task._account = api, None
+    task._symbol, task._direction, task._offset = 'SHFE.rb2505', direction, offset
+    task._volume, task._limit_price = 1, 3301.
+    task._order_chan, task._trade_chan, task._trade_objs_chan = Chan(), None, None
+    asyncio.run(task._run())
     assert next(iter(api.orders.values())).limit_price == 3301.
     assert journal.owned() == set(api.orders)
     journal.close()

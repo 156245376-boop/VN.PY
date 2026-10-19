@@ -17,11 +17,14 @@
     function paint(){if(!payload||!alive)return;svg.replaceChildren();svg.setAttribute('width',canvas.clientWidth);svg.setAttribute('height',canvas.clientHeight);
       const y=chart.mainBoard.rightYAxis.scale;
       for(const f of payload.fills){const id=barForTime(payload.bars,f.time_ns,payload.bar_seconds);if(id===null)continue;
-        const px=x(id),py=y(Number(f.price)),up=f.direction==='BUY';
+        const px=x(id),py=y(Number(f.display_price??f.price)),up=f.direction==='BUY';
         const marker=shape('path',{d:up?`M${px},${py-8}l-6,12h12Z`:`M${px},${py+8}l-6,-12h12Z`,fill:up?'#d24e48':'#168669','data-fill':f.key});
         marker.style.pointerEvents='all';marker.style.cursor='pointer';const title=document.createElementNS(ns,'title');title.textContent=fillName(f)+' · '+f.volume+' 手 · 成交价 '+f.price;marker.append(title);
         marker.onclick=()=>options.onFill?.(f);}
       const events=payload.risk_events||[];
+      for(const roll of payload.main_changes||[]){const id=barForTime(payload.bars,roll.time_ns,payload.bar_seconds);if(id===null||!roll.old_symbol)continue;
+        const line=shape('line',{x1:x(id),x2:x(id),y1:0,y2:canvas.clientHeight,stroke:'#9267b6','stroke-dasharray':'3 3'});
+        const title=document.createElementNS(ns,'title');title.textContent='主力换月：'+roll.old_symbol+' → '+roll.new_symbol;line.append(title);}
       for(let i=0;i<events.length;i++){const e=events[i],r=e.risk;if(!r?.quantity||!Number(r.stop_price)||e.kind==='stopped')continue;
         const next=events[i+1];if(!next||next.risk?.trade_id!==r.trade_id)continue;
         const a=barForTime(payload.bars,e.time_ns,payload.bar_seconds),b=barForTime(payload.bars,next.time_ns,payload.bar_seconds);

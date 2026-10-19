@@ -3,7 +3,7 @@
 import json
 
 
-def chart_html(assets, *, live=None):
+def chart_html(assets, *, live=None, continuous=False):
     shim = """<script>window.__qfReplay=true;
 const OriginalSocket=window.WebSocket;
 window.WebSocket=function(url,protocols){
@@ -30,4 +30,7 @@ window.__replayRequests={};
     html = html.replace("</body>", '<script src="/replay.js"></script></body>')
     if live is not None:
         html = html.replace('</body>', '<script src="/live.js"></script></body>')
+    if continuous:
+        html = html.replace('window.__qfReplay=true;', 'window.__qfContinuousReplay=true;')
+        html = html.replace('</body>', '<script src="/continuous.js"></script></body>')
     return html

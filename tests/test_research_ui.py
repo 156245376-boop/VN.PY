@@ -6,6 +6,7 @@ import pytest
 
 
 @pytest.mark.parametrize('script,marker', [('research_form_node.js', 'RESEARCH_FORM_OK'),
+    ('continuous_replay_node.js', 'CONTINUOUS_REPLAY_OK'),
     ('pivot_form_node.js', 'PIVOT_FORM_OK'),
     ('research_terminal_node.js', 'RESEARCH_TERMINAL_OK'),
     ('live_research_render_node.js', 'LIVE_RESEARCH_RENDER_OK'),

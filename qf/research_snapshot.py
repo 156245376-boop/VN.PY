@@ -9,6 +9,10 @@ from qf.research_config import public_values
 
 
 def view_snapshot(journal, config, quote, *, now, revision, progress, terminal=False):
+    if config.schema_version == 3:
+        from qf.continuous_results import continuous_snapshot
+        return continuous_snapshot(journal, config, quote, now=now, revision=revision,
+                                   progress=progress, terminal=terminal)
     warmup = max(config.fast_period, config.slow_period)
     prefix = [json.loads(row[0]) for row in reversed(journal.db.execute(
         'SELECT data FROM research_bars WHERE time_ns<=? ORDER BY time_ns DESC LIMIT ?',

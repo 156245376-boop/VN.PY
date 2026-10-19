@@ -50,7 +50,15 @@ class ReplayView:
             raise ValueError("本机复盘服务未能打开")
         return self.url
 
-    def _read(self, offset=0, limit=10000):
+    def _read(self, offset=None, limit=10000, *, series='signal', symbol=None):
+        if self.summary['config']['schema_version'] == 3:
+            from qf.continuous_results import ContinuousReader
+            reader = ContinuousReader(self.path)
+            if offset is None:
+                initial = reader.initial(series=series, symbol=symbol)
+                offset, limit = initial['offset'], 2000
+            return reader.window(offset, limit, series=series, symbol=symbol)
+        offset = 0 if offset is None else offset
         with closing(
             sqlite3.connect((self.path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)
         ) as db:
@@ -65,6 +73,19 @@ class ReplayView:
         return dict(bars=rows, total_bars=count, offset=offset, next_offset=offset + len(rows))
 
     def _payload(self):
+        if self.summary['config']['schema_version'] == 3:
+            from qf.continuous_results import ContinuousReader
+            with closing(ContinuousReader(self.path).connect()) as db:
+                raw = db.execute('SELECT data FROM contract_specs '
+                                 'ORDER BY symbol LIMIT 1').fetchone()
+                specs = {s: json.loads(data) for s, data in db.execute(
+                    'SELECT * FROM contract_specs')}
+            return dict(**self.summary, revision=self.revision,
+                symbol=self.summary['config']['continuous'],
+                bar_seconds=self.summary['config']['bar_seconds'],
+                contract_spec=json.loads(raw[0]) if raw else {},
+                contract_specs=specs,
+                fills=[], risk_events=[], ma_series=[])
         with closing(
             sqlite3.connect((self.path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)
         ) as db:
@@ -142,8 +163,9 @@ class ReplayView:
         initial = self._read()
         duration = str(payload["bar_seconds"] * 1_000_000_000)
         symbol = payload["symbol"]
+        first_id = initial.get('first_bar_id', 0)
         data = {
-            str(i): dict(
+            str(first_id+i): dict(
                 datetime=int(row["time_ns"]), **{k: v for k, v in row.items() if k != "time_ns"}
             )
             for i, row in enumerate(initial["bars"])
@@ -176,9 +198,9 @@ class ReplayView:
             draw_chart_datas={},
             snapshots={},
             quotes={symbol: quote},
-            klines={symbol: {duration: dict(last_id=len(data) - 1, data=data)}},
+            klines={symbol: {duration: dict(last_id=first_id+len(data)-1, data=data)}},
         )
-        html = chart_html(assets)
+        html = chart_html(assets, continuous=payload['config']['schema_version'] == 3)
         sockets = set()
 
         async def index(request):
@@ -207,17 +229,34 @@ class ReplayView:
         async def bars(request):
             try:
                 offset, limit = (
-                    int(request.query.get("offset", "0")),
+                    int(request.query['offset']) if 'offset' in request.query else None,
                     int(request.query.get("limit", "10000")),
                 )
-                if offset < 0 or not 1 <= limit <= 10000:
+                if (offset is not None and offset < 0) or not 1 <= limit <= 10000:
                     raise ValueError()
-                return web.json_response(self._read(offset, limit))
+                page = self._read(offset, limit, series=request.query.get('series', 'signal'),
+                                  symbol=request.query.get('symbol'))
+                return web.json_response(page | dict(run_id=self.run_id,
+                    request_id=request.query.get('request_id', ''), revision=self.revision))
             except (ValueError, sqlite3.Error):
                 raise web.HTTPBadRequest(text="复盘分页无效") from None
 
         async def script(request):
-            return web.FileResponse(Path(__file__).with_name("web") / "native-replay.js")
+            name = ('continuous-replay.js' if request.path == '/continuous.js'
+                    else 'native-replay.js')
+            return web.FileResponse(Path(__file__).with_name("web") / name)
+
+        async def locate(request):
+            from qf.continuous_results import ContinuousReader
+            try:
+                if payload['config']['schema_version'] != 3:
+                    raise ValueError()
+                page = ContinuousReader(self.path).locate(request.query['time_ns'],
+                    series=request.query.get('series', 'signal'),
+                    symbol=request.query.get('symbol'))
+                return web.json_response(dict(offset=page['offset'], global_id=page['global_id']))
+            except (KeyError, ValueError):
+                raise web.HTTPBadRequest(text='复盘定位无效') from None
 
         app = web.Application()
         app.router.add_get("/", index)
@@ -227,6 +266,8 @@ class ReplayView:
         app.router.add_get("/replay", replay)
         app.router.add_get("/bars", bars)
         app.router.add_get("/replay.js", script)
+        app.router.add_get('/continuous.js', script)
+        app.router.add_get('/locate', locate)
         app.router.add_static("/web", assets, show_index=False)
         runner = web.AppRunner(app, shutdown_timeout=1)
         await runner.setup()

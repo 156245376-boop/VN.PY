@@ -85,6 +85,9 @@ def _read(root, run_id):
 
 
 def read_run(root, run_id):
+    from qf.continuous_results import read_continuous_run, schema_at
+    if schema_at(run_path(root, run_id)) == 2:
+        return read_continuous_run(root, run_id)
     config, state, _, _, span = _read(root, run_id)
     return dict(
         run_id=run_id,
@@ -106,6 +109,9 @@ def read_run(root, run_id):
 
 
 def summarize_run(root, run_id):
+    from qf.continuous_results import schema_at, summarize_continuous_run
+    if schema_at(run_path(root, run_id)) == 2:
+        return summarize_continuous_run(root, run_id)
     config, state, fills, equity, _ = _read(root, run_id)
     initial = decimal_value(state.get("initial_equity", config.initial_balance))
     balances = [initial, *[decimal_value(r[1]) for r in equity]]
@@ -160,9 +166,12 @@ def compare_runs(root, run_ids):
         raise ValueError("请选择两个不同的实验运行")
     items = [summarize_run(root, identity) for identity in run_ids]
     left, right = [i["config"] for i in items]
-    differences = {k: [left[k], right[k]] for k in left if left[k] != right[k]}
+    differences = {k: [left.get(k), right.get(k)] for k in left.keys() | right.keys()
+                   if left.get(k) != right.get(k)}
     comparable = ("symbol", "bar_seconds", "start", "end", "initial_balance", "precision")
     warnings = [key for key in comparable if key in differences]
+    warnings.extend(key for key in ('contract_mode', 'signal_adjustment', 'roll_policy')
+                    if key in differences)
     if (left['strategy_version'] != right['strategy_version']
             or left['risk'].get('stop_method') != right['risk'].get('stop_method')):
         warnings.append('策略版本或止损规则不同')
@@ -174,6 +183,9 @@ def compare_runs(root, run_ids):
 
 
 def run_details(root, run_id):
+    from qf.continuous_results import read_continuous_run, schema_at
+    if schema_at(run_path(root, run_id)) == 2:
+        return read_continuous_run(root, run_id, details=True)
     read_run(root, run_id)
     path = run_path(root, run_id)
     with closing(sqlite3.connect((path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)) as db:

@@ -1,0 +1,15 @@
+const assert=require('assert');
+require('../qf/web/continuous-replay.js');
+const Cache=globalThis.QfContinuousReplay.WindowCache;
+const c=new Cache('run');
+const old=c.begin('signal',null),current=c.begin('actual','SHFE.rb2510');
+assert.strictEqual(c.accept({...old,bars:[]}),false);
+assert.strictEqual(c.accept({...current,run_id:'other',bars:[]}),false);
+assert.strictEqual(c.accept({...current,bars:Array.from({length:12000},(_,i)=>({global_id:i,close:-20+i}))}),true);
+assert.strictEqual(c.bars.length,10000);
+assert.strictEqual(c.bars[0].global_id,2000);
+const newer=c.begin('signal',null);
+assert.strictEqual(c.accept({...newer,bars:[{global_id:0,close:-4}]}),true);
+assert.strictEqual(c.bars[0].close,-4);
+assert.strictEqual(c.accept({...current,bars:[]}),false);
+console.log('CONTINUOUS_REPLAY_OK');

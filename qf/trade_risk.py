@@ -1,9 +1,15 @@
 """定仓与阶梯保护的纯计算；金额为毛价差，成交反馈另行核实。"""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, replace
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+from typing import TYPE_CHECKING
 
 from qf.research_config import decimal_value
+
+if TYPE_CHECKING:
+    from qf.pivot_stop import EntryPlan
 
 ZERO = Decimal(0)
 
@@ -89,7 +95,8 @@ def _tick_price(price, tick, side):
         rounding=ROUND_FLOOR if side > 0 else ROUND_CEILING) * tick
 
 
-def apply_entry_fill(state, *, side, price, quantity, time_ns, risk, spec, trade_id):
+def apply_entry_fill(state, *, side, price, quantity, time_ns, risk, spec, trade_id,
+                     entry_plan: EntryPlan | None = None):
     price = decimal_value(price)
     if (state.sealed or type(side) is not int or side not in (-1, 1)
             or type(quantity) is not int or quantity <= 0 or price <= 0
@@ -98,12 +105,31 @@ def apply_entry_fill(state, *, side, price, quantity, time_ns, risk, spec, trade
         raise ValueError('入场成交与持仓状态不一致')
     total = state.quantity + quantity
     average = (state.entry_price*state.quantity + price*quantity) / total
-    distance = spec.price_tick*risk.stop_ticks
-    stop = average - side*distance
+    if entry_plan is None:
+        if not hasattr(risk, 'stop_ticks'):
+            raise ValueError('缺少冻结入场计划')
+        distance = spec.price_tick*risk.stop_ticks
+        stop = average - side*distance
+        initial_r = total*distance*spec.volume_multiple
+        invalid = False
+    else:
+        if (entry_plan.side != side or entry_plan.stop_price is None or entry_plan.lots < 1):
+            raise ValueError('入场计划与成交不一致')
+        stop = entry_plan.stop_price
+        initial_r = total*abs(average-stop)*spec.volume_multiple
+        invalid = (price-stop)*side <= 0 or total > entry_plan.lots
     if state.quantity:
         stop = _tighten(state.stop_price, stop, side)
+    reason = state.exit_reason
+    if entry_plan is not None and reason is None:
+        if invalid:
+            reason = 'entry_stop_invalid'
+        elif (state.stage and time_ns >= state.last_quote_ns
+              and (price-state.stop_price)*side <= 0):
+            reason = 'stair_stop'
     return replace(state, trade_id=trade_id, side=side, quantity=total, entry_price=average,
-                   initial_r=total*distance*spec.volume_multiple, stop_price=stop,
+                   initial_r=initial_r, stop_price=stop,
+                   exit_reason=reason,
                    last_fill_ns=max(time_ns, state.last_fill_ns))
 
 

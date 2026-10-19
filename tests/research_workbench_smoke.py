@@ -11,10 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import pandas as pd  # noqa: E402
 import tqsdk  # noqa: E402
 import webview  # noqa: E402
-from research_sdk import BASE, Api, sdk_for  # noqa: E402
+from pivot_sdk import PivotApi, sdk_for_pivot  # noqa: E402
 from test_credentials import MemoryStore  # noqa: E402
 from test_workbench import Session  # noqa: E402
 
@@ -31,52 +30,11 @@ def forbid_real_api(*args, **kwargs):
 tqsdk.TqApi = forbid_real_api
 
 
-class UiApi(Api):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        values = [1000.0] * 34 + [999.0] * 5 + [1006.0, 1000.0]
-        self.serial = pd.DataFrame(
-            [
-                dict(
-                    id=i,
-                    datetime=BASE + (i - (len(values) - 6)) * 60_000_000_000,
-                    open=v,
-                    high=v,
-                    low=v,
-                    close=v,
-                    volume=10,
-                    close_oi=20,
-                )
-                for i, v in enumerate(values)
-            ]
-        )
-        self.live = "backtest" not in kwargs
-
+class UiApi(PivotApi):
     def wait_update(self, **kwargs):
-        if self.live:
-            time.sleep(0.03)
-            self.steps += 1
-            self.quote.datetime = (
-                pd.Timestamp("2025-03-03 09:05:00") + pd.Timedelta(seconds=self.steps)
-            ).strftime("%Y-%m-%d %H:%M:%S.%f")
-            return True
-        result = super().wait_update(**kwargs)
-        index = self.serial.index[-1]
-        price = self.quote.last_price
-        self.serial.loc[index, "close"] = price
-        self.serial.loc[index, "high"] = max(self.serial.loc[index, "high"], price)
-        self.serial.loc[index, "low"] = min(self.serial.loc[index, "low"], price)
-        return result
-
-    def get_kline_serial(self, symbol, duration, **kwargs):
-        self.subscriptions.append(("kline", duration))
-        if duration != 60:
-            count = len(self.serial)
-            self.serial["datetime"] = [
-                BASE + 300_000_000_000 - (count - 1 - i) * duration * 1_000_000_000
-                for i in range(count)
-            ]
-        return self.serial
+        if not self.live:
+            time.sleep(.08)
+        return super().wait_update(**kwargs)
 
 
 class MarketFixture(Session):
@@ -173,7 +131,7 @@ def main():
         scenario = ["normal"]
 
         def execute(*args, **kwargs):
-            sdk = sdk_for(scenario[0])
+            sdk = sdk_for_pivot(scenario[0])
             sdk.TqApi = UiApi
             return execute_research(*args, sdk=sdk, **kwargs)
 

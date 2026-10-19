@@ -62,4 +62,6 @@
 .indicator-panel{position:fixed;right:22px;top:55px;z-index:1500;width:380px;max-width:calc(100vw - 40px);max-height:calc(100vh - 80px);overflow:auto;background:#fff;border:1px solid #c9dbd0;border-radius:10px;box-shadow:0 8px 38px #102d3540;padding:16px}
 .indicator-panel-head,.indicator-item>div:first-child{display:flex;align-items:center;gap:8px;justify-content:space-between}.indicator-panel-head h2{margin:0}.indicator-panel p{font-size:11px}.indicator-error{color:#b44945;min-height:16px}
 .indicator-panel select{max-width:240px;padding:7px}.indicator-item{border-top:1px solid #dce7df;margin-top:14px;padding-top:12px}.indicator-item label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0;color:#5b7067;font-size:11px}
+.field-error{color:#ad3939;min-height:1em;font-size:12px;white-space:normal} [aria-invalid=true]{border-color:#ad3939!important}
+#research-content progress{width:100%;height:18px;accent-color:#168669}.research-progress{font-size:13px;line-height:1.8;overflow-wrap:anywhere}
 .indicator-item input:not([type=checkbox]){width:140px;padding:6px}.indicator-item input[type=color]{height:28px;padding:2px;width:64px}.indicator-item button{padding:6px 9px;font-size:11px}.indicator-item-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}

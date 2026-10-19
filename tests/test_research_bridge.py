@@ -1,6 +1,6 @@
 import json
 
-from research_helpers import config_data
+from research_helpers import pivot_config_data as config_data
 from test_credentials import MemoryStore
 from test_workbench import Session
 

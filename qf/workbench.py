@@ -20,7 +20,11 @@ from qf.market_account import public_account
 from qf.market_session import MarketSession
 from qf.market_units import price_unit
 from qf.replay_view import ReplayView
-from qf.research_config import validate_research_config
+from qf.research_config import (
+    ResearchValidationError,
+    validate_contract_request,
+    validate_research_config,
+)
 from qf.research_results import RUN_ID, compare_runs, read_run, run_details, summarize_run
 from qf.research_session import ResearchSession
 from qf.window_host import run_window
@@ -41,6 +45,10 @@ LOAD_PHASES = {"idle", "connecting", "catalog", "bars", "chart", "ready", "faile
 ROW_FIELDS = ("continuous", "name", "exchange", "product", "underlying", "last_price",
               "change_percent", "volume", "open_interest", "quote_time", "data_state",
               "price_unit", "data_note")
+
+
+def research_error(reason, *, code='research_request_failed', field_errors=None):
+    return dict(ok=False, code=code, reason=reason, field_errors=field_errors or {})
 
 
 def _history_summary(raw):
@@ -122,13 +130,17 @@ class WorkbenchBridge:
                 config = validate_research_config(raw)
                 return dict(ok=True, experiment=self._experiments.save(
                     config, experiment_id=experiment_id), config=config.public())
+            except ResearchValidationError as exc:
+                return research_error('实验未保存：'+str(exc), code=exc.code,
+                                      field_errors=exc.field_errors)
             except (ValueError, TypeError, KeyError, OSError):
-                return dict(ok=False, reason='实验未保存，请核对合约、周期和风险参数。')
+                return research_error('实验未保存，请核对合约、周期和风险参数。')
 
-    def copy_experiment(self, experiment_id, revision, name):
+    def copy_experiment(self, experiment_id, revision, name, upgrade_to_pivot=False):
         with self._lock:
             try:
-                ref = self._experiments.copy(experiment_id, revision, name=name)
+                ref = self._experiments.copy(experiment_id, revision, name=name,
+                                             upgrade_to_pivot=upgrade_to_pivot)
                 return dict(ok=True, experiment=ref, config=self._experiments.load(
                     ref['experiment_id'], ref['revision']).public())
             except (ValueError, TypeError, KeyError, OSError):
@@ -142,33 +154,38 @@ class WorkbenchBridge:
     def get_research_contracts(self, continuous, start, end):
         with self._lock:
             try:
+                request = validate_contract_request(continuous, start, end)
                 if continuous not in {r['continuous'] for r in self._catalog}:
-                    raise ValueError('未知品种')
-                first, last = date.fromisoformat(start), date.fromisoformat(end)
-                if first > last:
-                    raise ValueError('日期倒序')
+                    raise ResearchValidationError('continuous', '请先选择目录中的品种')
                 return self._research.query_contracts(self._research_login(),
-                    continuous=continuous, start=first, end=last)
+                    continuous=request['continuous'], start=date.fromisoformat(request['start']),
+                    end=date.fromisoformat(request['end']))
+            except ResearchValidationError as exc:
+                return research_error('查询未开始：'+str(exc), code=exc.code,
+                                      field_errors=exc.field_errors)
             except Exception:
-                return dict(ok=False, reason='请先连接行情或保存快期凭证，并核对品种与日期。')
+                return research_error('查询未开始：请先连接行情或保存快期凭证；已有任务需结束。')
 
     def start_research(self, experiment_id, revision, mode, activate=False, resume=None,
                        fee_multiplier=1):
         with self._lock:
             try:
                 config = self._experiments.load(experiment_id, revision)
+                if config.strategy_version != 2:
+                    return research_error('旧版实验只读，请复制为新版拐点实验后运行。',
+                                          code='legacy_read_only')
                 snapshot = self._research.snapshot()
                 expected = dict(continuous=config.continuous,
                                 start=str(config.start), end=str(config.end))
                 if (snapshot.get('contract_request') != expected
                         or config.symbol not in {r['symbol'] for r in snapshot['contracts']}):
-                    raise ValueError('请先查询并选择当前区间实际合约')
+                    return research_error('未开始运行：请先查询并选择当前区间的实际合约。',
+                        field_errors={'symbol': '点击“查询区间实际合约”，再选择月份'})
                 return self._research.start(mode, config, self._research_login(), activate=activate,
                     resume=resume, fee_multiplier=fee_multiplier,
                     experiment_ref=dict(experiment_id=experiment_id, revision=revision))
             except Exception:
-                return dict(ok=False,
-                            reason='未开始运行：请核对合约、参数和凭证；已有任务需先停止。')
+                return research_error('未开始运行：请核对合约、参数和凭证；已有任务需先停止。')
 
     def stop_research(self, flatten=False):
         try:
@@ -180,6 +197,9 @@ class WorkbenchBridge:
 
     def get_research_state(self):
         return self._research.snapshot()
+
+    def get_research_live_snapshot(self):
+        return self._research.live_snapshot()
 
     def exit_message(self):
         state = self._research.snapshot()

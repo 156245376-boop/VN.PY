@@ -3,7 +3,7 @@
   const number=value=>value===null||value===undefined||!Number.isFinite(Number(value))?'—':Number(value).toLocaleString('zh-CN',{maximumFractionDigits:4});
   const precision=value=>value==='tick'?'Tick':value==='minute'?'分钟近似（流程验证）':'实时报价';
   const names={fast_period:'快均线（根）',slow_period:'慢均线（根）',symbol:'实际合约',continuous:'品种',bar_seconds:'K线周期（秒）',start:'起始交易日',end:'结束交易日',initial_balance:'初始资金（元）',precision:'数据精度',name:'实验名称',risk:'风险参数',
-    sizing:'定仓方式',fixed_lots:'固定手数',risk_budget:'风险预算（元）',stop_ticks:'初始止损（跳）',max_lots:'手数上限',max_margin_ratio:'保证金比例',take_profit_mode:'止盈方式',take_profit_value:'终点止盈',stairs_enabled:'阶梯保护',first_trigger_r:'第一档触发（R）',first_offset_ticks:'第一档偏移（跳）',second_trigger_r:'第二档触发（R）',second_lock_r:'第二档锁利（R）'};
+    strategy_version:'策略规则版本',schema_version:'配置版本',stop_method:'止损规则',pivot_left:'左侧确认柱',pivot_right:'右侧确认柱',limit_lots:'启用手数限制',limit_margin:'启用保证金限制',sizing:'定仓方式',fixed_lots:'固定手数',risk_budget:'风险预算（元）',stop_ticks:'初始止损（跳）',max_lots:'手数上限',max_margin_ratio:'保证金比例',take_profit_mode:'止盈方式',take_profit_value:'终点止盈',stairs_enabled:'阶梯保护',first_trigger_r:'第一档触发（R）',first_offset_ticks:'第一档偏移（跳）',second_trigger_r:'第二档触发（R）',second_lock_r:'第二档锁利（R）'};
   const fillName=f=>f.direction==='BUY'?(f.offset==='OPEN'?'买开（做多）':'买平（平空）'):(f.offset==='OPEN'?'卖开（做空）':'卖平（平多）');
   const reasonName=r=>({ma_reverse:'双均线反向交叉',initial_stop:'触发初始止损',stair_stop:'触发阶梯保护',take_profit:'达到终点止盈',user_flatten:'用户要求平仓停止'}[r]||'双均线交叉入场');
   const fillEvent=(events,key)=>events.find(e=>e.kind==='fill'&&e.payload?.fill_keys?.includes(key));
@@ -26,7 +26,7 @@
       for(const [key,pair]of Object.entries(payload.config_differences||{})){
         if(key==='risk'){for(const k of Object.keys(pair[0]))if(pair[0][k]!==pair[1][k])comparison.append(el('p',(names[k]||k)+'：'+pair[0][k]+' → '+pair[1][k]));}
         else comparison.append(el('p',(names[key]||key)+'：'+pair[0]+' → '+pair[1]));}
-      if(payload.comparability_warnings?.length)comparison.append(el('p','注意：区间、资金、精度、费用或完成状态不同，请核对可比条件；成本压力回放不是参数A/B实验。'));}
+      if(payload.comparability_warnings?.length)comparison.append(el('p','注意：策略版本、止损规则、区间、资金、精度、费用或完成状态不同，请核对可比条件；成本压力回放不是参数A/B实验。'));}
     compareButton.onclick=async()=>{const r=await api.compare_research_runs([...selected]);if(r.ok)compare(r.comparison);else comparison.textContent=r.reason;};
     function showFill(key,focus=true){const f=details.fills.find(f=>f.key===key);if(!f)return;
       const events=details.risk_events.filter(e=>BigInt(e.time_ns)<=BigInt(f.time_ns)),last=fillEvent(details.risk_events,f.key),signal=events.findLast(e=>e.payload?.signal)?.payload.signal;

@@ -9,7 +9,7 @@ addEventListener('message',e=>{if(e.data?.kind==='research-graph-probe')window._
  document.querySelector('[data-open-research]').click();
  assert(document.querySelector('[data-field=strategy_id]').value==='ma_cross','策略模板选择');
  input('name','测'.repeat(80));input('bar_seconds',300);
- input('risk.stop_ticks',50);input('risk.risk_budget',1000);input('risk.max_lots',10);input('risk.max_margin_ratio',50);
+ input('end','2025-03-03');input('risk.risk_budget',1000);
  await click('查询区间实际合约');
  await wait(async()=>{const s=await api.get_research_state();return s.status==='contracts_ready';},'查询实际合约');
  await wait(()=>document.querySelector('[data-field=symbol]').value==='SHFE.rb2505','合约选择');
@@ -41,13 +41,13 @@ addEventListener('message',e=>{if(e.data?.kind==='research-graph-probe')window._
  const trade=document.querySelector('#research-results .table-scroll tbody tr');trade.click();
  await wait(()=>document.querySelector('#research-results pre').textContent.includes('交叉依据'),'成交原因');
  const closing=document.querySelectorAll('#research-results .table-scroll tbody tr')[1];closing.click();
- await wait(()=>document.querySelector('#research-results pre').textContent.includes('触发阶梯保护')&&document.querySelector('#research-results pre').textContent.includes('初始R：1,000'),'平仓原因与R不被空仓确认覆盖');
+ await wait(()=>document.querySelector('#research-results pre').textContent.includes('触发阶梯保护')&&document.querySelector('#research-results pre').textContent.includes('初始R：800'),'平仓原因与R不被空仓确认覆盖');
  const selected=(await api.get_research_state()).run_id;
  assert((await api.get_research_result(selected)).details.fills.length===2,'结果可重新读取');
  const fault=async(mode,budget,expected)=>{await wait(()=>!button('运行回测').disabled,'故障前按钮恢复');
    await api.set_fixture_mode(mode);input('risk.risk_budget',budget);const previous=(await api.get_research_state()).run_id;
    await click('运行回测');await wait(async()=>{const s=await api.get_research_state();return !s.running&&s.run_id!==previous&&s.status===expected;},'故障演练 '+mode);};
- await fault('partial',1500,'backtest_finished');
+ await fault('partial',180,'backtest_finished');
  let partial=await api.get_research_result((await api.get_research_state()).run_id);
  assert(partial.details.fills.filter(f=>f.offset==='CLOSE').reduce((n,f)=>n+f.volume,0)===3,'部分成交后退出实际3手');
  await fault('reject',1000,'frozen');

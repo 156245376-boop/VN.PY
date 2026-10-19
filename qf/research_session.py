@@ -4,6 +4,7 @@ import copy
 import logging
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from qf.research_config import public_values, validate_research_config
@@ -34,6 +35,7 @@ class ResearchSession:
         self._closing_at = None
         self._timeout = 30
         self._live = None
+        self._request_id = 0
 
     def live_snapshot(self):
         with self._lock:
@@ -84,12 +86,13 @@ class ResearchSession:
             self._live = None
             self._state.update(status='connecting', phase='flat', risk={}, mode=mode,
                 activate=activate or mode == 'backtest', config=config.public(),
-                experiment_ref=copy.deepcopy(experiment_ref), result=None, run_id=None)
+                experiment_ref=copy.deepcopy(experiment_ref), result=None, run_id=None,
+                job_id=uuid.uuid4().hex, progress=None)
             self.thread = threading.Thread(target=self._run,
                 args=(mode, config, credentials, activate, resume, fee_multiplier,
                       copy.deepcopy(experiment_ref)), daemon=True)
             self.thread.start()
-            return {'ok': True, 'reason': '已开始研究任务。'}
+            return {'ok': True, 'reason': '已开始研究任务。', 'job_id': self._state['job_id']}
 
     def _run(self, mode, config, credentials, activate, resume, fee_multiplier, experiment_ref):
         previous = logging.root.manager.disable
@@ -120,13 +123,16 @@ class ResearchSession:
         with self._lock:
             if self.running:
                 raise ValueError('请先结束当前研究任务')
+            self._request_id += 1
             self._state.update(status='discovering', contracts=[],
+                               request_id=self._request_id,
                                contract_request=dict(continuous=continuous,
                                                      start=str(start), end=str(end)))
             self.thread = threading.Thread(target=self._query,
                 args=(credentials, continuous, start, end), daemon=True)
             self.thread.start()
-            return {'ok': True, 'reason': '正在查询实际合约，请稍候。'}
+            return {'ok': True, 'reason': '正在查询实际合约，请稍候。',
+                    'request_id': self._request_id}
 
     def _query(self, credentials, continuous, start, end):
         previous = logging.root.manager.disable

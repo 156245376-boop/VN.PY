@@ -163,6 +163,9 @@ def compare_runs(root, run_ids):
     differences = {k: [left[k], right[k]] for k in left if left[k] != right[k]}
     comparable = ("symbol", "bar_seconds", "start", "end", "initial_balance", "precision")
     warnings = [key for key in comparable if key in differences]
+    if (left['strategy_version'] != right['strategy_version']
+            or left['risk'].get('stop_method') != right['risk'].get('stop_method')):
+        warnings.append('策略版本或止损规则不同')
     if items[0]["fee_multiplier"] != items[1]["fee_multiplier"]:
         warnings.append("fee_multiplier（独立成本压力回放）")
     if items[0]["status"] != "backtest_finished" or items[1]["status"] != "backtest_finished":

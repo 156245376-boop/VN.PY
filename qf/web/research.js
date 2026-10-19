@@ -23,12 +23,18 @@
     const detail=reasons[s.reason]||'请核对上方运行状态';
     let notice=terminal?`${labels[s.status]}：${detail}。`:'';
     if(terminal&&s.reason==='contract_range_exceeds_expiry')notice=`回测未开始，任务已结束：合约 ${s.config?.symbol||'所选月份'} 无法覆盖结束日 ${s.config?.end||'所选日期'}。请缩短结束日，再重新查询并选择实际合约。`;
+    const warming=p?.warmup_percent!=null||p?.stage==='warmup';
+    const tradingStart=s.config?.start||'所选起始交易日';
+    const phaseNotice=warming?(terminal?`${labels[s.status]}：结束时仍在预热，正式交易尚未开始；交易起点 ${tradingStart}。`:
+      `历史预热中，不下单；正式交易从 ${tradingStart} 开始，预热图中的交叉不会产生委托。`):'';
     let progressText='';
     if(p&&terminal)progressText=`${notice} 已处理 ${p.completed_bars||0} 根完成柱、${p.fill_count||0} 笔成交；用时 ${p.elapsed_seconds??'—'} 秒。`;
     else if(p){const names={validating:'校验参数',connecting:'连接账户',history:'读取历史',warmup:'均线预热',backtesting:'运行回测',simulating:'模拟运行',saving:'保存结果'};
       let date='尚未推进到有效历史时间';try{if(p.current_ns)date=new Date(Number(BigInt(p.current_ns)/1000000n)).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});}catch(_){}
-      progressText=`${names[p.stage]||'正在核实状态'} · ${p.percent==null?'等待数据':p.percent+'%（历史时间）'} · 计算到 ${date} · 已处理 ${p.completed_bars} 根完成柱，${p.fill_count} 笔成交 · 已用 ${p.elapsed_seconds} 秒 · ${p.last_advance_age_seconds} 秒未推进 · 剩余时间暂无法估算。`;}
-    return {terminal,notice,progressText,showProgress:!!p,progressValue:terminal?(p?.percent??0):p?.percent,
+      const percent=warming?(p.warmup_percent==null?'预热进度待数据核实':`预热 ${p.warmup_percent}%`):(p.percent==null?'等待数据':p.percent+'%（历史时间）');
+      progressText=`${names[p.stage]||'正在核实状态'} · ${percent} · 计算到 ${date} · 已处理 ${p.completed_bars} 根完成柱，${p.fill_count} 笔成交 · 已用 ${p.elapsed_seconds} 秒 · ${p.last_advance_age_seconds} 秒未推进 · 剩余时间暂无法估算。`;}
+    if(warming)progressText+=terminal?` 停止时仍在预热，正式交易尚未开始；交易起点 ${tradingStart}。`:` ${phaseNotice}`;
+    return {terminal,notice,progressText,phaseNotice,showProgress:!!p,progressValue:terminal?(p?.percent??0):warming?p?.warmup_percent:p?.percent,
       showChart:researchState&&(!terminal||!!(p?.completed_bars||p?.fill_count))};
   }
   function create(root,api){
@@ -71,7 +77,7 @@
       liveFrame.hidden=!watch.checked||!s.job_id||!description.showChart;
       if(!description.showChart){liveNote.textContent=description.terminal?description.notice+' 本次没有可显示的K线。':'尚未启动新的回测；请先查询并选择实际合约。';
         if(liveFrame.hasAttribute('src'))liveFrame.removeAttribute('src');liveBinding=null;liveJob=null;return;}
-      liveNote.textContent=s.job_id?'运行图只显示本次已处理的数据。':'尚未启动回测；运行后可在这里观看交易过程。';
+      liveNote.textContent=description.phaseNotice||(s.job_id?'运行图只显示本次已处理的数据。':'尚未启动回测；运行后可在这里观看交易过程。');
       if(!watch.checked||!s.job_id||openingLive)return;
       if(liveBinding&&liveJob===s.job_id){pauseLive();return;}openingLive=true;
       try{const response=await api.open_research_live_chart();if(!response.ok){notice.textContent=response.reason;return;}

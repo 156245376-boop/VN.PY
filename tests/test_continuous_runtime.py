@@ -42,8 +42,15 @@ def test_single_account_over_two_years_and_three_rolls(tmp_path):
 
 def test_prewarm_uses_historical_mapping_without_orders(tmp_path):
     fixture = ContinuousSdkFixture()
-    result = run(tmp_path, fixture)
+    progress = []
+    result = run(tmp_path, fixture, progress=lambda stage, **fields:
+                 progress.append(fields['details']) if stage == 'research_progress' else None)
     assert result['status'] == 'backtest_finished', result
+    warmup = [p for p in progress if p['stage'] == 'warmup' and p['completed_bars']]
+    assert warmup and all(p['current_ns'] is not None for p in warmup)
+    assert all(p['warmup_percent'] is not None and p['fill_count'] == 0 for p in warmup)
+    assert all(p['current_ns'] < p['trading_start_ns'] for p in warmup)
+    assert result['summary']['fill_count'] > 0
     start = int(__import__('pandas').Timestamp('2025-01-03', tz='Asia/Shanghai').value)
     assert all(stamp >= start for stamp, _, _ in fixture.apis[0].targets)
     with sqlite3.connect(tmp_path/result['run_id']/'journal.sqlite3') as db:

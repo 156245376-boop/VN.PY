@@ -399,7 +399,8 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
     j.set('user_start', str(config.start))
     # 与锁定SDK的date参数完全相同，含前一交易日夜盘。
     start, end = _convert_user_input_to_nano(config.start, config.end)
-    tracker = BacktestProgress(start, end)
+    warmup_start, _ = _convert_user_input_to_nano(engine_start, config.end)
+    tracker = BacktestProgress(start, end, warmup_start_ns=warmup_start)
     api, loop, quote = None, None, None
     status, reason, revision = 'failed', 'sdk_or_auth_or_permission_error', 0
     expected, last_publish = None, 0

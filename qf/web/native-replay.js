@@ -12,7 +12,7 @@
     const canvas=chart.mainBoard._centerTopCanvas.dom,parent=canvas.parentElement,ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');
     Object.assign(svg.style,{position:'absolute',inset:0,zIndex:4,pointerEvents:'none',overflow:'hidden'});parent.style.position='relative';parent.append(svg);
     let payload=null,alive=true;const original=chart.draw;
-    const x=id=>id*chart.bar.step-chart.chartCtrl.pixelLeft+chart.bar.step/2;
+    const x=id=>(id+(payload?.first_bar_id||0))*chart.bar.step-chart.chartCtrl.pixelLeft+chart.bar.step/2;
     function shape(tag,attrs){const e=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))e.setAttribute(k,v);svg.append(e);return e;}
     function paint(){if(!payload||!alive)return;svg.replaceChildren();svg.setAttribute('width',canvas.clientWidth);svg.setAttribute('height',canvas.clientHeight);
       const y=chart.mainBoard.rightYAxis.scale;
@@ -35,7 +35,7 @@
         if(chart.plots[id]){chart.plots[id].data=data;chart.plots[id].plotId='简单均线 MA('+line.period+')';}}
       chart.draw();return true;}
     return {apply,focusFill(key){const f=payload?.fills.find(f=>f.key===key);if(!f)return false;
-      const id=barForTime(payload.bars,f.time_ns,payload.bar_seconds);if(id===null)return false;chart.setRange(Math.max(0,id-25),Math.min(payload.bars.length-1,id+25));chart.draw();options.onFill?.(f);return true;},
+      const id=barForTime(payload.bars,f.time_ns,payload.bar_seconds);if(id===null)return false;const offset=payload.first_bar_id||0;chart.setRange(offset+Math.max(0,id-25),offset+Math.min(payload.bars.length-1,id+25));chart.draw();options.onFill?.(f);return true;},
       dispose(){alive=false;chart.draw=original;svg.remove();}};
   }
   globalThis.QfNativeReplay={attach,barForTime,fillName,acceptMessage};

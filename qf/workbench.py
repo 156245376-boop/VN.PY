@@ -25,6 +25,7 @@ from qf.research_config import (
     validate_contract_request,
     validate_research_config,
 )
+from qf.research_live_view import LiveResearchView
 from qf.research_results import RUN_ID, compare_runs, read_run, run_details, summarize_run
 from qf.research_session import ResearchSession
 from qf.window_host import run_window
@@ -87,6 +88,8 @@ class WorkbenchBridge:
         self._research = research_session or ResearchSession(root / 'results')
         self._research_credentials = None
         self._replay = ReplayView(root / 'results')
+        self._live_view = LiveResearchView(self._research.live_snapshot)
+        self._live_job = None
 
     def list_research_runs(self):
         root = self._root / 'results'
@@ -200,6 +203,21 @@ class WorkbenchBridge:
 
     def get_research_live_snapshot(self):
         return self._research.live_snapshot()
+
+    def open_research_live_chart(self):
+        with self._lock:
+            try:
+                state = self._research.snapshot()
+                if not state.get('job_id') and not self._research.live_snapshot():
+                    return research_error('请先运行一个回测或模拟实验，再观看交易过程。')
+                if state.get('job_id') != self._live_job:
+                    self._live_view.close()
+                    self._live_job = state.get('job_id')
+                url = self._live_view.open()
+                return dict(ok=True, url=url, run_id=self._live_view.run_id,
+                            generation=self._live_view.generation)
+            except (ValueError, OSError):
+                return research_error('运行图未能打开；后台计算继续，请查看进度。')
 
     def exit_message(self):
         state = self._research.snapshot()
@@ -472,6 +490,7 @@ class WorkbenchBridge:
         research_closed = self._research.close()
         try:
             self._replay.close()
+            self._live_view.close()
         except ValueError:
             return False
         if research_closed and not self._session.running:

@@ -39,6 +39,21 @@
       const name=Array.from(form.read().name).slice(0,72).join('')+' · 副本';const response=await api.copy_experiment(ref.experiment_id,ref.revision,name,old);
       if(!checked(response))return;ref=response.experiment;form.render(response.config);copy.textContent='复制实验';await refresh();notice.textContent=old?'已复制为新版拐点实验；保留旧上限，请核对新止损规则。':'已复制，可修改均线或风险参数后另行回测。';});
     const costLabel=el('label','附加独立双倍费用回放 '),cost=el('input');cost.type='checkbox';costLabel.prepend(cost);actions.append(costLabel);
+    const watchLabel=el('label','观看交易过程（只读） '),watch=el('input');watch.type='checkbox';watch.dataset.watchResearch='true';watchLabel.prepend(watch);actions.append(watchLabel);
+    const liveFrame=el('iframe');liveFrame.className='research-live-frame';liveFrame.title='本次实验交易过程';liveFrame.hidden=true;root.append(liveFrame);
+    let liveBinding=null,liveJob=null,openingLive=false,latestState={};
+    try{watch.checked=localStorage.getItem('qf-watch-research')==='true';}catch(_){}
+    function pauseLive(){if(liveBinding?.run_id)liveFrame.contentWindow.postMessage({kind:'qf-live-pause',run_id:liveBinding.run_id,generation:liveBinding.generation,paused:!watch.checked},new URL(liveBinding.url).origin);}
+    async function syncLive(s){latestState=s;liveFrame.hidden=!watch.checked;if(!watch.checked||!s.job_id||openingLive)return;
+      if(liveBinding&&liveJob===s.job_id){pauseLive();return;}openingLive=true;
+      try{const response=await api.open_research_live_chart();if(!response.ok){notice.textContent=response.reason;return;}
+        liveBinding=response;liveJob=s.job_id;liveFrame.src=response.url;
+      }finally{openingLive=false;}}
+    watch.onchange=()=>{try{localStorage.setItem('qf-watch-research',String(watch.checked));}catch(_){}pauseLive();syncLive(latestState).catch(()=>{notice.textContent='运行图暂不可用，后台进度仍会继续。';});};
+    function liveMessage(e){if(!liveBinding||e.source!==liveFrame.contentWindow||e.origin!==new URL(liveBinding.url).origin||e.data?.generation!==liveBinding.generation)return;
+      if(liveBinding.run_id&&e.data.run_id!==liveBinding.run_id)return;
+      if(e.data.kind==='qf-live-ready'){liveBinding.run_id=e.data.run_id;pauseLive();}}
+    addEventListener('message',liveMessage);
     const activateLabel=el('label','允许本实验产生快期模拟委托 '),activate=el('input');activate.type='checkbox';activateLabel.prepend(activate);actions.append(activateLabel);
     const run=button('运行回测',async()=>{if(!await save())return;stress=cost.checked?{...ref}:null;
       const response=await api.start_research(ref.experiment_id,ref.revision,'backtest');if(!checked(response)){stress=null;return;}notice.textContent='回测已开始，分钟近似与Tick精度以运行记录为准。';});
@@ -62,6 +77,8 @@
       if(!busy&&!valid&&!form.isLegacy&&!notice.textContent)notice.textContent='请先查询当前品种和日期的实际合约，再选择月份。';
       state.textContent=(labels[s.status]||'状态待核实')+(s.reason?' · '+(reasons[s.reason]||'运行状态需要核实'):'');state.dataset.light=['failed','frozen'].includes(s.status)?'red':busy?'green':'yellow';
       const r=s.risk||{};risk.textContent=`本实验已核实持仓：${r.side===-1?'空':r.side===1?'多':'无方向'} ${r.quantity||0} 手；初始R：${r.initial_r??'—'} 元；保护价：${r.stop_price??'—'}；阶梯：${r.stage??'—'}；权益：${s.equity??'—'} 元；费用：${s.commission??'—'} 元。`;
+      await syncLive(s);
+      form.setRunState(s);
       const p=s.progress,stageNames={validating:'校验参数',connecting:'连接账户',history:'读取历史',warmup:'均线预热',backtesting:'运行回测',simulating:'模拟运行',saving:'保存结果',completed:'回测完成',failed:'失败',frozen:'已冻结',stopped:'已停止'};
       progressBar.hidden=!p;if(p){if(p.percent==null)progressBar.removeAttribute('value');else progressBar.value=p.percent;
         let date='尚未推进到有效历史时间';try{if(p.current_ns)date=new Date(Number(BigInt(p.current_ns)/1000000n)).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});}catch(_){}
@@ -76,7 +93,7 @@
     const timer=setInterval(poll,700);refresh().catch(()=>{});poll();
     return {show(next){view=next;root.hidden=!['strategy','backtests','paper'].includes(view);run.hidden=view==='paper';costLabel.hidden=view==='paper';activateLabel.hidden=view!=='paper';paper.hidden=view!=='paper';
       intro.textContent=view==='paper'?'快期TqKq主模拟账户：默认仅观察。资金由服务端返回，与行情图的本地模拟账户不同。':'选择双均线、实际合约、周期、日期与仓位规则；回测结果不证明策略有效。';},
-      updateCatalog:rows=>form.setCatalog(rows),prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);results?.dispose();form.dispose();}};
+      updateCatalog:rows=>form.setCatalog(rows),prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();}};
   }
   globalThis.QfResearch={create};
 })();

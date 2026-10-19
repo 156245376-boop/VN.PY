@@ -44,6 +44,7 @@ class ResearchSession:
     def _view_progress(self, snapshot):
         with self._lock:
             self._live = copy.deepcopy(snapshot)
+            self._state['entry_plan'] = copy.deepcopy(snapshot.get('entry_plan'))
 
     @property
     def running(self):

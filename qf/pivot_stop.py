@@ -42,9 +42,11 @@ class EntryPlan:
     reason: str
 
 
-def latest_confirmed_pivot(rows, *, side, left, right, as_of_ns, previous=None):
+def latest_confirmed_pivot(rows, *, side, left, right, as_of_ns, previous=None,
+                           allow_nonpositive=False):
     if (type(side) is not int or side not in (-1, 1) or type(as_of_ns) is not int
-            or as_of_ns <= 0 or any(type(n) is not int or not 1 <= n <= 50
+            or as_of_ns <= 0 or type(allow_nonpositive) is not bool
+            or any(type(n) is not int or not 1 <= n <= 50
                                     for n in (left, right))):
         raise ValueError('拐点参数无效')
     kind, field = ('low', 'low') if side == 1 else ('high', 'high')
@@ -60,7 +62,7 @@ def latest_confirmed_pivot(rows, *, side, left, right, as_of_ns, previous=None):
             if closed and start <= closed[-1][0]:
                 raise ValueError('拐点柱时间乱序')
             price = decimal_value(row[field])
-            if price <= 0:
+            if price <= 0 and not allow_nonpositive:
                 raise ValueError('拐点价格无效')
             closed.append((start, end, price))
     for i in range(left, len(closed) - right):

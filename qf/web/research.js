@@ -12,6 +12,11 @@
     new_run_requires_flat_account:'新模拟实验要求整个账户空仓',new_run_requires_no_orders:'新模拟实验要求账户没有未结委托',
     position_trade_mismatch:'实际持仓与本地成交记录不一致',unexpected_position:'发现超限、双向或其他合约持仓',execution_timeout:'执行等待超时，已冻结后续执行',
     contract_query_or_permission_failed:'合约查询未完成，请核对认证和权限',research_start_or_record_failed:'研究任务或本地记录未能启动',shutdown_unconfirmed:'退出清理超时，状态保留为待核实'};
+  Object.assign(reasons,{historical_main_missing:'该日期没有可核实的历史主力映射',historical_main_invalid:'历史主力不属于所选品种',
+    roll_reference_missing:'换月缺少两合约同一时刻的完成参考柱，已停止',prewarm_insufficient:'起始日前历史主力预热不足，未开始交易',
+    roll_spec_incompatible:'新旧合约乘数或最小手数不兼容，已停止移仓',roll_unaffordable:'资金不足以按原手数开新，未偷偷减仓',
+    roll_timeout:'移仓执行等待超时，状态待核实',roll_incomplete_at_end:'回测终点仍有未完成移仓，结果不完整',
+    roll_mapping_changed:'移仓未结束主力映射再次变化，已停止',tick_data_unavailable:'所需Tick数据未返回，未降为分钟近似'});
   function describeState(s){
     const terminal=['failed','frozen','stopped','backtest_finished'].includes(s.status);
     const researchState=terminal||['connecting','active','observing'].includes(s.status),p=researchState?s.progress:null;
@@ -45,13 +50,16 @@
       if(ref)picker.value=ref.experiment_id;
     }
     async function save(){const response=await api.save_experiment(form.read(),ref?.experiment_id||null);
-      if(!checked(response))return null;ref=response.experiment;await refresh();notice.textContent='实验已保存 · 修订'+ref.revision;return ref;}
+      if(!checked(response))return null;ref=response.experiment;form.setSaved(true);await refresh();notice.textContent='实验已保存 · 修订'+ref.revision;return ref;}
     const query=button('查询区间实际合约',async()=>{const c=form.readContractRequest(),response=await api.get_research_contracts(c.continuous,c.start,c.end);
       notice.textContent=response.reason;if(checked(response)){acceptedRequest={...c,request_id:response.request_id};contractKey='';}});
     const saveButton=button('保存实验',save);
     const copy=button('复制实验',async()=>{const old=form.isLegacy;if(!old&&!await save())return;if(!ref)return;
       const name=Array.from(form.read().name).slice(0,72).join('')+' · 副本';const response=await api.copy_experiment(ref.experiment_id,ref.revision,name,old);
       if(!checked(response))return;ref=response.experiment;form.render(response.config);copy.textContent='复制实验';await refresh();notice.textContent=old?'已复制为新版拐点实验；保留旧上限，请核对新止损规则。':'已复制，可修改均线或风险参数后另行回测。';});
+    const continuousCopy=button('复制为主力连续实验',async()=>{if(!ref)return;if(!form.isLegacy&&!await save())return;
+      const response=await api.copy_continuous_experiment(ref.experiment_id,ref.revision,Array.from(form.read().name).slice(0,65).join('')+' · 连续副本');
+      if(!checked(response))return;ref=response.experiment;form.render(response.config);form.setSaved(true);await refresh();notice.textContent='已新建主力连续副本，原实验和旧结果保留；可以选择跨年度日期。';});
     const costLabel=el('label','附加独立双倍费用回放 '),cost=el('input');cost.type='checkbox';costLabel.prepend(cost);actions.append(costLabel);
     const watchLabel=el('label','观看交易过程（只读） '),watch=el('input');watch.type='checkbox';watch.dataset.watchResearch='true';watchLabel.prepend(watch);actions.append(watchLabel);
     const liveFrame=el('iframe'),liveNote=el('p');liveNote.className='research-chart-state';liveNote.hidden=true;liveFrame.className='research-live-frame';liveFrame.title='本次实验交易过程';liveFrame.hidden=true;root.append(liveNote,liveFrame);
@@ -87,17 +95,23 @@
     if(globalThis.QfResearchResults)results=QfResearchResults.create(resultsRoot,api);
     picker.onchange=()=>{const item=picker.selectedOptions[0]?._experiment;
       if(item){ref={experiment_id:item.experiment_id,revision:item.revision};form.render(item.config);}
-      else {ref=null;form.render(QfResearchForm.defaults());}
+      else {ref=null;form.render(QfResearchForm.defaults(view==='paper'?'fixed':'historical_main'));}
+      form.setSaved(!!ref);
       copy.textContent=form.isLegacy?'复制为新版拐点实验':'复制实验';poll();};
     async function poll(){if(disposed||polling)return;polling=true;try{const s=await api.get_research_state();if(disposed)return;
       const busy=s.running,description=describeState(s);form.setRunning(busy&&s.status!=='discovering');for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
       stopButton.disabled=!busy;flattenButton.disabled=!busy||s.mode!=='paper'||!s.activate;
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
-      const valid=matches&&(s.contracts||[]).some(c=>c.symbol===form.read().symbol)&&!form.isLegacy;
-      run.disabled=paper.disabled=busy||!valid;saveButton.disabled=busy||form.isLegacy;
+      const mainMode=form.read().schema_version===3;
+      const valid=mainMode||(matches&&(s.contracts||[]).some(c=>c.symbol===form.read().symbol)&&!form.isLegacy);
+      run.disabled=busy||!valid;paper.disabled=busy||!valid||mainMode;saveButton.disabled=busy||form.isLegacy;
+      query.hidden=mainMode;continuousCopy.hidden=mainMode||!ref;continuousCopy.disabled=busy;
+      if(view==='paper'&&mainMode&&!busy)notice.textContent='当前为主力连续历史实验，仅可回测。请选择“新建实验”创建固定合约模拟模板。';
       if(!busy&&!valid&&!form.isLegacy&&!notice.textContent)notice.textContent='请先查询当前品种和日期的实际合约，再选择月份。';
       state.textContent=(labels[s.status]||'状态待核实')+(s.reason?' · '+(reasons[s.reason]||'运行状态需要核实'):'');state.dataset.light=['failed','frozen'].includes(s.status)?'red':busy?'green':'yellow';
       const r=s.risk||{};risk.textContent=`本实验已核实持仓：${r.side===-1?'空':r.side===1?'多':'无方向'} ${r.quantity||0} 手；初始R：${r.initial_r??'—'} 元；保护价：${r.stop_price??'—'}；阶梯：${r.stage??'—'}；权益：${s.equity??'—'} 元；费用：${s.commission??'—'} 元。`;
+      if(s.config?.schema_version===3)risk.textContent+=` 当前实际主力：${s.symbol||'待核实'}；换月 ${s.roll_count??s.result?.summary?.roll_count??0} 次；已完成逻辑交易 ${s.closed_trade_count??s.result?.summary?.closed_trade_count??0} 笔。`;
+      if(s.failure_context?.date)state.textContent+=` · 日期 ${s.failure_context.date} · 合约 ${s.failure_context.symbol||'待核实'} · ${s.failure_context.data_type==='mapping'?'历史主力映射':s.failure_context.data_type==='calendar'?'交易日历':'历史行情'}`;
       form.setRunState(s);
       const p=s.progress;progressBar.hidden=!description.showProgress;progressBar.dataset.terminal=String(description.terminal);
       if(p){if(description.progressValue==null)progressBar.removeAttribute('value');else progressBar.value=description.progressValue;}
@@ -115,8 +129,9 @@
           notice.textContent=answer.ok?'基准已保存；开始独立双倍费用压力回放。':answer.reason;}}
     }catch(_){state.textContent='研究状态暂不可用';}finally{polling=false;}}
     const timer=setInterval(poll,700);refresh().catch(()=>{});poll();
-    return {show(next){view=next;root.hidden=!['strategy','backtests','paper'].includes(view);run.hidden=view==='paper';costLabel.hidden=view==='paper';activateLabel.hidden=view!=='paper';paper.hidden=view!=='paper';
-      intro.textContent=view==='paper'?'快期TqKq主模拟账户：默认仅观察。资金由服务端返回，与行情图的本地模拟账户不同。':'选择双均线、实际合约、周期、日期与仓位规则；回测结果不证明策略有效。';},
+    return {show(next){const paperTransition=(view==='paper')!==(next==='paper');view=next;root.hidden=!['strategy','backtests','paper'].includes(view);run.hidden=view==='paper';costLabel.hidden=view==='paper';activateLabel.hidden=view!=='paper';paper.hidden=view!=='paper';
+      if(!ref&&paperTransition)form.render(QfResearchForm.defaults(view==='paper'?'fixed':'historical_main'));
+      intro.textContent=view==='paper'?'快期TqKq主模拟账户：默认仅观察。资金由服务端返回，与行情图的本地模拟账户不同。':'选择双均线、品种、周期和起止日期；默认按历史主力自动移仓，可跨年回测。';},
       updateCatalog:rows=>form.setCatalog(rows),prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();}};
   }
   globalThis.QfResearch={create,describeState};

@@ -106,12 +106,13 @@ def _spec(raw):
 def _evidence(db, first, now, *, series='signal', symbol=None):
     mappings = [(r[0], json.loads(r[1])) for r in db.execute(
         'SELECT time_ns,data FROM main_changes ORDER BY time_ns')]
-    def offset_at(stamp):
+    def offset_at(stamp, actual_symbol):
         value = Decimal(0)
         for time_ns, mapping in mappings:
             if time_ns > stamp:
                 break
-            value = dec(mapping['offset'])
+            if mapping['new_symbol'] == actual_symbol:
+                value = dec(mapping['offset'])
         return value if series == 'signal' else Decimal(0)
     fills = []
     for row in db.execute('SELECT f.*,l.trade_id,l.role,l.fee FROM fills f JOIN logical_fills l '
@@ -122,7 +123,7 @@ def _evidence(db, first, now, *, series='signal', symbol=None):
         fill = dict(zip(('key', 'order_id', 'symbol', 'direction', 'offset', 'volume',
                          'price', 'time_ns', 'trade_id', 'role', 'fee'), row, strict=True))
         fill['time_ns'] = str(fill['time_ns'])
-        fill['display_price'] = dec(fill['price'])-offset_at(row[7])
+        fill['display_price'] = dec(fill['price'])-offset_at(row[7], fill['symbol'])
         fills.append(fill)
     specs = {s: _spec(json.loads(raw)) for s, raw in db.execute('SELECT * FROM contract_specs')}
     events = []
@@ -138,7 +139,7 @@ def _evidence(db, first, now, *, series='signal', symbol=None):
         risk_data = json.loads(raw)
         if actual in specs and risk.quantity:
             stop = logical_stop(risk, spec=specs[actual])
-            risk_data.update(actual_stop_price=stop, stop_price=stop-offset_at(stamp))
+            risk_data.update(actual_stop_price=stop, stop_price=stop-offset_at(stamp, actual))
         if series == 'signal' or actual == symbol:
             events.append(dict(time_ns=str(stamp), kind=kind, payload=content, risk=risk_data))
     return public_values(dict(fills=list(reversed(fills)), risk_events=list(reversed(events)),

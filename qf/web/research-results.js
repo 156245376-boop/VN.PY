@@ -32,7 +32,7 @@
       const events=details.risk_events.filter(e=>BigInt(e.time_ns)<=BigInt(f.time_ns)),last=fillEvent(details.risk_events,f.key),signal=events.findLast(e=>e.payload?.signal)?.payload.signal;
       const r=last?.risk||{};reason.textContent=fillName(f)+' · '+time(f.time_ns)+'（北京时间）\n成交：'+number(f.volume)+' 手，价格 '+number(f.price)+'\n原因：'+reasonName(r.exit_reason)+
         '\n初始R：'+number(r.initial_r)+' 元；阶梯：'+(r.stage??'—')+'；保护价：'+number(r.stop_price)+(signal?'\n交叉依据：快线 '+number(signal.fast_current)+'；慢线 '+number(signal.slow_current):'');
-      if(binding&&focus)frame.contentWindow.postMessage({kind:'qf-replay-focus',run_id:binding.run_id,revision:binding.revision,fill_id:key},new URL(binding.url).origin);}
+      if(binding&&focus)frame.contentWindow.postMessage({kind:'qf-replay-focus',run_id:binding.run_id,revision:binding.revision,fill_id:key,time_ns:f.time_ns},new URL(binding.url).origin);}
     async function openReplay(){if(!current)return;const r=await api.open_research_replay(current.run_id);if(!r.ok){reason.textContent=r.reason;return;}
       binding=r;frame.hidden=false;frame.src=r.url;}
     replay.onclick=openReplay;
@@ -41,10 +41,11 @@
       summary.append(table(['净收益（元）','毛收益（元）','手续费（元）','最大回撤（元）','完整交易次数','期末净持仓（手）'],[[number(result.net_pnl),number(result.gross_pnl),number(result.commission),number(result.max_drawdown_amount),number(result.closed_trade_count),number(result.open_position)]]));
       if(result.status!=='backtest_finished')summary.append(el('p','本次为模拟、已停止或未完成运行，请核实状态；不得当作完整回测结果。'));
       summary.append(el('p','毛盈利不含手续费；期末持仓没有自动平仓，净收益包含市值变动。SDK成本不代表历史真实交易成本。'));
+      if(result.config.schema_version===3)summary.append(el('p',`历史主力连续 · 换月 ${result.roll_count??0} 次 · 移仓手续费 ${number(result.roll_commission)} 元（已包含在总手续费） · 完整交易按逻辑交易统计；信号图使用因果拼接价格，成交详情保留实际合约原价。`));
       if(binding?.run_id!==result.run_id){frame.hidden=true;frame.removeAttribute('src');binding=null;}
       const r=await api.get_research_result(result.run_id);if(disposed||current.run_id!==result.run_id)return;if(!r.ok){reason.textContent=r.reason;return;}
       details=r.details;tradeList.replaceChildren();const t=table(['成交时间（北京时间）','操作','手数','成交价','原因'],[]);const body=t.querySelector('tbody');
-      for(const f of details.fills){const tr=el('tr');for(const text of [time(f.time_ns),fillName(f),number(f.volume),number(f.price),'点击查看并定位'])tr.append(el('td',text));
+      for(const f of details.fills){const tr=el('tr');for(const text of [time(f.time_ns),fillName(f)+(f.symbol?' · '+f.symbol:'')+(f.role==='roll_out'?'（移仓平旧）':f.role==='roll_in'?'（移仓开新）':''),number(f.volume),number(f.price),'点击查看并定位'])tr.append(el('td',text));
         tr.style.cursor='pointer';tr.onclick=async()=>{showFill(f.key);if(!binding){queued=f.key;await openReplay();}};body.append(tr);}tradeList.append(t);
       if(!details.fills.length)tradeList.append(el('p','本次没有实际成交；信号和目标不等于成交。'));}
     function message(e){if(!binding||e.source!==frame.contentWindow||e.origin!==new URL(binding.url).origin||e.data?.run_id!==binding.run_id||e.data?.revision!==binding.revision)return;

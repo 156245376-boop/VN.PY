@@ -91,6 +91,23 @@ def test_series_filter_ids_and_actual_fill_price_are_explicit(tmp_path):
         j.close()
 
 
+def test_roll_fills_use_their_own_contract_offset_not_new_mapping_offset(tmp_path):
+    j = finished(tmp_path)
+    try:
+        j.record_mapping(dict(changed=True, old_symbol='SHFE.rb2505',
+            new_symbol='SHFE.rb2510', detected_ns=BASE+MINUTE,
+            reference_ns=BASE, previous_offset='0', offset='100'))
+        snap = continuous_snapshot(j, validate_research_config(j.get('config')),
+            SimpleNamespace(), now=BASE+3*MINUTE, revision=1, progress={})
+        old = next(f for f in snap['fills'] if f['role'] == 'roll_out')
+        new = next(f for f in snap['fills'] if f['role'] == 'roll_in')
+        assert D(old['display_price']) == 280
+        assert D(new['display_price']) == 280
+        assert new['price'] == 380
+    finally:
+        j.close()
+
+
 def test_million_bar_initial_page_and_live_snapshot_stay_bounded(tmp_path):
     j = journal(tmp_path)
     try:

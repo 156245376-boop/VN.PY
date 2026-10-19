@@ -133,6 +133,14 @@ class WorkbenchBridge:
         with self._lock:
             try:
                 config = validate_research_config(raw)
+                if experiment_id is not None:
+                    item = next(item for item in self._experiments.list()
+                                if item['experiment_id'] == experiment_id and item.get('config'))
+                    if (item['config'].get('contract_mode', 'fixed')
+                            != getattr(config, 'contract_mode', 'fixed')):
+                        return research_error('请复制为新实验后切换连续／固定合约模式。',
+                            code='copy_mode_required',
+                            field_errors={'contract_mode': '请先复制实验'})
                 return dict(ok=True, experiment=self._experiments.save(
                     config, experiment_id=experiment_id), config=config.public())
             except ResearchValidationError as exc:
@@ -150,6 +158,16 @@ class WorkbenchBridge:
                     ref['experiment_id'], ref['revision']).public())
             except (ValueError, TypeError, KeyError, OSError):
                 return dict(ok=False, reason='实验未复制，请先保存有效实验。')
+
+    def copy_continuous_experiment(self, experiment_id, revision, name):
+        with self._lock:
+            try:
+                ref = self._experiments.copy(experiment_id, revision, name=name,
+                                             upgrade_to_continuous=True)
+                return dict(ok=True, experiment=ref, config=self._experiments.load(
+                    ref['experiment_id'], ref['revision']).public())
+            except (ValueError, TypeError, KeyError, OSError):
+                return dict(ok=False, reason='未能复制为主力连续实验，请核对原实验。')
 
     def _research_login(self):
         if self._research_credentials:
@@ -176,9 +194,16 @@ class WorkbenchBridge:
         with self._lock:
             try:
                 config = self._experiments.load(experiment_id, revision)
-                if config.strategy_version != 2:
+                if config.strategy_version not in (2, 3):
                     return research_error('旧版实验只读，请复制为新版拐点实验后运行。',
                                           code='legacy_read_only')
+                if config.schema_version == 3:
+                    if mode != 'backtest':
+                        return research_error('主力连续只用于历史回测；模拟请新建固定合约实验。',
+                                              code='continuous_backtest_only')
+                    return self._research.start(mode, config, self._research_login(),
+                        activate=activate, resume=resume, fee_multiplier=fee_multiplier,
+                        experiment_ref=dict(experiment_id=experiment_id, revision=revision))
                 snapshot = self._research.snapshot()
                 expected = dict(continuous=config.continuous,
                                 start=str(config.start), end=str(config.end))

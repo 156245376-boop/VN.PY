@@ -1,0 +1,13 @@
+const assert=require('assert');
+require('../qf/web/research-form.js');
+const raw=QfResearchForm.defaults();
+assert.strictEqual(raw.schema_version,3);
+assert.strictEqual(raw.symbol,null);
+assert.strictEqual(raw.contract_mode,'historical_main');
+assert.strictEqual(raw.signal_adjustment,'causal_forward_gap_v1');
+assert.strictEqual(raw.roll_policy,'close_then_reopen_preserve_r_v1');
+const fixed=QfResearchForm.defaults('fixed');
+assert.strictEqual(fixed.schema_version,2);
+assert.ok(!('contract_mode' in fixed));
+assert.ok(fixed.symbol);
+console.log('CONTINUOUS_FORM_OK');

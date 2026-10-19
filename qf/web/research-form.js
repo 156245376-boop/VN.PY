@@ -1,13 +1,16 @@
 // 实验表单只管理草稿；服务端验证和运行快照是执行依据。
 (() => {
   'use strict';
-  const defaults=()=>({schema_version:2,strategy_id:'ma_cross',strategy_version:2,name:'双均线实验',
+  const defaults=(mode='historical_main')=>{const raw={schema_version:2,strategy_id:'ma_cross',strategy_version:2,name:'双均线实验',
     continuous:'KQ.m@SHFE.rb',symbol:'SHFE.rb2505',bar_seconds:60,fast_period:5,slow_period:20,
     start:'2025-03-03',end:'2025-03-07',initial_balance:'100000',precision:'minute',
     timeout_seconds:30,execution_timeout_seconds:30,risk:{sizing:'risk_budget',fixed_lots:'',risk_budget:'',
       stop_method:'confirmed_pivot',pivot_left:2,pivot_right:2,limit_lots:false,limit_margin:false,
       max_lots:null,max_margin_ratio:null,take_profit_mode:'r_multiple',take_profit_value:'3',
-      stairs_enabled:true,first_trigger_r:'1',first_offset_ticks:1,second_trigger_r:'2',second_lock_r:'0.5'}});
+      stairs_enabled:true,first_trigger_r:'1',first_offset_ticks:1,second_trigger_r:'2',second_lock_r:'0.5'}};
+    if(mode==='historical_main')Object.assign(raw,{schema_version:3,strategy_version:3,symbol:null,
+      contract_mode:'historical_main',signal_adjustment:'causal_forward_gap_v1',roll_policy:'close_then_reopen_preserve_r_v1',start:'2025-01-02',end:'2025-12-31'});
+    return raw;};
   function contractFit(row,end){
     const stamp=row.expire_datetime;
     if(typeof stamp!=='number'||!Number.isFinite(stamp)||stamp<=0)return {expiry:null,eligible:true};
@@ -26,7 +29,7 @@
     return {lots,initial_r,take_profit:r.take_profit_mode==='r_multiple'?initial_r*Number(r.take_profit_value):Number(r.take_profit_value),one_tick:lots*tick*multiple};
   }
   function create(root,options={}){
-    const inputs=new Map(),fields=new Map();let catalog=[],contracts=[],running=false,legacy=null;
+    const inputs=new Map(),fields=new Map();let catalog=[],contracts=[],running=false,legacy=null,saved=false;
     const grid=document.createElement('div');grid.className='research-grid';root.append(grid);
     function field(key,title,choices,type='number'){
       const label=document.createElement('label');label.textContent=title;
@@ -39,7 +42,9 @@
       input.addEventListener('change',()=>{if(['continuous','start','end'].includes(key)){contracts=[];setContracts([]);}update();options.onChange?.(key);});
       input.addEventListener('input',update);return input;
     }
-    field('name','实验名称',null,'text');field('strategy_id','策略模板',[['ma_cross','双均线交叉（简单均线）']]);field('continuous','品种',[]);field('symbol','实际月份合约（先查询）',[]);
+    field('name','实验名称',null,'text');field('strategy_id','策略模板',[['ma_cross','双均线交叉（简单均线）']]);
+    field('contract_mode','回测合约方式',[['historical_main','历史主力连续（自动移仓）'],['fixed','固定月份合约（高级／模拟）']]);
+    field('continuous','品种',[]);field('symbol','实际月份合约（先查询）',[]);
     field('bar_seconds','K线周期',[[60,'1分钟'],[300,'5分钟'],[900,'15分钟'],[1800,'30分钟'],[3600,'1小时'],[86400,'日线']]);
     field('fast_period','快均线周期（根）');field('slow_period','慢均线周期（根）');
     field('start','起始交易日',null,'date');field('end','结束交易日',null,'date');
@@ -58,7 +63,7 @@
     field('risk.first_trigger_r','第一档触发（R）');field('risk.first_offset_ticks','第一档：开仓价向盈利方向偏移（跳）');
     field('risk.second_trigger_r','第二档触发（R）');field('risk.second_lock_r','第二档锁定盈利（R）');
     const note=document.createElement('p');note.className='research-preview';root.append(note);
-    function read(){if(legacy)return structuredClone(legacy);const result=defaults();for(const [key,input]of inputs){const target=key.startsWith('risk.')?result.risk:result,k=key.split('.').at(-1);
+    function read(){if(legacy)return structuredClone(legacy);const mode=inputs.get('contract_mode').value,result=defaults(mode);for(const [key,input]of inputs){if(key==='contract_mode')continue;const target=key.startsWith('risk.')?result.risk:result,k=key.split('.').at(-1);
       target[k]=input.value;}
       for(const k of ['bar_seconds','fast_period','slow_period'])result[k]=Number(result[k]);
       for(const k of ['fixed_lots','pivot_left','pivot_right','first_offset_ticks'])result.risk[k]=Number(result.risk[k]);
@@ -68,15 +73,18 @@
       result.risk.stairs_enabled=result.risk.stairs_enabled==='true';
       if(result.risk.sizing==='fixed'&&!result.risk.risk_budget)result.risk.risk_budget='1';
       if(result.risk.sizing==='risk_budget'&&!result.risk.fixed_lots)result.risk.fixed_lots=1;
+      if(mode==='historical_main')result.symbol=null;
       return result;
     }
     function update(){const value=read();fields.get('risk.fixed_lots').hidden=value.risk.sizing!=='fixed';
+      fields.get('symbol').hidden=value.schema_version===3;
       fields.get('risk.risk_budget').hidden=value.risk.sizing!=='risk_budget';
       fields.get('risk.max_lots').hidden=!value.risk.limit_lots;
       fields.get('risk.max_margin_ratio').hidden=!value.risk.limit_margin;
       for(const k of ['first_trigger_r','first_offset_ticks','second_trigger_r','second_lock_r'])fields.get('risk.'+k).hidden=!value.risk.stairs_enabled;
-      note.textContent=legacy?'旧版跳数止损实验（只读）；请复制为新版拐点实验。旧记录不会被改写。':
+      note.textContent=legacy?'旧版跳数止损实验（只读）；请复制升级。旧记录不会被改写。':
         '止损价、止损距离与手数：等待信号后计算。多单取最近已确认波谷，空单取波峰；按预算和实际距离计算。1R推至开仓价±1跳，2R锁0.5R，3R退出；1跳不保证覆盖费用。';
+      if(value.schema_version===3)note.textContent+=' 历史主力连续：按当时主力平旧开新，延续原始R；仅历史回测，不用于快期模拟。';
     }
     function setCatalog(rows){const current=inputs.get('continuous').value||'KQ.m@SHFE.rb';catalog=rows||[];
       const select=inputs.get('continuous');if(select.dataset.key===JSON.stringify(catalog))return;
@@ -91,9 +99,9 @@
       return {eligibleCount};}
     function render(config){legacy=config.strategy_version===1?structuredClone(config):null;
       for(const [key,input]of inputs){const value=key.startsWith('risk.')?config.risk[key.slice(5)]:config[key];
-      input.value=key==='risk.max_margin_ratio'&&value!=null&&value!==''?String(Number(value)*100):String(value??'');}
+      input.value=key==='contract_mode'?(config.schema_version===3?'historical_main':'fixed'):key==='risk.max_margin_ratio'&&value!=null&&value!==''?String(Number(value)*100):String(value??'');}
       update();setRunning(running);showErrors({});}
-    function setRunning(value){running=value;for(const input of inputs.values())input.disabled=running||!!legacy;}
+    function setRunning(value){running=value;for(const [key,input]of inputs)input.disabled=running||!!legacy||(key==='contract_mode'&&saved);}
     function showErrors(errors){for(const [key,input]of inputs){const message=errors[key]||'';
       input.setAttribute('aria-invalid',message?'true':'false');fields.get(key).querySelector('small').textContent=message;}
       const first=inputs.get(Object.keys(errors)[0]);first?.focus();}
@@ -101,6 +109,7 @@
     function setRunState(snapshot){const p=snapshot?.entry_plan;if(p)note.textContent=`本次入场计划：止损价 ${p.stop_price??'—'}；距离 ${p.distance_ticks??'—'} 跳；计划 ${p.lots} 手；计划风险 ${p.planned_r} 元。实际成交风险可能因滑点和费用变化。`;}
     render(defaults());
     return {read,render,setCatalog,setContracts,readContractRequest,showErrors,setRunState,setRunning,
+      setSaved(value){saved=value;setRunning(running);},
       get isLegacy(){return !!legacy;},dispose(){root.replaceChildren();}};
   }
   globalThis.QfResearchForm={defaults,preview,create,contractFit};

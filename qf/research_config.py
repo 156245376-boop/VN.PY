@@ -1,7 +1,7 @@
 """新研究实验的严格公开配置；与旧固定样例的Config隔离。"""
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -129,12 +129,19 @@ def validate_contract_request(continuous, start, end):
 
 
 def validate_research_config(raw: dict) -> ResearchConfig:
-    if not isinstance(raw, dict) or set(raw) != set(ResearchConfig.__annotations__):
+    if not isinstance(raw, dict):
         _fail('config', '实验配置字段不完整或包含未知字段')
     data = dict(raw)
+    config_type = ResearchConfig
+    if data.get('schema_version') == 3:
+        from qf.continuous_config import ContinuousConfig
+        config_type = ContinuousConfig
+        data.setdefault('symbol', None)
+    if set(data) != {f.name for f in fields(config_type)}:
+        _fail('config', '实验配置字段不完整或包含未知字段')
     version = data['schema_version']
     if (type(version) is not int or type(data['strategy_version']) is not int
-            or (version, data['strategy_version']) not in ((1, 1), (2, 2))
+            or (version, data['strategy_version']) not in ((1, 1), (2, 2), (3, 3))
             or data['strategy_id'] != 'ma_cross'):
         _fail('strategy_version', '不支持的策略或配置版本')
     risk = data.pop('risk')
@@ -142,7 +149,7 @@ def validate_research_config(raw: dict) -> ResearchConfig:
     if not isinstance(risk, dict):
         _fail('risk', '风险配置字段不完整或包含未知字段')
     risk = dict(risk)
-    if version == 2:
+    if version in (2, 3):
         for key, switch in [('max_lots', 'limit_lots'), ('max_margin_ratio', 'limit_margin')]:
             if risk.get(switch) is False:
                 risk.setdefault(key, None)
@@ -153,10 +160,19 @@ def validate_research_config(raw: dict) -> ResearchConfig:
         _fail('name', '请填写不超过80字的实验名称')
     request = validate_contract_request(data['continuous'], data['start'], data['end'])
     symbol = data['symbol']
-    match = (re.fullmatch(r'(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.([A-Za-z]+)\d{3,4}', symbol)
-             if isinstance(symbol, str) else None)
-    if not match or data['continuous'] != f'KQ.m@{match[1]}.{match[2]}':
-        _fail('symbol', '请先查询并选择与品种匹配的实际月份合约')
+    if version == 3:
+        if symbol is not None:
+            _fail('symbol', '历史主力连续模式由回放时的主力映射选择合约，不固定月份')
+        for key, expected in [('contract_mode', 'historical_main'),
+                              ('signal_adjustment', 'causal_forward_gap_v1'),
+                              ('roll_policy', 'close_then_reopen_preserve_r_v1')]:
+            if data[key] != expected:
+                _fail(key, '连续回测模式或政策不受支持')
+    else:
+        match = (re.fullmatch(r'(SHFE|DCE|CZCE|CFFEX|INE|GFEX)\.([A-Za-z]+)\d{3,4}', symbol)
+                 if isinstance(symbol, str) else None)
+        if not match or data['continuous'] != f'KQ.m@{match[1]}.{match[2]}':
+            _fail('symbol', '请先查询并选择与品种匹配的实际月份合约')
     if _checked('bar_seconds', _integer, data['bar_seconds'], 1) not in (
             60, 300, 900, 1800, 3600, 86400):
         _fail('bar_seconds', '不支持的K线周期')
@@ -213,7 +229,7 @@ def validate_research_config(raw: dict) -> ResearchConfig:
             or (risk['take_profit_mode'] == 'r_multiple'
                 and risk['take_profit_value'] <= risk['second_trigger_r'])):
         _fail('risk.take_profit_value', '阶梯顺序或终点无效：后续阶梯必须能够到达')
-    return ResearchConfig(**data, risk=risk_type(**risk))
+    return config_type(**data, risk=risk_type(**risk))
 
 
 def migrate_to_pivot(config: ResearchConfig, *, name: str) -> ResearchConfig:

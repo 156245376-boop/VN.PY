@@ -109,11 +109,18 @@ class ExperimentStore:
                     temporary.unlink()
             return {k: raw[k] for k in ('experiment_id', 'revision', 'parent')}
 
-    def copy(self, experiment_id, revision, *, name, upgrade_to_pivot=False):
-        if type(upgrade_to_pivot) is not bool:
+    def copy(self, experiment_id, revision, *, name, upgrade_to_pivot=False,
+             upgrade_to_continuous=False):
+        if (type(upgrade_to_pivot) is not bool or type(upgrade_to_continuous) is not bool
+                or (upgrade_to_pivot and upgrade_to_continuous)):
             raise ValueError('升级选项无效')
         config = self.load(experiment_id, revision)
-        raw = (migrate_to_pivot(config, name=name) if upgrade_to_pivot else config).public()
+        if upgrade_to_continuous:
+            from qf.continuous_config import migrate_to_continuous
+            config = migrate_to_continuous(config, name=name)
+        elif upgrade_to_pivot:
+            config = migrate_to_pivot(config, name=name)
+        raw = config.public()
         raw['name'] = name
         return self._save(validate_research_config(raw),
                           parent=dict(experiment_id=experiment_id, revision=revision))

@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 from contextlib import nullcontext
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -131,6 +132,12 @@ def main():
         scenario = ["normal"]
 
         def execute(*args, **kwargs):
+            if scenario[0] == 'expiry':
+                kwargs['progress']('research_progress', details=dict(
+                    stage='history', percent=None, completed_bars=0, fill_count=0,
+                    elapsed_seconds=2.6, last_advance_age_seconds=2.6, current_ns=None))
+                return dict(status='frozen', reason='contract_range_exceeds_expiry',
+                            run_id='fixture-expiry-no-data')
             sdk = sdk_for_pivot(scenario[0])
             sdk.TqApi = UiApi
             return execute_research(*args, sdk=sdk, **kwargs)
@@ -142,6 +149,8 @@ def main():
                 dict(
                     symbol="SHFE.rb2505",
                     name="螺纹钢2025年5月",
+                    expire_datetime=datetime(2025, 5, 15, 15,
+                        tzinfo=timezone(timedelta(hours=8))).timestamp(),
                     price_tick=1,
                     volume_multiple=10,
                     margin_per_lot=3000,
@@ -152,7 +161,7 @@ def main():
 
         class FixtureBridge(WorkbenchBridge):
             def set_fixture_mode(self, value):
-                assert value in ("normal", "partial", "reject", "disconnect")
+                assert value in ("normal", "partial", "reject", "disconnect", "expiry")
                 scenario[0] = value
                 return {"ok": True}
 

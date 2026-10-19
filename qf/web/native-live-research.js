@@ -46,6 +46,7 @@
   async function poll(){if(busy||!alive||paused||document.hidden)return;busy=true;
     try{const response=await fetch('/snapshot?after_revision='+revision,{cache:'no-store'});if(!response.ok)throw Error();const packet=await response.json();
       if(packet.generation!==binding.generation||run&&packet.run_id!==run)return;
+      if(packet.terminal){alive=false;clearInterval(timer);banner.textContent=packet.reason==='contract_range_exceeds_expiry'?'本次回测已结束，结束日期超过所选合约到期日。请修改日期后重新查询合约；本次没有K线可显示。':'本次任务已结束，没有可显示的K线。请查看主页面的结束原因。';return;}
       if(packet.changed){run=packet.run_id;payload=packet.snapshot;revision=payload.revision;
         banner.textContent=`运行过程（${payload.terminal?(payload.progress.finished?'已保存完成':'未完成／已停止'):'计算中'}） · 只显示最近500根K线、窗口内最多5000条事件 · 图表时间 ${new Date(Number(BigInt(payload.as_of_ns)/1000000n)).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})} · 全部证据保存在本机结果中`;}
       draw();

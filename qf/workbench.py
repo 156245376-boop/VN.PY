@@ -1,10 +1,11 @@
 """可信桌面页面的最小业务桥接；不向网页暴露文件或命令执行接口。"""
 
+import math
 import re
 import subprocess
 import threading
 import webbrowser
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from qf.chart_workspace import PERIODS, ChartWorkspaceStore, period_for, validate_panes
@@ -88,7 +89,8 @@ class WorkbenchBridge:
         self._research = research_session or ResearchSession(root / 'results')
         self._research_credentials = None
         self._replay = ReplayView(root / 'results')
-        self._live_view = LiveResearchView(self._research.live_snapshot)
+        self._live_view = LiveResearchView(self._research.live_snapshot,
+                                           state_provider=self._research.snapshot)
         self._live_job = None
 
     def list_research_runs(self):
@@ -184,6 +186,19 @@ class WorkbenchBridge:
                         or config.symbol not in {r['symbol'] for r in snapshot['contracts']}):
                     return research_error('未开始运行：请先查询并选择当前区间的实际合约。',
                         field_errors={'symbol': '点击“查询区间实际合约”，再选择月份'})
+                row = next(r for r in snapshot['contracts'] if r['symbol'] == config.symbol)
+                expiry = row.get('expire_datetime')
+                if (mode == 'backtest' and type(expiry) in (int, float)
+                        and math.isfinite(expiry) and expiry > 0):
+                    expiry_day = datetime.fromtimestamp(expiry,
+                        timezone(timedelta(hours=8))).date()
+                    if config.end > expiry_day:
+                        message = (f'回测未开始：{config.symbol} 到期日为 {expiry_day}，'
+                                   f'结束日 {config.end} 已超出范围。'
+                                   '请缩短结束日，再重新查询并选择实际合约。')
+                        return research_error(message, code='contract_range_exceeds_expiry',
+                            field_errors={'end': f'请设置为 {expiry_day} 或更早的日期',
+                                          'symbol': '该月份合约不能覆盖当前结束日'})
                 return self._research.start(mode, config, self._research_login(), activate=activate,
                     resume=resume, fee_multiplier=fee_multiplier,
                     experiment_ref=dict(experiment_id=experiment_id, revision=revision))
@@ -208,6 +223,11 @@ class WorkbenchBridge:
         with self._lock:
             try:
                 state = self._research.snapshot()
+                if (not self._research.live_snapshot() and not state.get('running')
+                        and state.get('status') in ('failed', 'frozen', 'stopped',
+                                                   'backtest_finished')):
+                    return research_error('本次任务已结束，未产生可显示的K线。'
+                                          '请先处理上方失败原因，再运行回测。')
                 if not state.get('job_id') and not self._research.live_snapshot():
                     return research_error('请先运行一个回测或模拟实验，再观看交易过程。')
                 if state.get('job_id') != self._live_job:

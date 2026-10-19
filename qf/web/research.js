@@ -12,12 +12,26 @@
     new_run_requires_flat_account:'新模拟实验要求整个账户空仓',new_run_requires_no_orders:'新模拟实验要求账户没有未结委托',
     position_trade_mismatch:'实际持仓与本地成交记录不一致',unexpected_position:'发现超限、双向或其他合约持仓',execution_timeout:'执行等待超时，已冻结后续执行',
     contract_query_or_permission_failed:'合约查询未完成，请核对认证和权限',research_start_or_record_failed:'研究任务或本地记录未能启动',shutdown_unconfirmed:'退出清理超时，状态保留为待核实'};
+  function describeState(s){
+    const terminal=['failed','frozen','stopped','backtest_finished'].includes(s.status);
+    const researchState=terminal||['connecting','active','observing'].includes(s.status),p=researchState?s.progress:null;
+    const detail=reasons[s.reason]||'请核对上方运行状态';
+    let notice=terminal?`${labels[s.status]}：${detail}。`:'';
+    if(terminal&&s.reason==='contract_range_exceeds_expiry')notice=`回测未开始，任务已结束：合约 ${s.config?.symbol||'所选月份'} 无法覆盖结束日 ${s.config?.end||'所选日期'}。请缩短结束日，再重新查询并选择实际合约。`;
+    let progressText='';
+    if(p&&terminal)progressText=`${notice} 已处理 ${p.completed_bars||0} 根完成柱、${p.fill_count||0} 笔成交；用时 ${p.elapsed_seconds??'—'} 秒。`;
+    else if(p){const names={validating:'校验参数',connecting:'连接账户',history:'读取历史',warmup:'均线预热',backtesting:'运行回测',simulating:'模拟运行',saving:'保存结果'};
+      let date='尚未推进到有效历史时间';try{if(p.current_ns)date=new Date(Number(BigInt(p.current_ns)/1000000n)).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});}catch(_){}
+      progressText=`${names[p.stage]||'正在核实状态'} · ${p.percent==null?'等待数据':p.percent+'%（历史时间）'} · 计算到 ${date} · 已处理 ${p.completed_bars} 根完成柱，${p.fill_count} 笔成交 · 已用 ${p.elapsed_seconds} 秒 · ${p.last_advance_age_seconds} 秒未推进 · 剩余时间暂无法估算。`;}
+    return {terminal,notice,progressText,showProgress:!!p,progressValue:terminal?(p?.percent??0):p?.percent,
+      showChart:researchState&&(!terminal||!!(p?.completed_bars||p?.fill_count))};
+  }
   function create(root,api){
-    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false,acceptedRequest=null;
+    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false,acceptedRequest=null,lastTerminalKey='';
     const el=(tag,text,cls)=>{const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e;};
     const heading=el('h2','双均线交叉 · 策略实验'),intro=el('p','金叉做多、死叉做空；使用已完成K线，反向时先平仓。');
     const picker=el('select');picker.setAttribute('aria-label','已保存实验');
-    const formRoot=el('div'),actions=el('div',null,'research-actions'),notice=el('p'),state=el('p',null,'research-status'),risk=el('p');
+    const formRoot=el('div'),actions=el('div',null,'research-actions'),notice=el('p',null,'research-notice'),state=el('p',null,'research-status'),risk=el('p');
     const progressBar=el('progress'),progressText=el('p');progressBar.max=100;progressBar.hidden=true;progressText.className='research-progress';
     root.replaceChildren(heading,intro,picker,formRoot,actions,notice,state,progressBar,progressText,risk);
     const form=QfResearchForm.create(formRoot,{onChange(key){if(['continuous','start','end'].includes(key)){acceptedRequest=null;contractKey='';}}});
@@ -40,11 +54,17 @@
       if(!checked(response))return;ref=response.experiment;form.render(response.config);copy.textContent='复制实验';await refresh();notice.textContent=old?'已复制为新版拐点实验；保留旧上限，请核对新止损规则。':'已复制，可修改均线或风险参数后另行回测。';});
     const costLabel=el('label','附加独立双倍费用回放 '),cost=el('input');cost.type='checkbox';costLabel.prepend(cost);actions.append(costLabel);
     const watchLabel=el('label','观看交易过程（只读） '),watch=el('input');watch.type='checkbox';watch.dataset.watchResearch='true';watchLabel.prepend(watch);actions.append(watchLabel);
-    const liveFrame=el('iframe');liveFrame.className='research-live-frame';liveFrame.title='本次实验交易过程';liveFrame.hidden=true;root.append(liveFrame);
+    const liveFrame=el('iframe'),liveNote=el('p');liveNote.className='research-chart-state';liveNote.hidden=true;liveFrame.className='research-live-frame';liveFrame.title='本次实验交易过程';liveFrame.hidden=true;root.append(liveNote,liveFrame);
     let liveBinding=null,liveJob=null,openingLive=false,latestState={};
     try{watch.checked=localStorage.getItem('qf-watch-research')==='true';}catch(_){}
     function pauseLive(){if(liveBinding?.run_id)liveFrame.contentWindow.postMessage({kind:'qf-live-pause',run_id:liveBinding.run_id,generation:liveBinding.generation,paused:!watch.checked},new URL(liveBinding.url).origin);}
-    async function syncLive(s){latestState=s;liveFrame.hidden=!watch.checked;if(!watch.checked||!s.job_id||openingLive)return;
+    async function syncLive(s){latestState=s;const description=describeState(s);liveNote.hidden=!watch.checked;
+      if(liveJob&&liveJob!==s.job_id){liveFrame.removeAttribute('src');liveBinding=null;liveJob=null;}
+      liveFrame.hidden=!watch.checked||!s.job_id||!description.showChart;
+      if(!description.showChart){liveNote.textContent=description.terminal?description.notice+' 本次没有可显示的K线。':'尚未启动新的回测；请先查询并选择实际合约。';
+        if(liveFrame.hasAttribute('src'))liveFrame.removeAttribute('src');liveBinding=null;liveJob=null;return;}
+      liveNote.textContent=s.job_id?'运行图只显示本次已处理的数据。':'尚未启动回测；运行后可在这里观看交易过程。';
+      if(!watch.checked||!s.job_id||openingLive)return;
       if(liveBinding&&liveJob===s.job_id){pauseLive();return;}openingLive=true;
       try{const response=await api.open_research_live_chart();if(!response.ok){notice.textContent=response.reason;return;}
         liveBinding=response;liveJob=s.job_id;liveFrame.src=response.url;
@@ -56,12 +76,12 @@
     addEventListener('message',liveMessage);
     const activateLabel=el('label','允许本实验产生快期模拟委托 '),activate=el('input');activate.type='checkbox';activateLabel.prepend(activate);actions.append(activateLabel);
     const run=button('运行回测',async()=>{if(!await save())return;stress=cost.checked?{...ref}:null;
-      const response=await api.start_research(ref.experiment_id,ref.revision,'backtest');if(!checked(response)){stress=null;return;}notice.textContent='回测已开始，分钟近似与Tick精度以运行记录为准。';});
+      const response=await api.start_research(ref.experiment_id,ref.revision,'backtest');if(!checked(response)){stress=null;return;}lastTerminalKey='';notice.textContent='回测任务已提交，正在核实运行状态。';});
     const paper=button('连接模拟并观察',async()=>{if(activate.checked&&!confirm('允许此策略控制快期主模拟账户并产生模拟委托？请确认账户空仓且无挂单。'))return;
-      if(!await save())return;const response=await api.start_research(ref.experiment_id,ref.revision,'paper',activate.checked);checked(response);notice.textContent=response.reason;});
+      if(!await save())return;const response=await api.start_research(ref.experiment_id,ref.revision,'paper',activate.checked);checked(response);lastTerminalKey='';notice.textContent=response.reason;});
     activate.onchange=()=>paper.textContent=activate.checked?'启动模拟策略':'连接模拟并观察';
-    button('停止任务',async()=>{stress=null;notice.textContent=(await api.stop_research(false)).reason;});
-    button('平仓并停止',async()=>{stress=null;if(confirm('退出本实验拥有的快期模拟持仓并停止？需要等待真实成交确认。'))notice.textContent=(await api.stop_research(true)).reason;});
+    const stopButton=button('停止任务',async()=>{stress=null;notice.textContent=(await api.stop_research(false)).reason;});
+    const flattenButton=button('平仓并停止',async()=>{stress=null;if(confirm('退出本实验拥有的快期模拟持仓并停止？需要等待真实成交确认。'))notice.textContent=(await api.stop_research(true)).reason;});
     const resultsRoot=el('div');resultsRoot.id='research-results';root.append(resultsRoot);
     let results=null;
     if(globalThis.QfResearchResults)results=QfResearchResults.create(resultsRoot,api);
@@ -70,21 +90,25 @@
       else {ref=null;form.render(QfResearchForm.defaults());}
       copy.textContent=form.isLegacy?'复制为新版拐点实验':'复制实验';poll();};
     async function poll(){if(disposed||polling)return;polling=true;try{const s=await api.get_research_state();if(disposed)return;
-      const busy=s.running;form.setRunning(busy&&s.status!=='discovering');for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
+      const busy=s.running,description=describeState(s);form.setRunning(busy&&s.status!=='discovering');for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
+      stopButton.disabled=!busy;flattenButton.disabled=!busy||s.mode!=='paper'||!s.activate;
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
       const valid=matches&&(s.contracts||[]).some(c=>c.symbol===form.read().symbol)&&!form.isLegacy;
       run.disabled=paper.disabled=busy||!valid;saveButton.disabled=busy||form.isLegacy;
       if(!busy&&!valid&&!form.isLegacy&&!notice.textContent)notice.textContent='请先查询当前品种和日期的实际合约，再选择月份。';
       state.textContent=(labels[s.status]||'状态待核实')+(s.reason?' · '+(reasons[s.reason]||'运行状态需要核实'):'');state.dataset.light=['failed','frozen'].includes(s.status)?'red':busy?'green':'yellow';
       const r=s.risk||{};risk.textContent=`本实验已核实持仓：${r.side===-1?'空':r.side===1?'多':'无方向'} ${r.quantity||0} 手；初始R：${r.initial_r??'—'} 元；保护价：${r.stop_price??'—'}；阶梯：${r.stage??'—'}；权益：${s.equity??'—'} 元；费用：${s.commission??'—'} 元。`;
-      await syncLive(s);
       form.setRunState(s);
-      const p=s.progress,stageNames={validating:'校验参数',connecting:'连接账户',history:'读取历史',warmup:'均线预热',backtesting:'运行回测',simulating:'模拟运行',saving:'保存结果',completed:'回测完成',failed:'失败',frozen:'已冻结',stopped:'已停止'};
-      progressBar.hidden=!p;if(p){if(p.percent==null)progressBar.removeAttribute('value');else progressBar.value=p.percent;
-        let date='尚未推进到有效历史时间';try{if(p.current_ns)date=new Date(Number(BigInt(p.current_ns)/1000000n)).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});}catch(_){}
-        progressText.textContent=`${stageNames[p.stage]||'状态待核实'} · ${p.percent==null?'等待数据':p.percent+'%（历史时间）'} · 计算到 ${date} · 已处理 ${p.completed_bars} 根完成柱，${p.fill_count} 笔成交 · 已用 ${p.elapsed_seconds} 秒 · ${p.last_advance_age_seconds} 秒未推进 · 剩余时间暂无法估算。`;}
+      const p=s.progress;progressBar.hidden=!description.showProgress;progressBar.dataset.terminal=String(description.terminal);
+      if(p){if(description.progressValue==null)progressBar.removeAttribute('value');else progressBar.value=description.progressValue;}
+      progressText.textContent=description.progressText;
+      const terminalKey=JSON.stringify([s.job_id,s.run_id,s.status,s.reason]);
+      if(description.terminal&&terminalKey!==lastTerminalKey){lastTerminalKey=terminalKey;notice.textContent=description.notice;
+        if(s.status!=='backtest_finished')stress=null;}
+      await syncLive(s);
       const key=JSON.stringify([s.request_id,s.contract_request,s.contracts]);if(key!==contractKey&&s.status==='contracts_ready'&&matches&&(!acceptedRequest||acceptedRequest.request_id===s.request_id)){
-        contractKey=key;form.setContracts(s.contracts,form.read().symbol);notice.textContent=s.contracts.length?'已返回实际合约，请核对月份与历史覆盖。':'区间内未返回实际合约，请核对权限与日期。';}
+        contractKey=key;const selection=form.setContracts(s.contracts,form.read().symbol);
+        notice.textContent=!s.contracts.length?'区间内未返回实际合约，请核对权限与日期。':!selection.eligibleCount?'返回的月份合约均不能覆盖所选结束日，请缩短结束日后重新查询；软件不会自动修改日期。':!form.read().symbol?'请选择能覆盖结束日的实际月份；列表已标明到期日。':'已返回实际合约，请核对月份、到期日与历史覆盖。';}
       if(s.result?.run_id&&s.result.run_id!==lastResult){lastResult=s.result.run_id;await results?.refresh();
         if(s.result.summary)results?.render(s.result.summary);
         if(stress&&s.status==='backtest_finished'){const next=stress;stress=null;const answer=await api.start_research(next.experiment_id,next.revision,'backtest',false,null,2);
@@ -95,5 +119,5 @@
       intro.textContent=view==='paper'?'快期TqKq主模拟账户：默认仅观察。资金由服务端返回，与行情图的本地模拟账户不同。':'选择双均线、实际合约、周期、日期与仓位规则；回测结果不证明策略有效。';},
       updateCatalog:rows=>form.setCatalog(rows),prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();}};
   }
-  globalThis.QfResearch={create};
+  globalThis.QfResearch={create,describeState};
 })();

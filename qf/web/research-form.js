@@ -8,6 +8,12 @@
       stop_method:'confirmed_pivot',pivot_left:2,pivot_right:2,limit_lots:false,limit_margin:false,
       max_lots:null,max_margin_ratio:null,take_profit_mode:'r_multiple',take_profit_value:'3',
       stairs_enabled:true,first_trigger_r:'1',first_offset_ticks:1,second_trigger_r:'2',second_lock_r:'0.5'}});
+  function contractFit(row,end){
+    const stamp=row.expire_datetime;
+    if(typeof stamp!=='number'||!Number.isFinite(stamp)||stamp<=0)return {expiry:null,eligible:true};
+    const expiry=new Date(stamp*1000+8*3600000).toISOString().slice(0,10);
+    return {expiry,eligible:!end||end<=expiry};
+  }
   function preview(r,s,available){
     if(!s)return null;
     const tick=Number(s.price_tick),multiple=Number(s.volume_multiple),margin=Number(s.margin_per_lot),
@@ -78,8 +84,11 @@
       for(const row of catalog)select.add(new Option(row.name+' · '+row.exchange,row.continuous));
       select.value=current;if(!select.value&&catalog.length)select.value=catalog[0].continuous;}
     function setContracts(rows,selected){contracts=rows||[];const select=inputs.get('symbol'),old=selected||select.value||'SHFE.rb2505';select.replaceChildren(new Option('请选择已查询的实际合约',''));
-      for(const row of contracts)select.add(new Option((row.name||'实际合约')+' · '+row.symbol,row.symbol));
-      select.value=contracts.some(c=>c.symbol===old)?old:(contracts[0]?.symbol||'');update();}
+      const end=inputs.get('end').value;let eligibleCount=0;
+      for(const row of contracts){const fit=contractFit(row,end),option=new Option((row.name||'实际合约')+' · '+row.symbol+' · '+(fit.expiry?'到期 '+fit.expiry:'到期日待核实')+(fit.eligible?'':'（不能覆盖结束日）'),row.symbol);
+        option.disabled=!fit.eligible;if(fit.eligible)eligibleCount++;select.add(option);}
+      select.value=contracts.some(c=>c.symbol===old&&contractFit(c,end).eligible)?old:'';update();
+      return {eligibleCount};}
     function render(config){legacy=config.strategy_version===1?structuredClone(config):null;
       for(const [key,input]of inputs){const value=key.startsWith('risk.')?config.risk[key.slice(5)]:config[key];
       input.value=key==='risk.max_margin_ratio'&&value!=null&&value!==''?String(Number(value)*100):String(value??'');}
@@ -94,5 +103,5 @@
     return {read,render,setCatalog,setContracts,readContractRequest,showErrors,setRunState,setRunning,
       get isLegacy(){return !!legacy;},dispose(){root.replaceChildren();}};
   }
-  globalThis.QfResearchForm={defaults,preview,create};
+  globalThis.QfResearchForm={defaults,preview,create,contractFit};
 })();

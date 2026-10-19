@@ -13,8 +13,9 @@ from qf.runtime import chart_address
 
 
 class LiveResearchView:
-    def __init__(self, snapshot_provider):
+    def __init__(self, snapshot_provider, *, state_provider=None):
         self.provider = snapshot_provider
+        self.state_provider = state_provider
         self.generation = 0
         self.run_id = None
         self.thread = None
@@ -69,6 +70,12 @@ class LiveResearchView:
                 raise web.HTTPBadRequest(text='快照序号无效') from None
             value = self.provider()
             if value is None:
+                state = self.state_provider() if self.state_provider else {}
+                if (not state.get('running') and state.get('status') in
+                        ('failed', 'frozen', 'stopped', 'backtest_finished')):
+                    return web.json_response(dict(changed=False, waiting=False, terminal=True,
+                        generation=self.generation, run_id=self.run_id or state.get('run_id'),
+                        revision=0, status=state['status'], reason=state.get('reason')))
                 return web.json_response(dict(changed=False, waiting=True,
                     generation=self.generation, run_id=self.run_id, revision=0))
             if self.run_id is None:

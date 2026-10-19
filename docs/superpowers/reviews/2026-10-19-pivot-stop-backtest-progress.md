@@ -47,3 +47,7 @@
 3项Important均已修复并由独立复现测试证明RED→GREEN；之后完整tools/check.ps1通过371项。
 git diff --check通过。未遗留需要修复的审查问题，未合并主分支或创建PR。
 最终功能提交d212ae3；后续仅补录本验收记录，不改变运行代码。真实账户仍按上述本机步骤另验。
+
+## 临时材料清理
+
+自动安全审批拒绝删除本轮 `.superpowers/sdd/2026-10-19-pivot-stop-backtest-progress/`，仅返回 `blocked by policy`。整条清理命令未执行，材料保留；未重试、未换命令绕过。随后单独推送原分支成功。日常开发无需加载这些临时材料。

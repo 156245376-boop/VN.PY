@@ -14,6 +14,7 @@ assert.equal(live.apply({...snapshot,revision:2,fills:[{time_ns:'151'}]}),false)
 assert.equal(live.apply({...snapshot,revision:2,ma_series:[{points:[{time_ns:'151'}]}]}),false);
 assert.equal(live.apply({...snapshot,revision:2,bars:[{...row,close:11}]}),true);
 assert.equal(installs,2);assert.equal(applies[1].revision,7);assert.equal(applies[1].bars[0].close,11);
+assert.equal(live.apply({...snapshot,revision:3,bars:[{...row,completed:true,completed_at_ns:'150',signal_consumed:false}]}),true);
 const base={source:1,origin:'http://127.0.0.1',data:{run_id:'r',generation:7}};
 assert.equal(tool.acceptMessage(base,1,base.origin,'r',7),true);
 assert.equal(tool.acceptMessage({...base,source:2},1,base.origin,'r',7),false);

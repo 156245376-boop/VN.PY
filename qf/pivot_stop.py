@@ -1,12 +1,21 @@
 """已确认拐点与冻结入场计划；只使用截至指定时刻已完成的柱。"""
 
+import math
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from qf.research_config import PivotRiskConfig, decimal_value
 from qf.trade_risk import ContractSpec
 
 ZERO = Decimal(0)
+
+
+def normalize_sdk_price(value, tick):
+    """只吸收几个浮点ULP的尾差；真正不在刻度上的价格仍保留以便拒绝。"""
+    price = decimal_value(value)
+    nearest = (price/tick).to_integral_value(rounding=ROUND_HALF_UP)*tick
+    tolerance = min(tick*Decimal('1e-8'), Decimal(str(math.ulp(float(price))))*4)
+    return nearest if abs(price-nearest) <= tolerance else price
 
 
 @dataclass(frozen=True)
@@ -65,11 +74,11 @@ def latest_confirmed_pivot(rows, *, side, left, right, as_of_ns, previous=None):
 
 def plan_pivot_entry(risk: PivotRiskConfig, spec: ContractSpec, *, side,
                      reference_price, pivot, available, startup_equity):
-    reference = decimal_value(reference_price)
+    reference = normalize_sdk_price(reference_price, spec.price_tick)
     available, startup = decimal_value(available), decimal_value(startup_equity)
     if type(side) is not int or side not in (-1, 1) or reference <= 0 or startup <= 0:
         raise ValueError('入场参考或账户权益无效')
-    stop = decimal_value(pivot.price) if pivot else None
+    stop = normalize_sdk_price(pivot.price, spec.price_tick) if pivot else None
     distance = abs(reference-stop) if stop is not None else None
     per_lot = distance * spec.volume_multiple if distance is not None else None
 

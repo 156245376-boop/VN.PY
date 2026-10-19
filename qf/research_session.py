@@ -36,6 +36,7 @@ class ResearchSession:
         self._timeout = 30
         self._live = None
         self._request_id = 0
+        self._progress_at = None
 
     def live_snapshot(self):
         with self._lock:
@@ -52,7 +53,12 @@ class ResearchSession:
 
     def snapshot(self):
         with self._lock:
-            return wire(copy.deepcopy(self._state | {'running': self.running}))
+            value = copy.deepcopy(self._state | {'running': self.running})
+            if self.running and self._progress_at is not None and value.get('progress'):
+                delta = max(0, time.monotonic()-self._progress_at)
+                for key in ('elapsed_seconds', 'last_advance_age_seconds'):
+                    value['progress'][key] = round(value['progress'].get(key, 0)+delta, 1)
+            return wire(value)
 
     def _progress(self, stage, **fields):
         with self._lock:
@@ -60,6 +66,7 @@ class ResearchSession:
                 self._state['status'] = 'connecting'
             if stage == 'research_progress':
                 self._state['progress'] = wire(copy.deepcopy(fields['details']))
+                self._progress_at = time.monotonic()
             if stage == 'research_state':
                 for key in ('phase', 'equity', 'commission', 'symbol', 'precision', 'run_id'):
                     if key in fields:
@@ -85,6 +92,7 @@ class ResearchSession:
             self._stop.clear()
             self._flatten.clear()
             self._live = None
+            self._progress_at = None
             self._state.update(status='connecting', phase='flat', risk={}, mode=mode,
                 activate=activate or mode == 'backtest', config=config.public(),
                 experiment_ref=copy.deepcopy(experiment_ref), result=None, run_id=None,

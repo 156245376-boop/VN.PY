@@ -5,7 +5,7 @@
   function attach(chart,options){let revision=0,alive=true;const layer=options.layer||QfNativeReplay.attach(chart,options);
     return {apply(snapshot){if(!alive||snapshot.run_id!==options.run_id||!Number.isSafeInteger(snapshot.revision)||snapshot.revision<=revision)return false;
       const now=BigInt(snapshot.as_of_ns);
-      if((snapshot.bars||[]).some(b=>BigInt(b.time_ns)>now||b.completed&&BigInt(b.end_ns)>now)||
+      if((snapshot.bars||[]).some(b=>BigInt(b.time_ns)>now||b.completed&&BigInt(b.completed_at_ns||b.end_ns)>now)||
         (snapshot.fills||[]).some(f=>BigInt(f.time_ns)>now)||(snapshot.risk_events||[]).some(e=>BigInt(e.time_ns)>now)||
         (snapshot.ma_series||[]).some(s=>s.points.some(p=>BigInt(p.time_ns)>now)))return false;
       options.install?.(snapshot);const accepted=layer.apply({...snapshot,revision:options.generation});

@@ -2,7 +2,7 @@
   'use strict';
   const labels={created:'尚未运行',connecting:'正在连接',active:'正在运行',observing:'仅观察，不委托',
     stopped:'已停止',failed:'失败',frozen:'已冻结，需核实',backtest_finished:'回测完成',discovering:'正在查询合约',contracts_ready:'合约查询完成'};
-  const reasons={contract_range_exceeds_expiry:'结束日期超过该月份合约的到期日，请缩小日期或重新查询合约',historical_coverage_incomplete:'所选日期存在未返回的交易日，不能作为完整回测；请缩小日期或核对合约覆盖',trading_calendar_unavailable:'交易日历未能核实，已停止；请检查网络与日期范围',no_trading_days:'该区间没有交易日，请调整日期',historical_time_stalled:'历史时间长时间没有推进，已停止；请核对数据权限和网络',result_save_failed:'结果保存失败，请检查本机目录与磁盘',result_integrity_failed:'结果完整性核对未通过，不能标为完成',requested_stop:'任务已停止；不代表持仓已经平仓',flatten_confirmed:'已确认空仓且无未结委托',
+  const reasons={terminal_bar_evidence_invalid:'末根K线完成证据核对失败，未标为完整回测',contract_range_exceeds_expiry:'结束日期超过该月份合约的到期日，请缩小日期或重新查询合约',historical_coverage_incomplete:'所选日期存在未返回的交易日，不能作为完整回测；请缩小日期或核对合约覆盖',trading_calendar_unavailable:'交易日历未能核实，已停止；请检查网络与日期范围',no_trading_days:'该区间没有交易日，请调整日期',historical_time_stalled:'历史时间长时间没有推进，已停止；请核对数据权限和网络',result_save_failed:'结果保存失败，请检查本机目录与磁盘',result_integrity_failed:'结果完整性核对未通过，不能标为完成',requested_stop:'任务已停止；不代表持仓已经平仓',flatten_confirmed:'已确认空仓且无未结委托',
     historical_replay_completed:'历史回放完成，期末持仓按市值计入',sdk_or_auth_or_permission_error:'认证、权限或SDK请求未完成，请核对凭证与数据权限',
     sdk_cost_missing:'SDK未返回有效费用、保证金或合约规格，已停止执行',underlying_changed:'所选合约不是已核实的当前主力，请重新查询并选择月份',
     connection_lost:'连接中断，本地保护无法保证继续执行',order_rejected:'委托被拒绝，已冻结后续执行',external_order:'发现本实验之外的委托，请先核实账户',

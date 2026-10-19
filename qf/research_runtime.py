@@ -11,7 +11,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 import pandas as pd
-from tqsdk.datetime import _get_trading_day_from_timestamp
+from tqsdk.datetime import _get_trading_day_from_timestamp, _get_trading_day_start_time
 
 from qf.history import summarize_history
 from qf.journal import PaperLock
@@ -58,6 +58,33 @@ def _rows(serial, seconds):
         raise Frozen('historical_data_invalid')
     return [dict(r, datetime=int(r['datetime'])) for r in serial.to_dict('records')
             if r['datetime'] > 0]
+
+
+def capture_terminal_close(journal, config, backtest, serial):
+    """锁定SDK的最终CLOSE发送证据；不在回放结束后补发策略信号。"""
+    key = (config.symbol, config.bar_seconds*1_000_000_000)
+    final = getattr(backtest, '_serials', {}).get(key)
+    if (not isinstance(final, dict) or final.get('when') != 'CLOSE'
+            or key in getattr(backtest, '_generators', {key: None})):
+        return None
+    rows = _rows(serial, config.bar_seconds)
+    if not rows:
+        return None
+    row, item, close_ns = rows[-1], final.get('kline_or_tick'), final.get('timestamp')
+    stamp, duration = row['datetime'], key[1]
+    expected_close = (stamp+duration if config.bar_seconds < 86400 else
+                      _get_trading_day_start_time(stamp+duration))-1000
+    if (not isinstance(item, dict) or type(close_ns) is not int
+            or close_ns != expected_close or not backtest._start_dt <= stamp <= backtest._end_dt
+            or close_ns > backtest._end_dt or item.get('datetime') != stamp
+            or any(item.get(k) != row[k] for k in
+                   ('open', 'high', 'low', 'close', 'volume', 'close_oi'))):
+        return None
+    journal.capture_bars(config.symbol, config.bar_seconds, [row], sdk_closed_ns=close_ns)
+    evidence = dict(time_ns=str(stamp), completed_at_ns=str(close_ns), signal_consumed=False,
+                    source='SDK_3.10.2_terminal_CLOSE')
+    journal.set('terminal_close_bar', evidence)
+    return close_ns
 
 
 def contract_spec(api, account, symbol, quote, *, paper, multiplier):
@@ -498,6 +525,13 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
         status, reason = ('backtest_finished', 'historical_replay_completed') if not paper else (
             'failed', 'unexpected_replay_end')
         stats = getattr(account, 'tqsdk_stat', {})
+        if not paper and loop is not None and config.strategy_version == 2:
+            try:
+                closed = capture_terminal_close(j, config, backtest, serial)
+                if closed is not None:
+                    loop.as_of_ns = max(loop.as_of_ns, closed)
+            except (Frozen, ValueError, TypeError, KeyError):
+                status, reason = 'failed', 'terminal_bar_evidence_invalid'
         has_data = loop is not None and j.db.execute(
             'SELECT count(*) FROM research_bars').fetchone()[0] > 0
         if not has_data:

@@ -122,7 +122,7 @@ class ResearchJournal(Journal):
                                 ('last_target', json.dumps(target)))
         return True
 
-    def capture_bars(self, symbol, bar_seconds, rows, *, completed=True):
+    def capture_bars(self, symbol, bar_seconds, rows, *, completed=True, sdk_closed_ns=None):
         values = []
         for row in rows:
             stamp = int(row['datetime'])
@@ -131,6 +131,11 @@ class ResearchJournal(Journal):
             data.update(time_ns=str(stamp), completed=completed)
             end = bar_end_ns(stamp, bar_seconds)
             data['end_ns'] = str(end)
+            if sdk_closed_ns is not None:
+                if type(sdk_closed_ns) is not int or not stamp < sdk_closed_ns <= end:
+                    raise ValueError('SDK末柱完成时间无效')
+                data.update(completed_at_ns=str(sdk_closed_ns), signal_consumed=False,
+                            completion_source='SDK_3.10.2_terminal_CLOSE')
             if stamp <= 0 or min(data[k] for k in ('open', 'high', 'low', 'close')) <= 0:
                 raise ValueError('K线无效')
             values.append((symbol, bar_seconds, stamp, dumps(data)))

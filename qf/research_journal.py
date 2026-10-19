@@ -49,7 +49,12 @@ def bar_end_ns(stamp, seconds):
 
 def integrity_manifest(db):
     result = {}
-    for table in ('state', 'research_bars', 'risk_events', 'fills', 'equity', 'orders'):
+    tables = ('state', 'research_bars', 'risk_events', 'fills', 'equity', 'orders')
+    schema = db.execute("SELECT value FROM state WHERE key='research_schema'").fetchone()
+    if schema and json.loads(schema[0]) == 2:
+        tables += ('signal_bars', 'main_changes', 'roll_events', 'contract_specs',
+                   'logical_fills', 'signals', 'events')
+    for table in tables:
         digest, count = hashlib.sha256(), 0
         query = ("SELECT * FROM state WHERE key!='research_integrity' ORDER BY key"
                  if table == 'state' else f'SELECT * FROM {table} ORDER BY rowid')

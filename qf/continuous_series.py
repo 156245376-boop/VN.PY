@@ -82,18 +82,18 @@ class SignalSeries:
         if (row.get('completed', True) is not True or type(completed_at_ns) is not int
                 or completed_at_ns < end):
             raise ValueError('信号柱尚未完成')
-        if stamp in self._seen:
-            if raw != self._seen[stamp]:
-                raise ValueError('已经处理的完成柱内容发生变化')
-            return None
-        if stamp <= self._last:
-            return None
         if stamp < self.switch_ns:
             if end > self.switch_ns:
                 evidence = dict(reason='roll_boundary_incomplete', source_symbol=symbol,
                                 datetime=stamp, end_ns=end, detected_ns=self.switch_ns)
                 if evidence not in self._discards:
                     self._discards.append(evidence)
+            return None
+        if stamp in self._seen:
+            if raw != self._seen[stamp]:
+                raise ValueError('已经处理的完成柱内容发生变化')
+            return None
+        if stamp <= self._last:
             return None
         adjusted = {key: raw[key]-self.offset for key in PRICE_FIELDS}
         adjusted.update(datetime=stamp, end_ns=end, completed=True,

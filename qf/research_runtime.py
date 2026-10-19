@@ -19,6 +19,7 @@ from qf.ma_cross import completed_cross
 from qf.pivot_stop import latest_confirmed_pivot, plan_pivot_entry
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
+from qf.research_contract import contract_spec as contract_spec
 from qf.research_coverage import assess_coverage
 from qf.research_journal import ResearchJournal, bar_end_ns, research_trade_key
 from qf.research_progress import BacktestProgress
@@ -35,7 +36,6 @@ from qf.runtime import (
 )
 from qf.safety import ExecutionScope, Frozen, Guard, settle_stop
 from qf.trade_risk import (
-    ContractSpec,
     apply_entry_fill,
     close_trade_fills,
     empty_risk,
@@ -85,22 +85,6 @@ def capture_terminal_close(journal, config, backtest, serial):
                     source='SDK_3.10.2_terminal_CLOSE')
     journal.set('terminal_close_bar', evidence)
     return close_ns
-
-
-def contract_spec(api, account, symbol, quote, *, paper, multiplier):
-    # 快期账户没有TqSim的get_margin/get_commission；仅使用SDK返回的模型字段。
-    margin = getattr(quote, 'margin', float('nan')) if paper else account.get_margin(symbol)
-    fee = getattr(quote, 'commission', float('nan')) if paper else account.get_commission(symbol)
-    try:
-        spec = ContractSpec(symbol, dec(quote.price_tick), dec(quote.volume_multiple),
-                            int(quote.open_min_limit_order_volume), 1,
-                            dec(margin), dec(fee)*multiplier, 'SDK_quote_model' if paper
-                            else 'SDK_TqSim_per_lot_model')
-    except (ValueError, TypeError, AttributeError, OverflowError):
-        raise Frozen('sdk_cost_missing') from None
-    if not paper:
-        account.set_commission(symbol, float(spec.commission_per_lot))
-    return spec
 
 
 def discover_contracts(sdk, credentials, *, continuous, start, end, timeout):
@@ -375,6 +359,8 @@ def execute_research(mode, config, root, credentials, *, sdk=None, activate=Fals
                      flatten_requested=lambda: False, progress=None, experiment_ref=None,
                      view_progress=None):
     config = validate_research_config(config.public())
+    if config.schema_version == 3 and mode != 'backtest':
+        raise ValueError('主力连续版本只用于历史回测，模拟请使用固定合约实验')
     if (mode not in ('backtest', 'paper') or type(activate) is not bool
             or (mode != 'paper' and (activate or resume))
             or type(fee_multiplier) is not int or fee_multiplier not in (1, 2)
@@ -384,6 +370,11 @@ def execute_research(mode, config, root, credentials, *, sdk=None, activate=Fals
         import tqsdk as sdk
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
+    if config.schema_version == 3:
+        from qf.continuous_runtime import execute_continuous
+        return execute_continuous(config, root, credentials, sdk=sdk,
+            fee_multiplier=fee_multiplier, stop_requested=stop_requested, progress=progress,
+            view_progress=view_progress, experiment_ref=experiment_ref)
     with PaperLock(root) if mode == 'paper' else nullcontext():
         return _run(sdk, mode, config, root, credentials, activate, resume, fee_multiplier,
                     stop_requested, flatten_requested, progress, experiment_ref, view_progress)

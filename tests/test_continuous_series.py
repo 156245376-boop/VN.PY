@@ -24,6 +24,16 @@ def series():
     return value
 
 
+def test_new_contract_reference_history_does_not_rewrite_old_signal():
+    value = series()
+    value.append(symbol=OLD, row=row(0, 100), completed_at_ns=BASE+MINUTE)
+    value.switch(old_symbol=OLD, new_symbol=NEW, detected_ns=BASE+2*MINUTE,
+                 old_rows=[row(0, 100)], new_rows=[row(0, 200)])
+    assert value.append(symbol=NEW, row=row(0, 200),
+                        completed_at_ns=BASE+2*MINUTE) is None
+    assert value.window()[0]['close'] == 100
+
+
 def test_gap_only_roll_has_no_cross_and_does_not_rewrite_past():
     value = series()
     for i in range(200):

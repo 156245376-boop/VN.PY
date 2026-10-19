@@ -7,6 +7,8 @@ import time
 import uuid
 from pathlib import Path
 
+from qf.continuous_risk import LogicalRisk
+from qf.continuous_roll import RollState
 from qf.research_config import public_values, validate_research_config
 from qf.research_runtime import discover_contracts, execute_research
 from qf.trade_risk import RiskState
@@ -74,6 +76,13 @@ class ResearchSession:
                 if isinstance(fields.get('risk'), dict):
                     self._state['risk'] = {k: v for k, v in fields['risk'].items()
                                            if k in RiskState.__annotations__}
+                for key, allowed in (
+                    ('logical_risk', LogicalRisk.__annotations__),
+                    ('roll', RollState.__annotations__),
+                    ('failure_context', {'date', 'symbol', 'data_type'})):
+                    if isinstance(fields.get(key), dict):
+                        self._state[key] = {k: v for k, v in fields[key].items() if k in allowed
+                                            and isinstance(v, (str, int, float, bool, type(None)))}
                 self._state['status'] = 'active' if self._state.get('activate') else 'observing'
 
     def start(self, mode, config, credentials, *, activate=False, resume=None, experiment_ref,
@@ -88,6 +97,8 @@ class ResearchSession:
             if mode != 'paper' and (activate or resume):
                 raise ValueError('仅快期模拟允许启用或恢复')
             config = validate_research_config(config.public())
+            if config.schema_version == 3 and mode != 'backtest':
+                raise ValueError('主力连续版本只用于历史回测')
             self._timeout = config.execution_timeout_seconds
             self._stop.clear()
             self._flatten.clear()
@@ -113,13 +124,17 @@ class ResearchSession:
                 experiment_ref=experiment_ref, stop_requested=self._stop.is_set,
                 flatten_requested=self._flatten.is_set, progress=self._progress,
                 view_progress=self._view_progress)
-            fields = ('status', 'reason', 'run_id', 'summary')
+            fields = ('status', 'reason', 'run_id', 'summary', 'failure_context')
             safe = {k: v for k, v in result.items() if k in fields}
+            if isinstance(safe.get('failure_context'), dict):
+                safe['failure_context'] = {k: v for k, v in safe['failure_context'].items()
+                    if k in {'date', 'symbol', 'data_type'} and isinstance(v, str)}
             if safe.get('status') not in STATES:
                 safe['status'] = 'failed'
             with self._lock:
                 self._state.update(status=safe['status'], result=safe,
                                    reason=safe.get('reason'), run_id=safe.get('run_id'))
+                self._state['failure_context'] = safe.get('failure_context')
                 if isinstance(safe.get('summary', {}).get('risk'), dict):
                     self._state['risk'] = safe['summary']['risk']
         except Exception:

@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 
 from qf.journal import PaperLock
-from qf.research_config import ResearchConfig, validate_research_config
+from qf.research_config import ResearchConfig, migrate_to_pivot, validate_research_config
 
 
 def _toml(data, section=''):
@@ -109,8 +109,11 @@ class ExperimentStore:
                     temporary.unlink()
             return {k: raw[k] for k in ('experiment_id', 'revision', 'parent')}
 
-    def copy(self, experiment_id, revision, *, name):
-        raw = self.load(experiment_id, revision).public()
+    def copy(self, experiment_id, revision, *, name, upgrade_to_pivot=False):
+        if type(upgrade_to_pivot) is not bool:
+            raise ValueError('升级选项无效')
+        config = self.load(experiment_id, revision)
+        raw = (migrate_to_pivot(config, name=name) if upgrade_to_pivot else config).public()
         raw['name'] = name
         return self._save(validate_research_config(raw),
                           parent=dict(experiment_id=experiment_id, revision=revision))

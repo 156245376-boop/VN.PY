@@ -12,3 +12,13 @@ def config_data():
                           take_profit_mode="r_multiple", take_profit_value="3",
                           stairs_enabled=True, first_trigger_r="1", first_offset_ticks=1,
                           second_trigger_r="2", second_lock_r="0.5"))
+
+
+def pivot_config_data():
+    data = config_data()
+    data.update(schema_version=2, strategy_version=2)
+    data['risk'].pop('stop_ticks')
+    data['risk'].update(stop_method='confirmed_pivot', pivot_left=2, pivot_right=2,
+                        limit_lots=False, limit_margin=False,
+                        max_lots=None, max_margin_ratio=None)
+    return data

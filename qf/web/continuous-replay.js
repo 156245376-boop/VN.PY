@@ -46,7 +46,8 @@
     if(current?.symbol===symbol&&current.duration===duration){
       if(chart!==current||reset){layer?.dispose();chart=current;layer=QfNativeReplay.attach(chart,{onFill(f){
         if(parentOrigin)parent.postMessage({kind:'qf-replay-fill',run_id:header.run_id,revision:header.revision,fill:f},parentOrigin);
-      }});layer.apply(payload);if(reset)chart.setRange(Math.max(first,last-100),last);chart.draw();}
+      }});layer.apply(payload);if(reset)chart.setRange(Math.max(first,last-100),last);chart.draw();
+        if(parentOrigin)parent.postMessage({kind:'qf-replay-ready',run_id:header.run_id,revision:header.revision},parentOrigin);}
     }
   }
   previous.onclick=()=>{if(payload&&!busy)load(payload.offset-2000);};

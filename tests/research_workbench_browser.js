@@ -8,6 +8,8 @@ addEventListener('message',e=>{if(e.data?.kind==='research-live-probe')window.__
  const button=text=>[...document.querySelectorAll('#research-content button')].find(b=>b.textContent===text);
  const click=async text=>{await wait(()=>button(text)&&!button(text).disabled,'按钮可用：'+text);button(text).click();};
  document.querySelector('[data-open-research]').click();
+ input('contract_mode','fixed');
+ input('start','2025-03-03');
  assert(document.querySelector('[data-field=strategy_id]').value==='ma_cross','策略模板选择');
  assert(!document.querySelector('[data-field="risk.stop_ticks"]'),'不再手填止损距离');
  assert(document.querySelector('[data-field="risk.pivot_left"]').value==='2'&&document.querySelector('[data-field="risk.pivot_right"]').value==='2','默认左右2/2');

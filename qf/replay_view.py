@@ -166,7 +166,8 @@ class ReplayView:
         first_id = initial.get('first_bar_id', 0)
         data = {
             str(first_id+i): dict(
-                datetime=int(row["time_ns"]), **{k: v for k, v in row.items() if k != "time_ns"}
+                datetime=int(row['time_ns']),
+                **{k: v for k, v in row.items() if k not in ('time_ns', 'datetime')}
             )
             for i, row in enumerate(initial["bars"])
         }

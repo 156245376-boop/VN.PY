@@ -22,6 +22,13 @@ def schema_at(path):
         return json.loads(row[0]) if row else None
 
 
+def chart_bar(raw):
+    row = dict(raw)
+    for key in ('open', 'high', 'low', 'close', 'volume', 'close_oi'):
+        row[key] = float(dec(row[key]))
+    return row
+
+
 class ContinuousReader:
     """调用方先校验完整性；每页单独只读事务，关闭的运行文件不会变化。"""
     def __init__(self, path):
@@ -49,7 +56,8 @@ class ContinuousReader:
             total = db.execute(f'SELECT count(*) FROM {table} {where}', params).fetchone()[0]
             rows = db.execute(f'SELECT data FROM {table} {where} ORDER BY time_ns '
                               'LIMIT ? OFFSET ?', (*params, limit, offset)).fetchall()
-            bars = [json.loads(row[0]) | {'global_id': offset+i} for i, row in enumerate(rows)]
+            bars = [chart_bar(json.loads(row[0])) | {'global_id': offset+i}
+                    for i, row in enumerate(rows)]
         return dict(bars=bars, total_bars=total, offset=offset, next_offset=offset+len(bars),
                     series=series, actual_symbol=symbol)
 
@@ -232,7 +240,7 @@ def continuous_snapshot(journal, config, quote, *, now, revision, progress, term
     prefix = [json.loads(r[1]) | {'global_id': r[0]} for r in reversed(journal.db.execute(
         'SELECT seq,data FROM signal_bars WHERE time_ns<=? ORDER BY time_ns DESC LIMIT ?',
         (now, 500+config.slow_period)).fetchall())]
-    bars = prefix[-500:]
+    bars = [chart_bar(row) for row in prefix[-500:]]
     first_id = bars[0]['global_id'] if bars else 0
     lines = []
     for period in (config.fast_period, config.slow_period):

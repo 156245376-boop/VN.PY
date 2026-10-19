@@ -3,7 +3,7 @@
           window.BigInt=Object.assign(function(value){window.__bigCalls++;return OriginalBigInt(value);},
             {asIntN:OriginalBigInt.asIntN,asUintN:OriginalBigInt.asUintN});
           setInterval(()=>{
-          if(!window.__qfReplay&&!window.__qfLiveResearch)return;const chart=window.QfNativeHistory?.getChart?.();
+          if(!window.__qfReplay&&!window.__qfLiveResearch&&!window.__qfContinuousReplay)return;const chart=window.QfNativeHistory?.getChart?.();
           parent.postMessage({kind:window.__qfLiveResearch?'research-live-probe':'research-graph-probe',fills:document.querySelectorAll('[data-fill]').length,
             banner:document.querySelector('.qf-replay-banner')?.textContent,
             plots:Object.keys(chart?.plots||{}).filter(k=>k.startsWith('qf_replay_ma_')).length,

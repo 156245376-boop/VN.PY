@@ -16,10 +16,14 @@ from tqsdk.datetime import _get_trading_day_from_timestamp
 from qf.history import summarize_history
 from qf.journal import PaperLock
 from qf.ma_cross import completed_cross
+from qf.pivot_stop import latest_confirmed_pivot, plan_pivot_entry
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
+from qf.research_coverage import assess_coverage
 from qf.research_journal import ResearchJournal, bar_end_ns, research_trade_key
+from qf.research_progress import BacktestProgress
 from qf.research_results import run_path, summarize_run
+from qf.research_snapshot import view_snapshot
 from qf.runtime import (
     check_connections,
     emit_progress,
@@ -117,11 +121,13 @@ class ResearchLoop:
         self.target = self.risk.side*self.risk.quantity
         self.pending_since = None
         self.pending_direction = None
+        self.pending_signal = self.pending_pivot = self.entry_plan = None
+        self.pivots = {1: None, -1: None}
         self.block_before = journal.get('block_before', 0)
         self.last_bar = journal.get('last_bar', 0)
         self.seen = set()
         self.guard = Guard(journal, config.symbol,
-                           scope=ExecutionScope(config.risk.max_lots, True),
+                           scope=ExecutionScope(config.risk.max_lots or 1, True),
                            fill_handler=self.accept_fill)
         self.stopping_flat = False
         self.fee_day = None
@@ -143,11 +149,14 @@ class ResearchLoop:
                 state = apply_entry_fill(self.risk, side=1 if fill['direction'] == 'BUY' else -1,
                     price=dec(fill['price']), quantity=fill['volume'], time_ns=fill['time_ns'],
                     risk=self.config.risk, spec=self.spec,
-                    trade_id=self.risk.trade_id or uuid.uuid4().hex)
+                    trade_id=self.risk.trade_id or uuid.uuid4().hex,
+                    entry_plan=self.entry_plan)
             else:
                 state = close_trade_fills(self.risk, [fill])
             self.journal.commit_update('fill-'+research_trade_key(fill), time_ns=fill['time_ns'],
-                kind='fill', payload={'phase': self.phase}, risk_state=state, fills=[fill])
+                kind='fill', payload={'phase': self.phase, **({'entry_plan':
+                    public_values(asdict(self.entry_plan))} if self.entry_plan else {})},
+                risk_state=state, fills=[fill])
             self.risk = state
         except ValueError:
             self.guard.freeze('fill_risk_mismatch')
@@ -159,7 +168,10 @@ class ResearchLoop:
     def submit(self, target, now):
         if not self.active:
             return
-        self.record('intent', now, {'phase': self.phase}, target=target)
+        payload = {'phase': self.phase}
+        if target and self.entry_plan is not None:
+            payload['entry_plan'] = public_values(asdict(self.entry_plan))
+        self.record('intent', now, payload, target=target)
         if self.task is None:
             self.new_task()
         self.task.set_target_volume(target)
@@ -220,12 +232,24 @@ class ResearchLoop:
                 self.config.execution_timeout_seconds:
             self.guard.freeze('execution_timeout')
 
-    def open_direction(self, direction, now):
-        decision = size_order(self.config.risk, self.spec,
-            available=dec(self.api.get_account().available), startup_equity=self.startup_equity)
+    def open_direction(self, direction, now, *, quote=None, pivot=None):
+        if self.config.strategy_version == 2:
+            reference = getattr(quote, 'ask_price1' if direction == 1 else 'bid_price1')
+            if not math.isfinite(reference) or reference <= 0:
+                self.record('skipped', now, {'reason': 'entry_quote_unavailable'})
+                return
+            decision = plan_pivot_entry(self.config.risk, self.spec, side=direction,
+                reference_price=dec(reference), pivot=pivot,
+                available=dec(self.api.get_account().available), startup_equity=self.startup_equity)
+            self.entry_plan = decision
+        else:
+            decision = size_order(self.config.risk, self.spec,
+                available=dec(self.api.get_account().available), startup_equity=self.startup_equity)
         self.record('skipped' if not decision.lots else 'signal', now,
-                    {'sizing': public_values(asdict(decision))})
+                    {('entry_plan' if self.config.strategy_version == 2 else 'sizing'):
+                        public_values(asdict(decision))})
         if decision.lots and self.active:
+            self.guard.scope = ExecutionScope(decision.lots, True)
             self.risk = empty_risk()
             self.phase = 'entering'
             self.submit(direction*decision.lots, now)
@@ -281,6 +305,13 @@ class ResearchLoop:
                 self.journal.capture_bars(self.config.symbol, self.config.bar_seconds, rows[:-1])
                 self.last_bar = completed
                 self.journal.set('last_bar', completed)
+                if self.config.strategy_version == 2:
+                    closed = [dict(r, end_ns=bar_end_ns(r['datetime'], self.config.bar_seconds))
+                              for r in rows[:-1]]
+                    for side in (1, -1):
+                        self.pivots[side] = latest_confirmed_pivot(closed, side=side,
+                            left=self.config.risk.pivot_left, right=self.config.risk.pivot_right,
+                            as_of_ns=finished_ns, previous=self.pivots[side])
                 signal = completed_cross(rows, self.config.fast_period, self.config.slow_period,
                                          completed_ns=ready_ns)
                 if signal:
@@ -288,17 +319,19 @@ class ResearchLoop:
                 if (signal and completed > minimum_bar and start_ns <= completed <= end_ns
                         and finished_ns > self.block_before and not self.stopping_flat):
                     self.record('signal', now, {'signal': public_values(asdict(signal))})
+                    self.pending_signal = signal
+                    self.pending_pivot = self.pivots[signal.direction]
                     if self.phase == 'flat':
                         direction = signal.direction
                         self.pending_direction = None
-                        self.open_direction(direction, now)
+                        self.open_direction(direction, now, quote=quote, pivot=self.pending_pivot)
                     elif self.phase == 'exiting' and self.risk.exit_reason == 'ma_reverse':
                         self.pending_direction = signal.direction
                     elif signal.direction != self.risk.side:
                         self.begin_exit(now, 'ma_reverse', signal.direction)
         if self.phase == 'flat' and self.pending_direction is not None and not self.stopping_flat:
             direction, self.pending_direction = self.pending_direction, None
-            self.open_direction(direction, now)
+            self.open_direction(direction, now, quote=quote, pivot=self.pending_pivot)
         self.equity(now)
         emit_progress(self.progress, 'research_state', **public_values(dict(
             phase=self.phase, risk=asdict(self.risk), equity=str(self.api.get_account().balance),
@@ -309,7 +342,8 @@ class ResearchLoop:
 
 def execute_research(mode, config, root, credentials, *, sdk=None, activate=False, resume=None,
                      fee_multiplier=1, stop_requested=lambda: False,
-                     flatten_requested=lambda: False, progress=None, experiment_ref=None):
+                     flatten_requested=lambda: False, progress=None, experiment_ref=None,
+                     view_progress=None):
     config = validate_research_config(config.public())
     if (mode not in ('backtest', 'paper') or type(activate) is not bool
             or (mode != 'paper' and (activate or resume))
@@ -322,11 +356,11 @@ def execute_research(mode, config, root, credentials, *, sdk=None, activate=Fals
     root.mkdir(parents=True, exist_ok=True)
     with PaperLock(root) if mode == 'paper' else nullcontext():
         return _run(sdk, mode, config, root, credentials, activate, resume, fee_multiplier,
-                    stop_requested, flatten_requested, progress, experiment_ref)
+                    stop_requested, flatten_requested, progress, experiment_ref, view_progress)
 
 
 def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
-         stop_requested, flatten_requested, progress, experiment_ref):
+         stop_requested, flatten_requested, progress, experiment_ref, view_progress):
     j = (ResearchJournal.resume(run_path(root, resume), config.public()) if resume else
          ResearchJournal.create(root, mode, config.public(),
                                 provenance() | {'experiment_ref': experiment_ref}))
@@ -335,6 +369,33 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
     api, loop, account = None, None, None
     paper, status, reason = mode == 'paper', 'failed', 'sdk_or_auth_or_permission_error'
     confirmed = True
+    tracker, quote, expected_days = None, None, None
+    revision, last_publish = 0, 0
+
+    def publish(stage, *, current=None, terminal=False, success=False, force=False):
+        nonlocal revision, last_publish
+        if tracker is None:
+            return
+        bars = j.db.execute('SELECT count(*) FROM research_bars').fetchone()[0]
+        last = j.db.execute('SELECT data FROM research_bars ORDER BY time_ns DESC LIMIT 1')
+        last = last.fetchone()
+        if last and not json.loads(last[0])['completed']:
+            bars -= 1
+        fills = j.db.execute('SELECT count(*) FROM fills').fetchone()[0]
+        state = tracker.update(stage, current_ns=current, bars=bars, fills=fills, success=success)
+        emit_progress(progress, 'research_progress', details=state)
+        if (view_progress is not None and quote is not None and loop is not None
+                and (force or time.monotonic()-last_publish >= .2)):
+            revision += 1
+            frame = view_snapshot(j, config, quote, now=loop.last_equity_ns,
+                                  revision=revision, progress=state, terminal=terminal)
+            try:
+                view_progress(frame)
+            except Exception:
+                # 展示窗口关闭或回调失败不影响交易和结果留存。
+                pass
+            last_publish = time.monotonic()
+
     try:
         if resume:
             metadata = json.loads((j.path/'metadata.json').read_text('utf-8'))
@@ -355,8 +416,23 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
             backtest = sdk.TqBacktest(start_dt=config.start, end_dt=config.end)
             options['backtest'] = backtest
             start_ns, end_ns = backtest._start_dt, backtest._end_dt
+        tracker = BacktestProgress(start_ns, end_ns)
+        publish('connecting')
         emit_progress(progress, 'connecting')
         api = tracked_api(sdk, j, **options)
+        publish('history')
+        if not paper and config.strategy_version == 2:
+            try:
+                calendar = api.get_trading_calendar(config.start, config.end)
+                dates = pd.to_datetime(calendar['date']).dt.date
+                if dates.empty or dates.min() > config.start or dates.max() < config.end:
+                    raise ValueError('calendar coverage')
+                expected_days = sorted(str(d) for d, trading in zip(dates, calendar['trading'],
+                    strict=True) if bool(trading) and config.start <= d <= config.end)
+            except Exception:
+                raise Frozen('trading_calendar_unavailable') from None
+            if not expected_days:
+                raise Frozen('no_trading_days')
         quote = api.get_quote(config.symbol)
         main = api.get_quote(config.continuous) if paper else None
         if config.precision == 'tick':
@@ -367,6 +443,7 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
             api.get_kline_serial(config.symbol, 60, data_length=2)
         serial = api.get_kline_serial(config.symbol, config.bar_seconds,
                                       data_length=max(200, config.slow_period+2))
+        publish('warmup')
         wait_ready(api, lambda: (math.isfinite(quote.last_price) and bool(quote.datetime)
             and len(_rows(serial, config.bar_seconds)) >= config.slow_period+2
             and math.isfinite(api.get_account().balance)), config.timeout_seconds, set())
@@ -398,6 +475,11 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
                 loop.guard.freeze('underlying_changed')
             flat = loop.step(quote, serial, minimum_bar=minimum, start_ns=start_ns,
                              end_ns=end_ns, flatten=flatten_requested())
+            current = quote_ns(quote) if paper else getattr(backtest, '_current_dt', None)
+            publish('simulating' if paper else 'backtesting', current=current)
+            if (not paper and tracker.snapshot()['last_advance_age_seconds']
+                    > config.timeout_seconds):
+                raise Frozen('historical_time_stalled')
             if stop_requested() or flat:
                 status, reason = 'stopped', 'flatten_confirmed' if flat else 'requested_stop'
                 break
@@ -423,6 +505,7 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
     except Exception:
         status, reason = 'failed', 'sdk_or_auth_or_permission_error'
     finally:
+        publish('saving')
         if loop:
             loop.guard.enabled = False
         if api:
@@ -452,13 +535,34 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
                 confirmed = False
             if not confirmed and status != 'frozen':
                 status, reason = 'frozen', 'cancellation_unconfirmed'
+        if status == 'backtest_finished' and config.strategy_version == 2:
+            observed = set()
+            for stamp, raw in j.db.execute('SELECT time_ns,data FROM research_bars'):
+                if json.loads(raw).get('completed') and start_ns <= stamp <= end_ns:
+                    day = str(pd.Timestamp(_get_trading_day_from_timestamp(stamp), tz='UTC')
+                              .tz_convert('Asia/Shanghai').date())
+                    observed.add(day)
+            coverage = assess_coverage(expected_days=expected_days,
+                                       observed_days=sorted(observed), issues=[])
+            j.set('coverage_check', coverage)
+            if coverage['status'] != 'verified':
+                status, reason = 'failed', 'historical_coverage_incomplete'
         j.set('status', status)
         j.set('reason', reason)
         j.set('cancellation_confirmed', confirmed)
-        j.export()
-        j.close()
+        try:
+            j.export()
+        except Exception:
+            status, reason = 'failed', 'result_save_failed'
+            j.set('status', status)
+            j.set('reason', reason)
     try:
         summary = summarize_run(root, j.path.name)
     except ValueError:
         summary = {'issue': '结果记录不完整，不可可信复盘'}
+        if status == 'backtest_finished':
+            status, reason = 'failed', 'result_integrity_failed'
+    publish('completed' if status == 'backtest_finished' else status, terminal=True,
+            success=status == 'backtest_finished', force=True)
+    j.close()
     return dict(run_id=j.path.name, status=status, reason=reason, summary=summary)

@@ -13,7 +13,7 @@ from qf.trade_risk import RiskState
 
 PAYLOAD_FIELDS = {'signal', 'sizing', 'reason', 'phase', 'price', 'quote_ns', 'cost_source',
                   'price_tick', 'volume_multiple', 'commission_per_lot', 'margin_per_lot',
-                  'fill_keys'}
+                  'fill_keys', 'entry_plan', 'pivot', 'progress'}
 KINDS = {'signal', 'fill', 'protection', 'intent', 'sealed', 'reconciled', 'skipped', 'stopped'}
 DECIMALS = {'entry_price', 'initial_r', 'stop_price', 'peak_gross'}
 
@@ -114,6 +114,9 @@ class ResearchJournal(Journal):
             self.db.execute('INSERT INTO risk_events VALUES (?,?,?,?,?,?)',
                             (event_id, time_ns, kind, dumps(payload), risk_json, target))
             self.db.execute('INSERT OR REPLACE INTO state VALUES (?,?)', ('risk_state', risk_json))
+            if 'entry_plan' in payload:
+                self.db.execute('INSERT OR REPLACE INTO state VALUES (?,?)',
+                                ('entry_plan', dumps(payload['entry_plan'])))
             if target is not None:
                 self.db.execute('INSERT OR REPLACE INTO state VALUES (?,?)',
                                 ('last_target', json.dumps(target)))

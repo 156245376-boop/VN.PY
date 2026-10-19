@@ -95,6 +95,7 @@ def read_run(root, run_id):
         risk=state.get("risk_state", {}),
         experiment_ref=state.get("experiment_ref"),
         cost_source=state.get("cost_source"),
+        coverage_check=state.get('coverage_check'),
         precision=config.precision,
         coverage=dict(
             first_ns=str(span[0]) if span[0] else None,

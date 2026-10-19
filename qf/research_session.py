@@ -33,6 +33,15 @@ class ResearchSession:
         self._state = {'status': 'created', 'risk': {}, 'contracts': [], 'contract_request': None}
         self._closing_at = None
         self._timeout = 30
+        self._live = None
+
+    def live_snapshot(self):
+        with self._lock:
+            return wire(copy.deepcopy(self._live))
+
+    def _view_progress(self, snapshot):
+        with self._lock:
+            self._live = copy.deepcopy(snapshot)
 
     @property
     def running(self):
@@ -46,6 +55,8 @@ class ResearchSession:
         with self._lock:
             if stage == 'connecting':
                 self._state['status'] = 'connecting'
+            if stage == 'research_progress':
+                self._state['progress'] = wire(copy.deepcopy(fields['details']))
             if stage == 'research_state':
                 for key in ('phase', 'equity', 'commission', 'symbol', 'precision', 'run_id'):
                     if key in fields:
@@ -70,6 +81,7 @@ class ResearchSession:
             self._timeout = config.execution_timeout_seconds
             self._stop.clear()
             self._flatten.clear()
+            self._live = None
             self._state.update(status='connecting', phase='flat', risk={}, mode=mode,
                 activate=activate or mode == 'backtest', config=config.public(),
                 experiment_ref=copy.deepcopy(experiment_ref), result=None, run_id=None)
@@ -86,7 +98,8 @@ class ResearchSession:
             result = self.execute_fn(mode, config, self.root, credentials,
                 activate=activate, resume=resume, fee_multiplier=fee_multiplier,
                 experiment_ref=experiment_ref, stop_requested=self._stop.is_set,
-                flatten_requested=self._flatten.is_set, progress=self._progress)
+                flatten_requested=self._flatten.is_set, progress=self._progress,
+                view_progress=self._view_progress)
             fields = ('status', 'reason', 'run_id', 'summary')
             safe = {k: v for k, v in result.items() if k in fields}
             if safe.get('status') not in STATES:

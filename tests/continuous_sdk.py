@@ -165,14 +165,19 @@ class ContinuousSdkFixture:
                     if 'partial' in outer.faults and order.symbol != SYMBOLS[0]:
                         continue
                     price, qty = self.get_quote(order.symbol).last_price, order.volume_left
+                    if 'late_cancel' in outer.faults and order.offset == 'OPEN':
+                        qty = min(1, qty)
                     side = 1 if order.direction == 'BUY' else -1
                     position = self.positions.setdefault(order.symbol, NS(pos_long=0, pos_short=0))
                     if order.offset == 'OPEN':
+                        old_quantity = position.pos_long+position.pos_short
                         if side > 0:
                             position.pos_long += qty
                         else:
                             position.pos_short += qty
-                        self.entries[order.symbol] = price
+                        self.entries[order.symbol] = (
+                            self.entries.get(order.symbol, 0)*old_quantity+price*qty
+                        )/(old_quantity+qty)
                     else:
                         self.realized += (-side)*qty*10*(price-self.entries[order.symbol])
                         if side < 0:
@@ -185,7 +190,9 @@ class ContinuousSdkFixture:
                         exchange_id='SHFE', instrument_id=order.symbol.split('.')[1],
                         direction=order.direction, offset=order.offset, volume=qty,
                         price=price, trade_date_time=self.current()['now'])
-                    order.volume_left, order.status = 0, 'FINISHED'
+                    order.volume_left -= qty
+                    if not order.volume_left or getattr(order, 'cancel_requested', False):
+                        order.status = 'FINISHED'
                 unrealized = sum((p.pos_long-p.pos_short)*10
                     *(self.get_quote(s).last_price-self.entries[s])
                     for s, p in self.positions.items())
@@ -213,9 +220,13 @@ class ContinuousSdkFixture:
                 self.cancelled = True
                 for order in self.api.orders.values():
                     if order.symbol == self.symbol:
-                        order.status = 'FINISHED'
+                        if 'late_cancel' in outer.faults and order.status != 'FINISHED':
+                            order.cancel_requested = True
+                        else:
+                            order.status = 'FINISHED'
             def is_finished(self):
-                return self.cancelled
+                return self.cancelled and all(o.status == 'FINISHED'
+                    for o in self.api.orders.values() if o.symbol == self.symbol)
 
         self.sdk = NS(TqApi=Api, TqSim=Sim, TqBacktest=Backtest, TqAuth=lambda *a: object(),
                       TargetPosTask=Target, BacktestFinished=Finished)

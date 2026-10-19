@@ -58,13 +58,14 @@ def latest_confirmed_pivot(rows, *, side, left, right, as_of_ns, previous=None,
         start, end = int(row['datetime']), int(row['end_ns'])
         if start <= 0 or end <= start:
             raise ValueError('拐点柱时间无效')
-        if end <= as_of_ns and row.get('completed', True) is True:
+        available = (int(row.get('completed_at_ns', end)) if allow_nonpositive else end)
+        if available <= as_of_ns and row.get('completed', True) is True:
             if closed and start <= closed[-1][0]:
                 raise ValueError('拐点柱时间乱序')
             price = decimal_value(row[field])
             if price <= 0 and not allow_nonpositive:
                 raise ValueError('拐点价格无效')
-            closed.append((start, end, price))
+            closed.append((start, available, price))
     for i in range(left, len(closed) - right):
         stamp, _, price = closed[i]
         neighbors = closed[i-left:i] + closed[i+1:i+right+1]

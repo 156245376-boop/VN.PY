@@ -9,15 +9,15 @@ from pathlib import Path
 from qf.continuous_risk import LogicalRisk
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
-from qf.research_journal import ResearchJournal, dumps, research_trade_key
+from qf.research_journal import ResearchJournal, completed_at, dumps, research_trade_key
 from qf.trade_risk import ContractSpec
 
 CONTINUOUS_TABLES = ('signal_bars', 'main_changes', 'roll_events', 'contract_specs',
-                     'logical_fills')
+                     'logical_fills', 'logical_trades', 'continuous_order_roles')
 PAYLOAD = {'signal', 'entry_plan', 'reason', 'phase', 'price', 'quote_ns', 'target_symbol',
            'role', 'symbol', 'source_symbol', 'offset', 'progress', 'fill_keys', 'failure_context'}
 KINDS = {'signal', 'fill', 'protection', 'intent', 'sealed', 'reconciled', 'skipped', 'stopped',
-         'roll', 'mapping', 'boundary', 'warmup'}
+         'roll', 'mapping', 'boundary', 'warmup', 'closed'}
 ROLES = {'strategy_open', 'strategy_close', 'roll_out', 'roll_in'}
 ROLL_FIELDS = {'phase', 'old_symbol', 'new_symbol', 'side', 'requested_lots',
                'started_ns', 'reason'}
@@ -60,6 +60,10 @@ class ContinuousJournal(ResearchJournal):
           CREATE TABLE IF NOT EXISTS contract_specs(symbol TEXT PRIMARY KEY, data TEXT);
           CREATE TABLE IF NOT EXISTS logical_fills(fill_key TEXT PRIMARY KEY,
             trade_id TEXT, symbol TEXT, role TEXT, fee TEXT);
+          CREATE TABLE IF NOT EXISTS logical_trades(trade_id TEXT PRIMARY KEY,
+            time_ns INTEGER, reason TEXT);
+          CREATE TABLE IF NOT EXISTS continuous_order_roles(order_id TEXT PRIMARY KEY,
+            symbol TEXT, role TEXT);
           CREATE INDEX IF NOT EXISTS continuous_fill_time ON fills(time_ns);
           CREATE INDEX IF NOT EXISTS continuous_risk_time ON risk_events(time_ns);
           CREATE INDEX IF NOT EXISTS continuous_actual_time ON research_bars(symbol,time_ns);
@@ -136,7 +140,8 @@ class ContinuousJournal(ResearchJournal):
                 if saved is None:
                     raise ValueError('换月参考原始数据没有保存')
                 raw = json.loads(saved[0])
-                if not raw['completed'] or int(raw['end_ns']) > stamp:
+                if (not raw['completed']
+                        or completed_at(raw, self.get('config')['bar_seconds']) > stamp):
                     raise ValueError('换月参考柱在当时未完成')
                 quotes.append(dec(raw['close']))
             if dec(evidence['offset']) != dec(evidence['previous_offset'])+quotes[1]-quotes[0]:
@@ -156,19 +161,28 @@ class ContinuousJournal(ResearchJournal):
         self._symbol(symbol)
         if period != self.get('config')['bar_seconds']:
             raise ValueError('实际合约周期不匹配')
-        self.capture_bars(symbol, period, rows)
+        normal = [row for row in rows if 'completion_source' not in row]
+        self.capture_bars(symbol, period, normal)
+        for row in rows:
+            if 'completion_source' in row:
+                done = completed_at(row, period)
+                self.capture_bars(symbol, period, [row], sdk_closed_ns=done,
+                                  completion_source='SDK_3.10.2_CLOSE')
 
     def capture_signal(self, row):
         keys = {'open', 'high', 'low', 'close', 'datetime', 'end_ns', 'completed',
                 'completed_at_ns', 'raw', 'source_symbol', 'offset', 'volume',
                 'close_oi', 'trading_day'}
-        if set(row) != keys or row['completed'] is not True:
+        if set(row)-{'completion_source'} != keys or row['completed'] is not True:
             raise ValueError('信号记录必须是明确完成的白名单柱')
+        if 'completion_source' in row and row['completion_source'] != 'SDK_3.10.2_CLOSE':
+            raise ValueError('信号完成证据来源无效')
         self._symbol(row['source_symbol'])
         stamp, end = row['datetime'], row['end_ns']
         if (type(stamp) is not int or type(end) is not int or stamp <= 0 or end <= stamp
-                or type(row['completed_at_ns']) is not int or row['completed_at_ns'] < end):
+                or type(row['completed_at_ns']) is not int):
             raise ValueError('信号完成时间无效')
+        completed_at(row, self.get('config')['bar_seconds'])
         for key in ('open', 'high', 'low', 'close', 'offset', 'volume', 'close_oi'):
             dec(row[key])
         raw_fields = {'open', 'high', 'low', 'close', 'volume', 'close_oi', 'datetime', 'end_ns'}
@@ -197,6 +211,18 @@ class ContinuousJournal(ResearchJournal):
         return {symbol: quantity for symbol, quantity in self.db.execute(
             "SELECT symbol,sum(CASE WHEN direction='BUY' THEN volume ELSE -volume END) "
             'FROM fills GROUP BY symbol') if quantity}
+
+    def bind_order_role(self, order_id, symbol, role):
+        self._symbol(symbol)
+        if role not in ROLES or order_id not in self.owned():
+            raise ValueError('委托用途缺少执行所有权')
+        old = self.db.execute('SELECT symbol,role FROM continuous_order_roles WHERE order_id=?',
+                              (order_id,)).fetchone()
+        if old is not None and old != (symbol, role):
+            raise ValueError('既有委托用途不可改写')
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO continuous_order_roles VALUES (?,?,?)',
+                            (order_id, symbol, role))
 
     def commit_continuous(self, event_id, *, time_ns, kind, payload, logical_risk,
                           roll_state, fills, target=None):
@@ -241,6 +267,13 @@ class ContinuousJournal(ResearchJournal):
         keys = [values[0] for _, values in pairs]
         content = payload | ({'fill_keys': keys} if fills else {})
         with self.db:
+            if (kind == 'closed' or (fills and payload.get('role') == 'strategy_close'
+                                     and not logical_risk.quantity)):
+                if not logical_risk.trade_id or logical_risk.quantity:
+                    raise ValueError('逻辑交易终结时必须确认实际空仓')
+                self.db.execute('INSERT OR IGNORE INTO logical_trades VALUES (?,?,?)',
+                    (logical_risk.trade_id, time_ns,
+                     logical_risk.exit_reason or payload.get('reason', 'strategy_close')))
             for _, values in pairs:
                 raw = self.db.execute('SELECT data FROM contract_specs WHERE symbol=?',
                                       (values[2],)).fetchone()

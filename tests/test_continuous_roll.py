@@ -57,7 +57,9 @@ def test_same_update_exit_has_priority_and_never_revives_new_intent(interrupt):
     assert actions == [{'kind': 'target', 'symbol': OLD, 'volume': 0,
                         'role': 'strategy_close'}]
     assert advance(c, positions={OLD: (1, 0)}) == []
-    assert advance(c) == [{'kind': 'freeze', 'reason': c.state.reason}]
+    expected = ([{'kind': 'freeze', 'reason': c.state.reason}] if 'mapping' in interrupt else
+                [{'kind': 'complete', 'aborted': True, 'reason': c.state.reason}])
+    assert advance(c) == expected
     assert advance(c) == []
 
 

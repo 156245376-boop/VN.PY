@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 
 from qf.safety import Frozen
 
+NORMAL_EXITS = {'take_profit', 'initial_stop', 'stair_stop', 'ma_reverse', 'entry_stop_invalid'}
 
 @dataclass(frozen=True)
 class RollState:
@@ -22,6 +23,7 @@ class RollCoordinator:
         self.timeout_ns = int(timeout_seconds * 1_000_000_000)
         self._sent = set()
         self._old_exit_cancelled = False
+        self._abort_ns = None
 
     def request(self, old_symbol, new_symbol, *, side, lots, now_ns):
         if (self.state.phase != 'idle' or not old_symbol or not new_symbol
@@ -32,6 +34,7 @@ class RollCoordinator:
         self.state = RollState('old_cancel', old_symbol, new_symbol, side, lots, now_ns)
         self._sent.clear()
         self._old_exit_cancelled = False
+        self._abort_ns = None
 
     def _once(self, key, actions):
         if key in self._sent:
@@ -54,11 +57,15 @@ class RollCoordinator:
                   'roll_timeout' if now_ns-s.started_ns > self.timeout_ns else None)
         if reason and s.phase != 'aborting':
             self.state = s = replace(s, phase='aborting', reason=reason)
+            self._abort_ns = now_ns
         if s.phase == 'aborting':
             actions = self._once('abort_cancel', [
                 {'kind': 'cancel', 'symbol': sym} for sym in symbols])
             if actions:
                 return actions
+            if self._abort_ns is not None and now_ns-self._abort_ns > self.timeout_ns:
+                self.state = replace(s, phase='frozen', reason='roll_cleanup_unconfirmed')
+                return [{'kind': 'freeze', 'reason': 'roll_cleanup_unconfirmed'}]
             if not done or pending:
                 return []
             held = [(sym, positions.get(sym, (0, 0))) for sym in symbols]
@@ -70,6 +77,9 @@ class RollCoordinator:
                          'role': 'strategy_close'}])
             if actions or any(long or short for _, (long, short) in held):
                 return actions
+            if s.reason in NORMAL_EXITS or s.reason == 'stop_requested':
+                self.state = replace(s, phase='idle')
+                return [{'kind': 'complete', 'aborted': True, 'reason': s.reason}]
             self.state = replace(s, phase='frozen')
             return [{'kind': 'freeze', 'reason': s.reason}]
         if s.phase == 'old_cancel':
@@ -103,12 +113,17 @@ class RollCoordinator:
 
 
 class ContinuousGuard:
-    def __init__(self, journal, coordinator, *, fill_handler):
+    def __init__(self, journal, coordinator, *, fill_handler, order_handler=None):
         self.journal, self.coordinator = journal, coordinator
         self.fill_handler = fill_handler
+        self.order_handler = order_handler
         self.enabled = False
         self.positions, self.orders, self.targets = {}, {}, {}
         self.baseline_orders = set()
+
+    def on_order_submitted(self, order_id, symbol):
+        if self.order_handler is not None:
+            self.order_handler(order_id, symbol)
 
     def freeze(self, code):
         self.enabled = False

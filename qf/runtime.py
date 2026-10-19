@@ -133,6 +133,8 @@ def tracked_api(sdk, journal, *, web_gui=False, progress=None, **kwargs):
                                          offset_leg2=offset_leg2)
             # insert_order 先入本地队列；下次 wait_update 发出前持久记录所有权。
             journal.order(order.order_id, symbol, direction, offset, volume)
+            if hasattr(self.execution_guard, 'on_order_submitted'):
+                self.execution_guard.on_order_submitted(order.order_id, symbol)
             return order
 
     return ResearchApi(debug=False, disable_print=True, web_gui=web_gui, **kwargs)

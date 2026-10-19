@@ -5,7 +5,11 @@ import hashlib
 import json
 from dataclasses import asdict
 
-from tqsdk.datetime import _get_trading_day_end_time, _get_trading_day_from_timestamp
+from tqsdk.datetime import (
+    _get_trading_day_end_time,
+    _get_trading_day_from_timestamp,
+    _get_trading_day_start_time,
+)
 
 from qf.journal import Journal
 from qf.research_config import decimal_value, public_values
@@ -47,13 +51,27 @@ def bar_end_ns(stamp, seconds):
             if seconds == 86400 else stamp + seconds * 1_000_000_000)
 
 
+def completed_at(row, seconds):
+    """SDK CLOSE 比区间终点早不足一微秒；仅接受明确保存的锁定版本证据。"""
+    end = int(row['end_ns'])
+    done = int(row.get('completed_at_ns', end))
+    if done < end:
+        source = row.get('completion_source')
+        stamp = int(row.get('datetime', row.get('time_ns')))
+        expected = ((stamp+seconds*1_000_000_000) if seconds < 86400 else
+                    _get_trading_day_start_time(stamp+seconds*1_000_000_000))-1000
+        if source not in ('SDK_3.10.2_CLOSE', 'SDK_3.10.2_terminal_CLOSE') or done != expected:
+            raise ValueError('完成柱缺少匹配的SDK收盘证据')
+    return done
+
+
 def integrity_manifest(db):
     result = {}
     tables = ('state', 'research_bars', 'risk_events', 'fills', 'equity', 'orders')
     schema = db.execute("SELECT value FROM state WHERE key='research_schema'").fetchone()
     if schema and json.loads(schema[0]) == 2:
         tables += ('signal_bars', 'main_changes', 'roll_events', 'contract_specs',
-                   'logical_fills', 'signals', 'events')
+                   'logical_fills', 'logical_trades', 'continuous_order_roles', 'signals', 'events')
     for table in tables:
         digest, count = hashlib.sha256(), 0
         query = ("SELECT * FROM state WHERE key!='research_integrity' ORDER BY key"
@@ -127,7 +145,8 @@ class ResearchJournal(Journal):
                                 ('last_target', json.dumps(target)))
         return True
 
-    def capture_bars(self, symbol, bar_seconds, rows, *, completed=True, sdk_closed_ns=None):
+    def capture_bars(self, symbol, bar_seconds, rows, *, completed=True, sdk_closed_ns=None,
+                     completion_source='SDK_3.10.2_terminal_CLOSE'):
         values = []
         for row in rows:
             stamp = int(row['datetime'])
@@ -140,7 +159,7 @@ class ResearchJournal(Journal):
                 if type(sdk_closed_ns) is not int or not stamp < sdk_closed_ns <= end:
                     raise ValueError('SDK末柱完成时间无效')
                 data.update(completed_at_ns=str(sdk_closed_ns), signal_consumed=False,
-                            completion_source='SDK_3.10.2_terminal_CLOSE')
+                            completion_source=completion_source)
             if stamp <= 0 or min(data[k] for k in ('open', 'high', 'low', 'close')) <= 0:
                 raise ValueError('K线无效')
             values.append((symbol, bar_seconds, stamp, dumps(data)))

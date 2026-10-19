@@ -117,6 +117,19 @@ class WorkbenchBridge:
         except (ValueError, OSError):
             return dict(ok=False, reason='请选择两个有效的新实验运行结果。')
 
+    def get_research_fill(self, run_id, key):
+        import sqlite3
+
+        from qf.continuous_results import ContinuousReader
+        from qf.research_results import run_path
+        try:
+            root = self._root/'results'
+            if read_run(root, run_id)['config']['schema_version'] != 3:
+                raise ValueError('仅连续实验使用分页成交查询')
+            return dict(ok=True, details=ContinuousReader(run_path(root, run_id)).fill_details(key))
+        except (ValueError, OSError, sqlite3.Error):
+            return dict(ok=False, reason='该成交或关联证据不存在，未使用当前行情补造。')
+
     def open_research_replay(self, run_id):
         with self._lock:
             try:

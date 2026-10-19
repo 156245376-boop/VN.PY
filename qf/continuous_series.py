@@ -7,7 +7,7 @@ from decimal import Decimal
 from tqsdk.datetime import _get_trading_day_from_timestamp, _timestamp_nano_to_str
 
 from qf.research_config import decimal_value as dec
-from qf.research_journal import bar_end_ns
+from qf.research_journal import bar_end_ns, completed_at
 
 PRICE_FIELDS = ('open', 'high', 'low', 'close')
 
@@ -56,8 +56,8 @@ class SignalSeries:
                         continue
                     stamp = int(row['datetime'])
                     end = row.get('end_ns', bar_end_ns(stamp, self.period))
-                    done = row.get('completed_at_ns', end)
-                    if type(done) is int and done <= detected_ns and end <= detected_ns:
+                    done = completed_at(row | {'end_ns': end}, self.period)
+                    if done <= detected_ns:
                         raw = self._raw(row)
                         result[stamp] = raw
                 return result
@@ -79,8 +79,9 @@ class SignalSeries:
             raise ValueError('信号柱不是当前历史主力')
         raw = self._raw(row)
         stamp, end = raw['datetime'], raw['end_ns']
+        available = completed_at(row | {'end_ns': end}, self.period)
         if (row.get('completed', True) is not True or type(completed_at_ns) is not int
-                or completed_at_ns < end):
+                or completed_at_ns < available):
             raise ValueError('信号柱尚未完成')
         if stamp < self.switch_ns:
             if end > self.switch_ns:
@@ -101,6 +102,8 @@ class SignalSeries:
                         offset=self.offset, volume=raw['volume'], close_oi=raw['close_oi'],
                         trading_day=_timestamp_nano_to_str(
                             _get_trading_day_from_timestamp(stamp), fmt='%Y-%m-%d'))
+        if row.get('completion_source') == 'SDK_3.10.2_CLOSE':
+            adjusted.update(completed_at_ns=available, completion_source=row['completion_source'])
         self._rows.append(adjusted)
         self._seen[stamp], self._last = raw, stamp
         if len(self._rows) > self.maximum:

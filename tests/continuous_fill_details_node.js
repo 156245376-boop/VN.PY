@@ -1,0 +1,12 @@
+const assert=require('assert');
+require('../qf/web/research-results.js');
+(async()=>{let calls=0;const api={async get_research_fill(run,key){calls++;return {ok:true,details:{fill:{key,price:380},risk_events:[{kind:'fill'}]}};}};
+ const details=await QfResearchResults.loadFillDetails(api,'run',{fills:[],risk_events:[]},'older');
+ assert.strictEqual(details.fill.price,380);assert.strictEqual(calls,1);
+ const current={fills:[{key:'known',price:100}],risk_events:[]};
+ assert.strictEqual((await QfResearchResults.loadFillDetails(api,'run',current,'known')).fill.price,100);
+ assert.strictEqual(calls,1);
+ assert.ok(QfResearchResults.emptyFillText(10).includes('当前窗口'));
+ assert.ok(!QfResearchResults.emptyFillText(10).includes('本次没有实际成交'));
+ console.log('CONTINUOUS_FILL_DETAILS_OK');
+})().catch(e=>{console.error(e);process.exitCode=1;});

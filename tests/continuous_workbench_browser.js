@@ -34,6 +34,16 @@ addEventListener('message',e=>{if(e.data?.kind==='research-graph-probe')window._
  const details=(await api.get_research_result(baseId)).details;
  assert(details.fills.some(f=>f.role==='roll_in'&&f.symbol==='SHFE.rb2510'&&f.price>200),'真实移仓成交');
  await click('查看成交K线（离线复盘）');await wait(()=>window.__graphProbe?.fills>0&&window.__graphProbe?.plots===2&&!window.__graphProbe.invalid,'连续静态图');
+ // 模拟初始末尾窗口无成交，较早窗口的箭头详情须按ID从后端读取。
+ const actualGet=api.get_research_result;
+ api.get_research_result=async id=>{const r=await actualGet(id);return r.ok?{...r,details:{...r.details,fills:[],risk_events:[]}}:r;};
+ [...document.querySelectorAll('#research-results button')].find(b=>b.title===baseId).click();
+ await wait(()=>document.querySelector('#research-results').textContent.includes('当前窗口没有成交'),'窗口无成交不能误报全程无成交');
+ document.querySelector('#research-results pre').textContent='';
+ const replayFrame=document.querySelector('#research-results iframe');
+ replayFrame.contentWindow.postMessage({kind:'research-click-fill'},new URL(replayFrame.src).origin);
+ await wait(()=>document.querySelector('#research-results pre').textContent.includes('成交：')&&document.querySelector('#research-results pre').textContent.includes('初始R：'),'分页历史箭头详情');
+ api.get_research_result=actualGet;
  await click('复制实验');await wait(()=>document.querySelector('[aria-label="已保存实验"]').options.length===3,'连续副本');
  input('fast_period',3);await click('运行回测');
  await wait(async()=>{const s=await api.get_research_state();return !s.running&&s.run_id!==baseId&&s.status==='backtest_finished';},'副本结果');

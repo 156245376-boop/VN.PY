@@ -1,4 +1,5 @@
 (()=>{if(parent===window)return;
+          addEventListener('message',e=>{if(e.source===parent&&e.data?.kind==='research-click-fill')document.querySelector('[data-fill]')?.dispatchEvent(new MouseEvent('click',{bubbles:true}));});
           const OriginalBigInt=BigInt;window.__bigCalls=0;
           window.BigInt=Object.assign(function(value){window.__bigCalls++;return OriginalBigInt(value);},
             {asIntN:OriginalBigInt.asIntN,asUintN:OriginalBigInt.asUintN});

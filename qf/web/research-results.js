@@ -7,8 +7,13 @@
   const fillName=f=>f.direction==='BUY'?(f.offset==='OPEN'?'买开（做多）':'买平（平空）'):(f.offset==='OPEN'?'卖开（做空）':'卖平（平多）');
   const reasonName=r=>({ma_reverse:'双均线反向交叉',initial_stop:'触发初始止损',stair_stop:'触发阶梯保护',take_profit:'达到终点止盈',user_flatten:'用户要求平仓停止'}[r]||'双均线交叉入场');
   const fillEvent=(events,key)=>events.find(e=>e.kind==='fill'&&e.payload?.fill_keys?.includes(key));
+  const emptyFillText=count=>Number(count)>0?'当前窗口没有成交；全程有 '+number(count)+' 笔成交，可在复盘中按日期定位并点击箭头查看。':'本次没有实际成交；信号和目标不等于成交。';
+  async function loadFillDetails(api,run,details,key){const fill=details.fills.find(f=>f.key===key);
+    if(fill)return {fill,risk_events:details.risk_events};
+    if(typeof api.get_research_fill!=='function')return null;
+    const response=await api.get_research_fill(run,key);return response.ok?response.details:null;}
   function time(stamp){try{return new Date(Number(BigInt(stamp)/1000000n)+8*3600000).toISOString().slice(0,19).replace('T',' ');}catch(_){return '时间待核实';}}
-  function create(root,api){let current=null,details={fills:[],risk_events:[]},binding=null,queued=null,disposed=false;
+  function create(root,api){let current=null,details={fills:[],risk_events:[]},binding=null,queued=null,disposed=false,fillRequest=0;
     const el=(tag,text)=>{const e=document.createElement(tag);e.textContent=text??'';return e;};
     const title=el('h3','实验结果与比较'),list=el('div'),compareButton=el('button','比较所选两个运行'),comparison=el('div'),summary=el('div'),reason=el('pre'),frame=document.createElement('iframe');
     const selected=new Set(),tradeList=el('div');tradeList.className='table-scroll';reason.style.whiteSpace='pre-wrap';frame.hidden=true;
@@ -28,8 +33,12 @@
         else comparison.append(el('p',(names[key]||key)+'：'+pair[0]+' → '+pair[1]));}
       if(payload.comparability_warnings?.length)comparison.append(el('p','注意：策略版本、止损规则、区间、资金、精度、费用或完成状态不同，请核对可比条件；成本压力回放不是参数A/B实验。'));}
     compareButton.onclick=async()=>{const r=await api.compare_research_runs([...selected]);if(r.ok)compare(r.comparison);else comparison.textContent=r.reason;};
-    function showFill(key,focus=true){const f=details.fills.find(f=>f.key===key);if(!f)return;
-      const events=details.risk_events.filter(e=>BigInt(e.time_ns)<=BigInt(f.time_ns)),last=fillEvent(details.risk_events,f.key),signal=events.findLast(e=>e.payload?.signal)?.payload.signal;
+    async function showFill(key,focus=true){const run=current?.run_id,request=++fillRequest;let packet;
+      try{packet=await loadFillDetails(api,run,details,key);}catch(_){packet=null;}
+      if(disposed||current?.run_id!==run||request!==fillRequest)return;
+      if(!packet){reason.textContent='未能读取该成交的已保存证据。';return;}
+      const f=packet.fill;
+      const events=packet.risk_events.filter(e=>BigInt(e.time_ns)<=BigInt(f.time_ns)),last=fillEvent(packet.risk_events,f.key),signal=events.findLast(e=>e.payload?.signal)?.payload.signal;
       const r=last?.risk||{};reason.textContent=fillName(f)+' · '+time(f.time_ns)+'（北京时间）\n成交：'+number(f.volume)+' 手，价格 '+number(f.price)+'\n原因：'+reasonName(r.exit_reason)+
         '\n初始R：'+number(r.initial_r)+' 元；阶梯：'+(r.stage??'—')+'；保护价：'+number(r.stop_price)+(signal?'\n交叉依据：快线 '+number(signal.fast_current)+'；慢线 '+number(signal.slow_current):'');
       if(binding&&focus)frame.contentWindow.postMessage({kind:'qf-replay-focus',run_id:binding.run_id,revision:binding.revision,fill_id:key,time_ns:f.time_ns},new URL(binding.url).origin);}
@@ -47,12 +56,12 @@
       details=r.details;tradeList.replaceChildren();const t=table(['成交时间（北京时间）','操作','手数','成交价','原因'],[]);const body=t.querySelector('tbody');
       for(const f of details.fills){const tr=el('tr');for(const text of [time(f.time_ns),fillName(f)+(f.symbol?' · '+f.symbol:'')+(f.role==='roll_out'?'（移仓平旧）':f.role==='roll_in'?'（移仓开新）':''),number(f.volume),number(f.price),'点击查看并定位'])tr.append(el('td',text));
         tr.style.cursor='pointer';tr.onclick=async()=>{showFill(f.key);if(!binding){queued=f.key;await openReplay();}};body.append(tr);}tradeList.append(t);
-      if(!details.fills.length)tradeList.append(el('p','本次没有实际成交；信号和目标不等于成交。'));}
+      if(!details.fills.length)tradeList.append(el('p',emptyFillText(result.fill_count)));}
     function message(e){if(!binding||e.source!==frame.contentWindow||e.origin!==new URL(binding.url).origin||e.data?.run_id!==binding.run_id||e.data?.revision!==binding.revision)return;
       if(e.data.kind==='qf-replay-ready'&&queued){const key=queued;queued=null;showFill(key);}
       if(e.data.kind==='qf-replay-fill')showFill(e.data.fill?.key,false);}
     addEventListener('message',message);refresh().catch(()=>{});
     return {refresh,render,compare,dispose(){disposed=true;removeEventListener('message',message);frame.removeAttribute('src');}};
   }
-  globalThis.QfResearchResults={create,number,precision,fillName,fillEvent};
+  globalThis.QfResearchResults={create,number,precision,fillName,fillEvent,loadFillDetails,emptyFillText};
 })();

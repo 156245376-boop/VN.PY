@@ -108,6 +108,32 @@ def test_roll_fills_use_their_own_contract_offset_not_new_mapping_offset(tmp_pat
         j.close()
 
 
+def test_fill_details_before_initial_window_use_indexed_id_lookup(tmp_path):
+    j = finished(tmp_path)
+    try:
+        raw = j.db.execute('SELECT data FROM signal_bars').fetchone()[0]
+        with j.db:
+            j.db.execute('WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 '
+                'FROM n WHERE x<2999) INSERT INTO signal_bars SELECT x,?+x*?,?+(x+1)*?, '
+                "'SHFE.rb2505',json_set(?, '$.time_ns',cast(?+x*? AS TEXT),"
+                "'$.datetime',?+x*?,'$.end_ns',?+(x+1)*?) FROM n",
+                (BASE, MINUTE, BASE, MINUTE, raw, BASE, MINUTE, BASE, MINUTE, BASE, MINUTE))
+        j.set('signal_count', 3000)
+        j.export()
+        reader = ContinuousReader(j.path)
+        page = reader.initial()
+        assert reader.window(page['offset'], 2000)['fills'] == []
+        key = j.db.execute("SELECT fill_key FROM logical_fills WHERE role='roll_in'").fetchone()[0]
+        details = reader.fill_details(key)
+        assert details['fill']['price'] == 380 and details['fill']['role'] == 'roll_in'
+        assert len(details['risk_events']) <= 2
+        assert details['risk_events'][-1]['payload']['fill_keys'] == [key]
+        with pytest.raises(ValueError):
+            reader.fill_details('f'*64)
+    finally:
+        j.close()
+
+
 def test_million_bar_initial_page_and_live_snapshot_stay_bounded(tmp_path):
     j = journal(tmp_path)
     try:

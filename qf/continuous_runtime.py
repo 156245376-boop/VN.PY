@@ -9,7 +9,11 @@ from datetime import timedelta
 from types import SimpleNamespace
 
 import pandas as pd
-from tqsdk.datetime import _convert_user_input_to_nano, _get_trading_day_from_timestamp
+from tqsdk.datetime import (
+    _convert_user_input_to_nano,
+    _get_trading_day_from_timestamp,
+    _get_trading_day_start_time,
+)
 
 from qf.continuous_journal import ContinuousJournal
 from qf.continuous_results import continuous_snapshot, summarize_continuous_run
@@ -46,16 +50,32 @@ def trading_day(stamp):
                .tz_convert('Asia/Shanghai').date())
 
 
-def completed_rows(serial, period, now):
+def completed_rows(serial, period, now, *, backtest=None, symbol=None):
     rows = []
     for raw in serial.to_dict('records'):
         if not raw.get('datetime') or raw['datetime'] <= 0:
             continue
         stamp = int(raw['datetime'])
         end = bar_end_ns(stamp, period)
-        if end <= now:
+        evidence = getattr(backtest, '_serials', {}).get((symbol, period*1_000_000_000), {})
+        close = ((stamp+period*1_000_000_000) if period < 86400 else
+                 _get_trading_day_start_time(stamp+period*1_000_000_000))-1000
+        item = evidence.get('kline_or_tick', {})
+        sdk_closed = (evidence.get('when') == 'CLOSE' and evidence.get('timestamp') == close
+            and close <= now and item.get('datetime') == stamp
+            and all(item.get(k) == raw[k] for k in
+                    ('open', 'high', 'low', 'close', 'volume', 'close_oi')))
+        # 3.10.2 先 fetch 下一事件再把本次 diff 发给 API；不能只看游标的 when。
+        sent = getattr(backtest, '_sended_to_api', {}).get((symbol, period*1_000_000_000), [])
+        delivered = any(first <= raw.get('id', -1) < last for first, last in sent)
+        sdk_closed = sdk_closed or (
+            getattr(backtest, '_current_dt', None) == now and close <= now and delivered
+            and evidence.get('timestamp', 0) > close)
+        if end <= now or sdk_closed:
             row = {k: raw[k] for k in ('open', 'high', 'low', 'close', 'volume', 'close_oi')}
             rows.append(row | dict(datetime=stamp, end_ns=end, completed=True))
+            if sdk_closed and end > now:
+                rows[-1].update(completed_at_ns=close, completion_source='SDK_3.10.2_CLOSE')
     if any(a['datetime'] >= b['datetime'] for a, b in zip(rows, rows[1:], strict=False)):
         raise Frozen('historical_data_invalid')
     return rows
@@ -67,11 +87,13 @@ class ContinuousLoop:
         self.config, self.multiplier, self.start_ns = config, multiplier, start_ns
         self.risk = LogicalRisk()
         self.roll = RollCoordinator(RollState(), timeout_seconds=config.execution_timeout_seconds)
-        self.guard = ContinuousGuard(journal, self.roll, fill_handler=self.accept_fill)
+        self.guard = ContinuousGuard(journal, self.roll, fill_handler=self.accept_fill,
+                                     order_handler=self.bind_order)
         self.series = SignalSeries(config.bar_seconds,
             max_window=max(config.slow_period+2, config.risk.pivot_left+config.risk.pivot_right+2))
         self.quotes, self.serials, self.specs = {}, {}, {}
         self.tasks, self.targets, self.roles, self.cancelled = {}, {}, {}, set()
+        self.deferred_targets = {}
         self.entry_plan, self.pending_mapping = None, None
         self.now, self.last_signal, self.intent_since = 0, 0, None
         self.prewarmed = False
@@ -79,6 +101,30 @@ class ContinuousLoop:
         self.pivots = {1: None, -1: None}
         self.observed, self.captured = set(), {}
         self.context = dict(date=str(config.start), symbol=config.continuous, data_type='mapping')
+        self.backtest = None
+
+    def closed_rows(self, symbol, now):
+        return completed_rows(self.serials[symbol], self.config.bar_seconds, now,
+                              backtest=self.backtest, symbol=symbol)
+
+    def consume(self, symbol, rows):
+        signal = None
+        for raw in rows:
+            bar = self.series.append(symbol=symbol, row=raw, completed_at_ns=self.now)
+            if bar is None:
+                continue
+            self.j.capture_signal(bar)
+            if self.start_ns <= raw['datetime']:
+                self.observed.add(bar['trading_day'])
+            window = self.series.window()
+            for side in (1, -1):
+                self.pivots[side] = latest_confirmed_pivot(window, side=side,
+                    left=self.config.risk.pivot_left, right=self.config.risk.pivot_right,
+                    as_of_ns=self.now, previous=self.pivots[side], allow_nonpositive=True)
+            if self.now >= self.start_ns:
+                signal = completed_cross_closed(window, self.config.fast_period,
+                    self.config.slow_period, completed_ns=self.now, allow_nonpositive=True)
+        return signal
 
     def record(self, kind, payload=None, target=None):
         self.j.commit_continuous(uuid.uuid4().hex, time_ns=self.now, kind=kind,
@@ -89,7 +135,9 @@ class ContinuousLoop:
         if self.j.has_fill(fill):
             return
         symbol = fill['symbol']
-        role = self.roles.get(symbol)
+        bound = self.j.db.execute('SELECT symbol,role FROM continuous_order_roles WHERE order_id=?',
+                                  (fill['order_id'],)).fetchone()
+        role = bound[1] if bound is not None and bound[0] == symbol else None
         if role is None or symbol not in self.specs:
             raise Frozen('fill_intent_missing')
         risk = apply_logical_fill(self.risk, fill, role=role, spec=self.specs[symbol],
@@ -98,6 +146,9 @@ class ContinuousLoop:
             payload=dict(role=role, symbol=symbol), logical_risk=risk,
             roll_state=asdict(self.roll.state), fills=[fill]):
             self.risk = risk
+
+    def bind_order(self, order_id, symbol):
+        self.j.bind_order_role(order_id, symbol, self.roles.get(symbol))
 
     def subscribe(self, symbol):
         if symbol not in self.quotes:
@@ -147,6 +198,11 @@ class ContinuousLoop:
         return symbol not in self.tasks or self.tasks[symbol].is_finished()
 
     def target(self, symbol, volume, role):
+        if not self.task_done(symbol) and self.roles.get(symbol) != role:
+            # 不把旧 OPEN 的迟到成交改成 CLOSE；先确认旧任务及委托结束。
+            self.deferred_targets[symbol] = (volume, role)
+            self.cancel(symbol)
+            return
         if volume and role == 'roll_in':
             spec = self.specs[symbol]
             if (abs(volume) < spec.min_open_lots or abs(volume) % spec.lot_step):
@@ -163,7 +219,7 @@ class ContinuousLoop:
         self.tasks[symbol].set_target_volume(volume)
         self.intent_since = time.monotonic()
 
-    def reconcile(self):
+    def reconcile(self, *, execute_deferred=True):
         for fill in trades_snapshot(self.api.get_trade()):
             self.guard.accept_fill(fill)
         positions = positions_snapshot(self.api.get_position())
@@ -174,11 +230,17 @@ class ContinuousLoop:
             if long-short == target and not pending:
                 self.cancel(symbol)
         if (self.entry_plan is not None and not self.risk.sealed and self.risk.quantity
-                and self.risk.quantity == self.entry_plan.lots and not pending
+                and (self.risk.quantity == self.entry_plan.lots
+                     or self.series.symbol in self.deferred_targets) and not pending
                 and self.task_done(self.series.symbol)):
             self.risk = seal_logical(self.risk)
             self.record('sealed', dict(symbol=self.series.symbol))
-        return positions, pending
+        if execute_deferred and not pending:
+            for symbol, (volume, role) in list(self.deferred_targets.items()):
+                if self.task_done(symbol):
+                    del self.deferred_targets[symbol]
+                    self.target(symbol, volume, role)
+        return positions, any(o.status != 'FINISHED' for o in self.api.get_order().values())
 
     def protect(self, positions):
         held = next((symbol for symbol, pair in positions.items() if any(pair)), None)
@@ -191,14 +253,47 @@ class ContinuousLoop:
                 self.record('protection', dict(symbol=held, price=dec(quote.last_price),
                                               quote_ns=self.now))
 
+    def trade_closed(self):
+        return bool(self.risk.trade_id and self.j.db.execute(
+            'SELECT 1 FROM logical_trades WHERE trade_id=?', (self.risk.trade_id,)).fetchone())
+
+    def advance_roll(self, positions, *, mapped, stopping, reverse=False):
+        actions = self.roll.advance(positions=positions, pending_orders=self.api.get_order(),
+            task_finished={symbol: self.task_done(symbol) for symbol in self.tasks},
+            risk_exit=((self.risk.exit_reason if not self.trade_closed() else None)
+                       or ('ma_reverse' if reverse else None)),
+            stop_requested=stopping, mapping=mapped,
+            now_ns=self.roll.state.started_ns+time.monotonic_ns()-self.roll_clock)
+        for action in actions:
+            if action['kind'] == 'cancel':
+                self.cancel(action['symbol'])
+            elif action['kind'] == 'target':
+                if action['role'] == 'strategy_close' and not self.risk.exit_reason:
+                    self.risk = replace(self.risk, exit_reason=self.roll.state.reason)
+                self.target(action['symbol'], action['volume'], action['role'])
+            elif action['kind'] == 'complete':
+                if action.get('aborted') and self.risk.trade_id:
+                    self.risk = replace(self.risk, exit_reason=action['reason'])
+                    self.record('closed', dict(reason=action['reason']))
+                else:
+                    self.j.set('roll_count', self.j.get('roll_count', 0)+1)
+            elif action['kind'] == 'freeze':
+                raise Frozen(action['reason'])
+            self.record('roll', dict(phase=self.roll.state.phase))
+
     def step(self, main, now, *, stopping=False):
         self.now = now
         self.context['date'] = trading_day(now)
         positions, pending = self.reconcile()
         self.protect(positions)
+        signal = None
         mapped = main.underlying_symbol
         if not mapped:
             raise Frozen('historical_main_missing')
+        if self.roll.state.phase != 'idle' and (mapped != self.roll.state.new_symbol or stopping):
+            # 当前执行范围先清理，不能在旧/新仓未结时改写为第三个合约。
+            self.advance_roll(positions, mapped=mapped, stopping=stopping)
+            return
         self.subscribe(mapped)
         if not self.ensure_spec(mapped):
             return
@@ -209,11 +304,11 @@ class ContinuousLoop:
             if new != mapped:
                 raise Frozen('roll_mapping_changed')
             old = self.series.symbol
-            old_rows = (completed_rows(self.serials[old], self.config.bar_seconds, detected)
-                        if old else [])
-            new_rows = completed_rows(self.serials[new], self.config.bar_seconds, detected)
+            old_rows = self.closed_rows(old, detected) if old else []
+            new_rows = self.closed_rows(new, detected)
             if old:
                 self.capture(old, old_rows)
+                signal = self.consume(old, old_rows)
             self.capture(new, new_rows)
             try:
                 evidence = self.series.switch(old_symbol=old, new_symbol=new,
@@ -231,25 +326,9 @@ class ContinuousLoop:
                                   lots=self.risk.quantity, now_ns=now)
                 self.roll_clock = time.monotonic_ns()
                 self.record('roll', dict(phase=self.roll.state.phase))
-        rows = completed_rows(self.serials[mapped], self.config.bar_seconds, now)
+        rows = self.closed_rows(mapped, now)
         self.capture(mapped, rows)
-        signal = None
-        for raw in rows:
-            bar = self.series.append(symbol=mapped, row=raw, completed_at_ns=now)
-            if bar is None:
-                continue
-            self.j.capture_signal(bar)
-            if self.start_ns <= raw['datetime']:
-                self.observed.add(bar['trading_day'])
-            window = self.series.window()
-            for side in (1, -1):
-                self.pivots[side] = latest_confirmed_pivot(window, side=side,
-                    left=self.config.risk.pivot_left, right=self.config.risk.pivot_right,
-                    as_of_ns=now, previous=self.pivots[side], allow_nonpositive=True)
-            if now < self.start_ns:
-                continue
-            signal = completed_cross_closed(window, self.config.fast_period,
-                self.config.slow_period, completed_ns=now, allow_nonpositive=True)
+        signal = self.consume(mapped, rows) or signal
         for discarded in self.series.take_discards():
             self.record('boundary', dict(reason=discarded['reason'], source_symbol=mapped,
                                         progress=discarded))
@@ -261,25 +340,13 @@ class ContinuousLoop:
         reverse = (signal and signal.direction and self.risk.quantity
                    and signal.direction != self.risk.side)
         if self.roll.state.phase != 'idle':
-            actions = self.roll.advance(positions=positions, pending_orders=self.api.get_order(),
-                task_finished={symbol: self.task_done(symbol) for symbol in self.tasks},
-                risk_exit=self.risk.exit_reason or ('ma_reverse' if reverse else None),
-                stop_requested=stopping, mapping=mapped,
-                now_ns=self.roll.state.started_ns+time.monotonic_ns()-self.roll_clock)
-            for action in actions:
-                if action['kind'] == 'cancel':
-                    self.cancel(action['symbol'])
-                elif action['kind'] == 'target':
-                    self.target(action['symbol'], action['volume'], action['role'])
-                elif action['kind'] == 'complete':
-                    self.j.set('roll_count', self.j.get('roll_count', 0)+1)
-                elif action['kind'] == 'freeze':
-                    raise Frozen(action['reason'])
-                self.record('roll', dict(phase=self.roll.state.phase))
+            self.advance_roll(positions, mapped=mapped, stopping=stopping, reverse=reverse)
             return
         if stopping:
             return
         if self.risk.quantity and (self.risk.exit_reason or reverse):
+            if reverse and not self.risk.exit_reason:
+                self.risk = replace(self.risk, exit_reason='ma_reverse')
             symbol = next(s for s, pair in positions.items() if any(pair))
             if self.targets.get(symbol) != 0:
                 self.target(symbol, 0, 'strategy_close')
@@ -384,6 +451,7 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
         main = api.get_quote(config.continuous)
         loop = ContinuousLoop(sdk, api, account, j, config,
                               multiplier=fee_multiplier, start_ns=start)
+        loop.backtest = backtest
         loop.guard.start(positions_snapshot(api.get_position()), api.get_order(), activate=True)
         api.execution_guard = loop.guard
         j.set('initial_equity', str(config.initial_balance))
@@ -401,14 +469,14 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
             if math.isfinite(acct.balance) and math.isfinite(acct.commission):
                 j.equity(now, float(acct.balance), float(acct.commission))
             publish('warmup' if now < start else 'backtesting')
-            if stop_requested():
+            if stop_requested() and loop.roll.state.phase == 'idle':
                 status, reason = 'stopped', 'requested_stop'
                 break
             api.wait_update(deadline=time.time()+1)
     except sdk.BacktestFinished:
         status, reason = 'backtest_finished', 'historical_replay_completed'
         if loop:
-            loop.reconcile()
+            loop.reconcile(execute_deferred=False)
             from qf.research_runtime import capture_terminal_close
             if loop.series.symbol:
                 terminal = capture_terminal_close(j,
@@ -442,7 +510,16 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
                 if loop:
                     for symbol in loop.tasks:
                         loop.cancel(symbol)
-                    loop.reconcile()
+                    if status != 'backtest_finished':
+                        deadline = time.monotonic()+config.execution_timeout_seconds
+                        while (not all(loop.task_done(symbol) for symbol in loop.tasks)
+                               or any(o.status != 'FINISHED' for o in api.get_order().values())):
+                            if time.monotonic() >= deadline:
+                                raise Frozen('cancellation_unconfirmed')
+                            api.wait_update(deadline=time.time()+1)
+                            loop.now = int(backtest._current_dt)
+                            loop.reconcile(execute_deferred=False)
+                    loop.reconcile(execute_deferred=False)
                     loop.guard.enabled = False
                 j.set('final_positions', positions_snapshot(api.get_position()))
                 if any(o.status != 'FINISHED' for o in api.get_order().values()):

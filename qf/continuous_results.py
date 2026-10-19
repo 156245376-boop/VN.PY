@@ -1,6 +1,7 @@
 """连续回测只读结果与索引分页；绝不创建行情会话。"""
 
 import json
+import re
 import sqlite3
 from contextlib import closing
 from decimal import Decimal
@@ -102,6 +103,30 @@ class ContinuousReader:
         else:
             evidence = dict(fills=[], risk_events=[], main_changes=[])
         return page | evidence | dict(ma_series=lines, first_bar_id=offset)
+
+    def fill_details(self, key):
+        if not isinstance(key, str) or not re.fullmatch('[0-9a-f]{64}', key):
+            raise ValueError('成交编号无效')
+        with closing(self.connect()) as db:
+            row = db.execute('SELECT f.*,l.trade_id,l.role,l.fee FROM fills f '
+                'JOIN logical_fills l ON l.fill_key=f.key WHERE f.key=?', (key,)).fetchone()
+            if row is None:
+                raise ValueError('保存的成交不存在')
+            fill = dict(zip(('key', 'order_id', 'symbol', 'direction', 'offset', 'volume',
+                'price', 'time_ns', 'trade_id', 'role', 'fee'), row, strict=True))
+            fill['time_ns'] = str(fill['time_ns'])
+            saved = db.execute("SELECT time_ns,kind,payload,risk FROM risk_events "
+                "WHERE time_ns=? AND kind='fill' AND EXISTS(SELECT 1 FROM "
+                "json_each(risk_events.payload,'$.fill_keys') WHERE value=?) LIMIT 1",
+                (row[7], key)).fetchone()
+            if saved is None:
+                raise ValueError('成交关联证据缺失')
+            signal = db.execute("SELECT time_ns,kind,payload,risk FROM risk_events "
+                "WHERE time_ns<=? AND kind='signal' ORDER BY time_ns DESC LIMIT 1",
+                (row[7],)).fetchone()
+            events = [dict(time_ns=str(r[0]), kind=r[1], payload=json.loads(r[2]),
+                           risk=json.loads(r[3])) for r in (signal, saved) if r is not None]
+        return dict(fill=fill, risk_events=events)
 
 
 def _spec(raw):
@@ -212,10 +237,7 @@ def summarize_continuous_run(root, run_id):
         fees = [dec(r[0]) for r in db.execute(
             "SELECT fee FROM logical_fills WHERE role IN ('roll_in','roll_out')")]
         # 平旧换新期间数量暂时为零，不是逻辑交易结束；只统计最终策略退出。
-        closed = db.execute("SELECT count(*) FROM (SELECT l.trade_id FROM logical_fills l "
-            "JOIN fills f ON f.key=l.fill_key GROUP BY l.trade_id HAVING "
-            "sum(CASE WHEN f.offset='OPEN' THEN f.volume ELSE -f.volume END)=0 "
-            "AND sum(CASE WHEN l.role='strategy_close' THEN 1 ELSE 0 END)>0)").fetchone()[0]
+        closed = db.execute('SELECT count(*) FROM logical_trades').fetchone()[0]
         count = db.execute('SELECT count(*) FROM fills').fetchone()[0]
         actual = state.get('final_positions')
         peak, drawdown, pct = initial, Decimal(0), Decimal(0)

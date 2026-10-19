@@ -1,5 +1,6 @@
 window.__researchSmoke=null;window.__graphProbe=null;window.confirm=()=>true;
 addEventListener('message',e=>{if(e.data?.kind==='research-graph-probe')window.__graphProbe=e.data;});
+addEventListener('message',e=>{if(e.data?.kind==='research-live-probe')window.__liveProbe=e.data;});
 (async()=>{const api=pywebview.api;
  const wait=async(fn,label)=>{window.__researchStage=label;for(let i=0;i<100;i++){if(await fn())return;await new Promise(r=>setTimeout(r,100));}throw Error(label);};
  const assert=(value,text)=>{if(!value)throw Error(text);};
@@ -8,6 +9,10 @@ addEventListener('message',e=>{if(e.data?.kind==='research-graph-probe')window._
  const click=async text=>{await wait(()=>button(text)&&!button(text).disabled,'按钮可用：'+text);button(text).click();};
  document.querySelector('[data-open-research]').click();
  assert(document.querySelector('[data-field=strategy_id]').value==='ma_cross','策略模板选择');
+ assert(!document.querySelector('[data-field="risk.stop_ticks"]'),'不再手填止损距离');
+ assert(document.querySelector('[data-field="risk.pivot_left"]').value==='2'&&document.querySelector('[data-field="risk.pivot_right"]').value==='2','默认左右2/2');
+ await click('保存实验');await wait(()=>document.querySelector('[data-field=symbol]').getAttribute('aria-invalid')==='true','空合约定位');
+ assert(!(await api.get_research_state()).running,'校验失败没有虚假运行');
  input('name','测'.repeat(80));input('bar_seconds',300);
  input('end','2025-03-03');input('risk.risk_budget',1000);
  await click('查询区间实际合约');
@@ -15,9 +20,19 @@ addEventListener('message',e=>{if(e.data?.kind==='research-graph-probe')window._
  await wait(()=>document.querySelector('[data-field=symbol]').value==='SHFE.rb2505','合约选择');
  await click('保存实验');
  await wait(()=>document.querySelector('[aria-label="已保存实验"]').options.length===2,'保存实验');
+ const watch=document.querySelector('[data-watch-research]');watch.click();
  await click('运行回测');button('运行回测').click();
+ await wait(async()=>{const s=await api.get_research_state();return s.running&&s.progress?.percent>0&&s.progress?.percent<100;},'实际运行时间进度');
+ const firstJob=(await api.get_research_state()).job_id;
+ await wait(()=>window.__liveProbe?.plots===2&&window.__liveProbe?.history?.status==='ready','过程原生图表');
+ const liveSrc=document.querySelector('.research-live-frame').src;
+ watch.click();assert(document.querySelector('.research-live-frame').hidden,'收起运行图');
+ watch.click();await wait(()=>!document.querySelector('.research-live-frame').hidden,'重新展开运行图');
+ assert(document.querySelector('.research-live-frame').src===liveSrc&&(await api.get_research_state()).job_id===firstJob,'展开不重启运行或页面');
  await wait(async()=>{const s=await api.get_research_state();return s.status==='backtest_finished';},'第一轮5/20回测');
  let runs=(await api.list_research_runs()).runs.filter(r=>r.config);assert(runs.length===1,'只创建一次回测');
+ assert((await api.get_research_state()).progress.percent===100,'保存核实后完成100%');
+ watch.click();
  assert((await api.get_experiments()).experiments[0].revision===2,'双击只创建一次启动修订');
  const first=runs[0].run_id;const detail=await api.get_research_result(first);
  assert(detail.details.fills.length===2,'完整开平仓成交');

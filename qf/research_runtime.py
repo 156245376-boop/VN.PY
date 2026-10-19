@@ -133,6 +133,7 @@ class ResearchLoop:
         self.fee_day = None
         self.previous_day_fee = dec(0)
         self.last_equity_ns = 0
+        self.as_of_ns = 0
         self.trimming_entry = False
         self.total_fee = dec(journal.get('total_commission', 0))
         self.startup_equity = dec(journal.get('initial_equity', config.initial_balance))
@@ -158,6 +159,7 @@ class ResearchLoop:
                     public_values(asdict(self.entry_plan))} if self.entry_plan else {})},
                 risk_state=state, fills=[fill])
             self.risk = state
+            self.as_of_ns = max(self.as_of_ns, fill['time_ns'])
         except ValueError:
             self.guard.freeze('fill_risk_mismatch')
 
@@ -277,6 +279,7 @@ class ResearchLoop:
         positions, orders = positions_snapshot(self.api.get_position()), self.api.get_order()
         self.guard.check(positions, orders)
         now = quote_ns(quote)
+        self.as_of_ns = max(self.as_of_ns, now, self.risk.last_fill_ns)
         if self.paper and (quote.expired or not math.isfinite(quote.expire_datetime)
                            or quote.expire_datetime <= time.time()+86400):
             self.guard.freeze('contract_near_expiry')
@@ -383,11 +386,13 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
             bars -= 1
         fills = j.db.execute('SELECT count(*) FROM fills').fetchone()[0]
         state = tracker.update(stage, current_ns=current, bars=bars, fills=fills, success=success)
+        if paper:
+            state['percent'] = None
         emit_progress(progress, 'research_progress', details=state)
         if (view_progress is not None and quote is not None and loop is not None
                 and (force or time.monotonic()-last_publish >= .2)):
             revision += 1
-            frame = view_snapshot(j, config, quote, now=loop.last_equity_ns,
+            frame = view_snapshot(j, config, quote, now=max(loop.as_of_ns, tracker.current or 0),
                                   revision=revision, progress=state, terminal=terminal)
             try:
                 view_progress(frame)
@@ -449,6 +454,11 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
             and math.isfinite(api.get_account().balance)), config.timeout_seconds, set())
         if paper and main.underlying_symbol != config.symbol:
             raise Frozen('underlying_changed')
+        if (not paper and config.strategy_version == 2
+                and math.isfinite(quote.expire_datetime)
+                and config.end > pd.Timestamp(quote.expire_datetime, unit='s', tz='UTC')
+                .tz_convert('Asia/Shanghai').date()):
+            raise Frozen('contract_range_exceeds_expiry')
         spec = contract_spec(api, account, config.symbol, quote, paper=paper, multiplier=multiplier)
         if not resume:
             j.set('initial_equity', api.get_account().balance)

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 
-def test_full_research_flow_in_real_webview(tmp_path):
+def test_full_pivot_progress_flow_in_webview(tmp_path):
     run_phase(tmp_path, "write")
     run_phase(tmp_path, "reopen")
 
@@ -28,3 +28,4 @@ def run_phase(root, phase):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RESEARCH_WORKBENCH_OK" in result.stdout
+    assert 'PIVOT_RESEARCH_OK' in result.stdout

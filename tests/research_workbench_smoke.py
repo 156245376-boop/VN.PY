@@ -33,7 +33,7 @@ tqsdk.TqApi = forbid_real_api
 class UiApi(PivotApi):
     def wait_update(self, **kwargs):
         if not self.live:
-            time.sleep(.08)
+            time.sleep(.6)
         return super().wait_update(**kwargs)
 
 
@@ -174,6 +174,7 @@ def main():
             database.rename(renamed)
             renamed.rename(database)
         print("RESEARCH_WORKBENCH_OK")
+        print("PIVOT_RESEARCH_OK")
 
 
 if __name__ == "__main__":

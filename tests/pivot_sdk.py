@@ -47,10 +47,13 @@ class PivotApi(Api):
                 + pd.Timedelta(seconds=self.steps)).strftime('%Y-%m-%d %H:%M:%S.%f')
             return True
         try:
+            before_fee = self.account.commission
             result = super().wait_update(**kwargs)
         except Finished:
             self.kwargs['backtest']._current_dt = 2145888000000000000
             raise
+        fee = self.kwargs['account'].get_commission('SHFE.rb2505')
+        self.account.commission = before_fee+(self.account.commission-before_fee)*fee/2
         prices = [1005., 1010., 1002., 1002., 1002.]
         if self.scenario == 'partial':
             prices = [1005., 1000., 1000., 1000., 1000.]

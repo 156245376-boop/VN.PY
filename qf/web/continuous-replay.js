@@ -9,9 +9,13 @@
   }
   globalThis.QfContinuousReplay={WindowCache};
   if(typeof window==='undefined'||!window.__qfContinuousReplay)return;
-  let header=null,cache=null,payload=null,chart=null,layer=null,installed=[],selection='signal',actual=null,busy=false,alive=true,requestKey='';
+  let header=null,cache=null,payload=null,chart=null,layer=null,installed=[],selection='signal',actual=null,busy=false,alive=true,requestKey='',accountTime='',accountRequest=0;
   let parentOrigin=null;try{parentOrigin=new URL(document.referrer).origin;}catch(_){}
   const banner=document.createElement('div');banner.className='qf-replay-banner';
+  async function emitAccount(stamp){if(!parentOrigin||!header||!stamp||stamp===accountTime)return;accountTime=stamp;const token=++accountRequest;
+    try{const response=await fetch('/account?time_ns='+encodeURIComponent(stamp),{cache:'no-store'});const packet=await response.json();
+      if(token!==accountRequest||!packet.account)return;parent.postMessage({kind:'qf-research-account',run_id:header.run_id,revision:header.revision,time_ns:stamp,account:packet.account},parentOrigin);
+    }catch(_){}}
   const label=document.createElement('span'),series=document.createElement('select'),date=document.createElement('input');date.type='date';
   const previous=document.createElement('button'),next=document.createElement('button'),locate=document.createElement('button');
   previous.textContent='前一窗口';next.textContent='后一窗口';locate.textContent='定位日期';
@@ -23,7 +27,7 @@
       if(!response.ok)throw Error();const page=await response.json();if(!alive||!cache.accept(page))return;
       payload={...header,...page,bars:cache.bars,symbol:selection==='signal'?header.config.continuous:actual};
       payload.contract_spec=header.contract_specs?.[actual]||header.contract_spec;
-      layer?.dispose();layer=null;chart=null;requestKey='';install(true);
+      layer?.dispose();layer=null;chart=null;requestKey='';install(true);if(header.account)emitAccount(header.account.time_ns||payload.as_of_ns);
       label.textContent=`离线复盘 · ${selection==='signal'?'因果拼接信号价（可能为负）':'实际合约原价'} · 已加载 ${page.offset+1}—${page.next_offset} / ${page.total_bars} 根 · 箭头详情为真实成交价 `;
     }catch(_){label.textContent='读取失败，请重新选择窗口；没有使用当前行情补造数据。';}
     finally{if(cache.request===Number(token.request_id))busy=false;}
@@ -46,7 +50,7 @@
     if(current?.symbol===symbol&&current.duration===duration){
       if(chart!==current||reset){layer?.dispose();chart=current;layer=QfNativeReplay.attach(chart,{onFill(f){
         if(parentOrigin)parent.postMessage({kind:'qf-replay-fill',run_id:header.run_id,revision:header.revision,fill:f},parentOrigin);
-      }});layer.apply(payload);if(reset)chart.setRange(Math.max(first,last-100),last);chart.draw();
+      },onTime:emitAccount});layer.apply(payload);if(reset)chart.setRange(Math.max(first,last-100),last);chart.draw();
         if(parentOrigin)parent.postMessage({kind:'qf-replay-ready',run_id:header.run_id,revision:header.revision},parentOrigin);}
     }
   }

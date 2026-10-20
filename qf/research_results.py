@@ -226,6 +226,13 @@ def run_details(root, run_id):
             dict(time_ns=str(r[0]), kind=r[1], payload=json.loads(r[2]), risk=json.loads(r[3]))
             for r in db.execute("SELECT time_ns,kind,payload,risk FROM risk_events ORDER BY rowid")
         ]
+        from qf.research_account import read_account
+        from qf.research_protection import protection_window
+        span = db.execute('SELECT min(time_ns),max(time_ns) FROM research_bars').fetchone()
+        account = read_account(db, at_ns=span[1])
+        protection = protection_window(
+            db, first_ns=span[0] or 0, as_of_ns=span[1] or 0,
+            series='actual', symbol=read_run(root, run_id)['config']['symbol'])
     for fill in fills:
         fill["time_ns"] = str(fill["time_ns"])
-    return dict(fills=fills, risk_events=events)
+    return dict(fills=fills, risk_events=events, account=account, protection=protection)

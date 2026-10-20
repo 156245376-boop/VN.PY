@@ -111,6 +111,7 @@ class ContinuousLoop:
         self.context = dict(date=str(config.start), symbol=config.continuous, data_type='mapping')
         self.backtest = None
         self.account_evidence = account_schema(journal.db)
+        self.latest_account = None
 
     def closed_rows(self, symbol, now):
         return completed_rows(self.serials[symbol], self.config.bar_seconds, now,
@@ -152,6 +153,7 @@ class ContinuousLoop:
         snapshot = account_snapshot(self.api, time_ns=self.now, status=status,
                                     totals=account_totals(self.j.db))
         save_account(self.j, snapshot, trigger=trigger)
+        self.latest_account = snapshot
 
     def accept_fill(self, fill):
         if self.j.has_fill(fill):
@@ -464,7 +466,8 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
             emit_progress(progress, 'research_state', run_id=j.path.name, symbol=held,
                 phase=loop.roll.state.phase, precision=config.precision, risk=risk,
                 logical_risk=public_values(asdict(loop.risk)), roll=asdict(loop.roll.state),
-                equity=api.get_account().balance, commission=api.get_account().commission)
+                equity=api.get_account().balance, commission=api.get_account().commission,
+                account=loop.latest_account)
         if view_progress and loop and quote and (force or time.monotonic()-last_publish >= .2):
             revision += 1
             frame = continuous_snapshot(j, config, quote, now=loop.now, revision=revision,

@@ -68,7 +68,8 @@
       if(!checked(response))return;ref=response.experiment;form.render(response.config);form.setSaved(true);await refresh();notice.textContent='已新建主力连续副本，原实验和旧结果保留；可以选择跨年度日期。';});
     const costLabel=el('label','附加独立双倍费用回放 '),cost=el('input');cost.type='checkbox';costLabel.prepend(cost);actions.append(costLabel);
     const watchLabel=el('label','观看交易过程（只读） '),watch=el('input');watch.type='checkbox';watch.dataset.watchResearch='true';watchLabel.prepend(watch);actions.append(watchLabel);
-    const liveFrame=el('iframe'),liveNote=el('p');liveNote.className='research-chart-state';liveNote.hidden=true;liveFrame.className='research-live-frame';liveFrame.title='本次实验交易过程';liveFrame.hidden=true;root.append(liveNote,liveFrame);
+    const liveFrame=el('iframe'),liveNote=el('p'),accountRoot=el('div');liveNote.className='research-chart-state';liveNote.hidden=true;liveFrame.className='research-live-frame';liveFrame.title='本次实验交易过程';liveFrame.hidden=true;accountRoot.hidden=true;
+    const accountView=globalThis.QfAccountView?.create(accountRoot,{scenario:'research'});root.append(liveNote,liveFrame,accountRoot);
     let liveBinding=null,liveJob=null,openingLive=false,latestState={};
     try{watch.checked=localStorage.getItem('qf-watch-research')==='true';}catch(_){}
     function pauseLive(){if(liveBinding?.run_id)liveFrame.contentWindow.postMessage({kind:'qf-live-pause',run_id:liveBinding.run_id,generation:liveBinding.generation,paused:!watch.checked},new URL(liveBinding.url).origin);}
@@ -86,7 +87,8 @@
     watch.onchange=()=>{try{localStorage.setItem('qf-watch-research',String(watch.checked));}catch(_){}pauseLive();syncLive(latestState).catch(()=>{notice.textContent='运行图暂不可用，后台进度仍会继续。';});};
     function liveMessage(e){if(!liveBinding||e.source!==liveFrame.contentWindow||e.origin!==new URL(liveBinding.url).origin||e.data?.generation!==liveBinding.generation)return;
       if(liveBinding.run_id&&e.data.run_id!==liveBinding.run_id)return;
-      if(e.data.kind==='qf-live-ready'){liveBinding.run_id=e.data.run_id;pauseLive();}}
+      if(e.data.kind==='qf-live-ready'){liveBinding.run_id=e.data.run_id;pauseLive();}
+      if(e.data.kind==='qf-research-account'&&e.data.account){accountRoot.hidden=false;accountView?.update(e.data.account,[]);}}
     addEventListener('message',liveMessage);
     const activateLabel=el('label','允许本实验产生快期模拟委托 '),activate=el('input');activate.type='checkbox';activateLabel.prepend(activate);actions.append(activateLabel);
     const run=button('运行回测',async()=>{if(!await save())return;stress=cost.checked?{...ref}:null;
@@ -107,6 +109,7 @@
     async function poll(){if(disposed||polling)return;polling=true;try{const s=await api.get_research_state();if(disposed)return;
       const busy=s.running,description=describeState(s);form.setRunning(busy&&s.status!=='discovering');for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
       stopButton.disabled=!busy;flattenButton.disabled=!busy||s.mode!=='paper'||!s.activate;
+      accountRoot.hidden=!s.account;if(accountView)accountView.update(s.account,[]);
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
       const mainMode=form.read().schema_version===3;
       const valid=mainMode||(matches&&(s.contracts||[]).some(c=>c.symbol===form.read().symbol)&&!form.isLegacy);
@@ -138,7 +141,7 @@
     return {show(next){const paperTransition=(view==='paper')!==(next==='paper');view=next;root.hidden=!['strategy','backtests','paper'].includes(view);run.hidden=view==='paper';costLabel.hidden=view==='paper';activateLabel.hidden=view!=='paper';paper.hidden=view!=='paper';
       if(!ref&&paperTransition)form.render(QfResearchForm.defaults(view==='paper'?'fixed':'historical_main'));
       intro.textContent=view==='paper'?'快期TqKq主模拟账户：默认仅观察。资金由服务端返回，与行情图的本地模拟账户不同。':'选择双均线、品种、周期和起止日期；默认按历史主力自动移仓，可跨年回测。';},
-      updateCatalog:rows=>form.setCatalog(rows),prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();}};
+      updateCatalog:rows=>form.setCatalog(rows),prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();accountView?.dispose?.();}};
   }
   globalThis.QfResearch={create,describeState};
 })();

@@ -14,10 +14,14 @@
   }
   globalThis.QfNativeLiveResearch={attach,acceptMessage};
   if(typeof window==='undefined'||!window.__qfLiveResearch)return;
-  const binding=window.__qfLiveResearch;let run=binding.run_id,revision=0,payload=null,layer=null,chart=null,busy=false,alive=true,paused=false,installed=0,lastRequest='';
+  const binding=window.__qfLiveResearch;let run=binding.run_id,revision=0,payload=null,layer=null,chart=null,busy=false,alive=true,paused=false,installed=0,lastRequest='',accountTime='';
   let parentOrigin=null;try{parentOrigin=new URL(document.referrer).origin;}catch(_){}
   const banner=document.createElement('div');banner.className='qf-replay-banner';banner.textContent='运行图 · 等待后台处理历史数据；不会另行连接账户';document.body.prepend(banner);
   const emit=kind=>{if(parentOrigin)parent.postMessage({kind,run_id:run,generation:binding.generation,revision},parentOrigin);};
+  function accountFor(stamp){const history=payload?.account_history;if(!history)return payload?.account||null;
+    let chosen=history.seed||null;for(const sample of history.samples||[])if(BigInt(sample.time_ns)<=BigInt(stamp))chosen=sample;return chosen||payload?.account||null;}
+  function emitAccount(stamp){if(!parentOrigin||!payload||!stamp||stamp===accountTime)return;accountTime=stamp;const account=accountFor(stamp);
+    if(account)parent.postMessage({kind:'qf-research-account',run_id:run,generation:binding.generation,revision,time_ns:stamp,account},parentOrigin);}
   function install(next){const view=document.querySelector('.tq-top-view')?.__vue__,sdk=view?.$tqsdk;if(!sdk)return;
     const first=next.first_bar_id||0,last=first+next.bars.length-1,duration=next.bar_seconds*1e9,symbol=next.symbol;
     const request=window.__replayRequests.web_chart||{chart_id:'web_chart',ins_list:symbol,duration,view_width:100};
@@ -37,7 +41,7 @@
     const duration=payload.bar_seconds*1e9;
     if(view.instrumentId!==payload.symbol||view.duration!==duration){install(payload);view.instrumentId=payload.symbol;view.duration=duration;return false;}
     const next=window.QfNativeHistory?.getChart?.();if(!next||next.symbol!==payload.symbol||next.duration!==duration){install(payload);return false;}
-    if(next!==chart){layer?.dispose();chart=next;layer=attach(chart,{run_id:run,generation:binding.generation,install});}
+    if(next!==chart){layer?.dispose();chart=next;layer=attach(chart,{run_id:run,generation:binding.generation,install,onTime:emitAccount});}
     const applied=layer.apply(payload);if(applied)emit('qf-live-ready');
     const request=window.__replayRequests.web_chart;
     if(request&&JSON.stringify(request)!==lastRequest)install(payload);
@@ -49,6 +53,7 @@
       if(packet.terminal){alive=false;clearInterval(timer);banner.textContent=packet.reason==='contract_range_exceeds_expiry'?'本次回测已结束，结束日期超过所选合约到期日。请修改日期后重新查询合约；本次没有K线可显示。':'本次任务已结束，没有可显示的K线。请查看主页面的结束原因。';return;}
       if(packet.changed){run=packet.run_id;payload=packet.snapshot;revision=payload.revision;
         banner.textContent=`运行过程（${payload.terminal?(payload.progress.finished?'已保存完成':'未完成／已停止'):'计算中'}） · 只显示最近500根K线、窗口内最多5000条事件 · 图表时间 ${new Date(Number(BigInt(payload.as_of_ns)/1000000n)).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})} · 全部证据保存在本机结果中`;}
+      if(payload?.as_of_ns)emitAccount(payload.as_of_ns);
       draw();
     }catch(_){banner.textContent='运行图暂时读取失败；后台继续计算，请查看主页面进度。';}
     finally{busy=false;}

@@ -158,6 +158,7 @@ class ResearchLoop:
         self.total_fee = dec(journal.get('total_commission', 0))
         self.startup_equity = dec(journal.get('initial_equity', config.initial_balance))
         self.account_evidence = account_schema(journal.db)
+        self.latest_account = None
 
     def record(self, kind, now, payload=None, target=None):
         self.journal.commit_update(uuid.uuid4().hex, time_ns=now, kind=kind,
@@ -304,6 +305,7 @@ class ResearchLoop:
         snapshot = account_snapshot(self.api, time_ns=self.as_of_ns, status=status,
                                     totals=account_totals(self.journal.db))
         save_account(self.journal, snapshot, trigger=trigger)
+        self.latest_account = snapshot
 
     def step(self, quote, serial, *, minimum_bar, start_ns, end_ns, flatten):
         self.quote = quote
@@ -375,7 +377,8 @@ class ResearchLoop:
         emit_progress(self.progress, 'research_state', **public_values(dict(
             phase=self.phase, risk=asdict(self.risk), equity=str(self.api.get_account().balance),
             commission=str(self.total_fee), symbol=self.config.symbol,
-            precision=self.config.precision, run_id=self.journal.path.name)))
+            precision=self.config.precision, run_id=self.journal.path.name,
+            account=self.latest_account)))
         return self.stopping_flat and self.phase == 'flat'
 
 

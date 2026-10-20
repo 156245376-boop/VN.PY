@@ -230,6 +230,12 @@ def read_continuous_run(root, run_id, *, details=False):
     if details:
         page = ContinuousReader(path).initial()
         result.update(ContinuousReader(path).window(page['offset'], 2000))
+        with closing(ContinuousReader(path).connect()) as db:
+            span = db.execute('SELECT min(time_ns),max(time_ns) FROM signal_bars').fetchone()
+            result['account'] = read_account(db, at_ns=span[1])
+            result['protection'] = protection_window(
+                db, first_ns=span[0] or 0, as_of_ns=span[1] or 0,
+                series='signal', symbol=None)
     return result
 
 

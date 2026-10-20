@@ -15,9 +15,10 @@
   function time(stamp){try{return new Date(Number(BigInt(stamp)/1000000n)+8*3600000).toISOString().slice(0,19).replace('T',' ');}catch(_){return '时间待核实';}}
   function create(root,api){let current=null,details={fills:[],risk_events:[]},binding=null,queued=null,disposed=false,fillRequest=0;
     const el=(tag,text)=>{const e=document.createElement(tag);e.textContent=text??'';return e;};
-    const title=el('h3','实验结果与比较'),list=el('div'),compareButton=el('button','比较所选两个运行'),comparison=el('div'),summary=el('div'),reason=el('pre'),frame=document.createElement('iframe');
-    const selected=new Set(),tradeList=el('div');tradeList.className='table-scroll';reason.style.whiteSpace='pre-wrap';frame.hidden=true;
-    const replay=el('button','查看成交K线（离线复盘）');root.replaceChildren(title,list,compareButton,comparison,summary,replay,tradeList,reason,frame);
+    const title=el('h3','实验结果与比较'),list=el('div'),compareButton=el('button','比较所选两个运行'),comparison=el('div'),summary=el('div'),reason=el('pre'),frame=document.createElement('iframe'),accountRoot=el('div');
+    const selected=new Set(),tradeList=el('div');tradeList.className='table-scroll';reason.style.whiteSpace='pre-wrap';frame.hidden=true;accountRoot.hidden=true;
+    const accountView=globalThis.QfAccountView?.create(accountRoot,{scenario:'research'});
+    const replay=el('button','查看成交K线（离线复盘）');root.replaceChildren(title,list,compareButton,comparison,summary,replay,tradeList,reason,accountRoot,frame);
     function table(headers,rows){const t=el('table'),thead=el('thead'),head=el('tr'),body=el('tbody');for(const h of headers)head.append(el('th',h));thead.append(head);
       for(const row of rows){const tr=el('tr');for(const value of row)tr.append(el('td',value));body.append(tr);}t.append(thead,body);return t;}
     async function refresh(){const response=await api.list_research_runs();if(disposed)return;list.replaceChildren();
@@ -39,8 +40,9 @@
       if(!packet){reason.textContent='未能读取该成交的已保存证据。';return;}
       const f=packet.fill;
       const events=packet.risk_events.filter(e=>BigInt(e.time_ns)<=BigInt(f.time_ns)),last=fillEvent(packet.risk_events,f.key),signal=events.findLast(e=>e.payload?.signal)?.payload.signal;
+      let trade=null;try{const response=await api.get_research_trade?.(run,key);if(response?.ok)trade=response.details;}catch(_){}
       const r=last?.risk||{};reason.textContent=fillName(f)+' · '+time(f.time_ns)+'（北京时间）\n成交：'+number(f.volume)+' 手，价格 '+number(f.price)+'\n原因：'+reasonName(r.exit_reason)+
-        '\n初始R：'+number(r.initial_r)+' 元；阶梯：'+(r.stage??'—')+'；保护价：'+number(r.stop_price)+(signal?'\n交叉依据：快线 '+number(signal.fast_current)+'；慢线 '+number(signal.slow_current):'');
+        '\n初始R：'+number(trade?.initial_r??r.initial_r)+' 元；阶梯：'+(r.stage??'—')+'；保护价：'+number(trade?.entry_plan?.stop_price??r.stop_price)+(signal?'\n交叉依据：快线 '+number(signal.fast_current)+'；慢线 '+number(signal.slow_current):'')+(trade?.pivot?'\n确认拐点：'+trade.pivot.kind+' '+number(trade.pivot.price)+' · 确认时间 '+time(trade.pivot.confirmed_ns):'');
       if(binding&&focus)frame.contentWindow.postMessage({kind:'qf-replay-focus',run_id:binding.run_id,revision:binding.revision,fill_id:key,time_ns:f.time_ns},new URL(binding.url).origin);}
     async function openReplay(){if(!current)return;const r=await api.open_research_replay(current.run_id);if(!r.ok){reason.textContent=r.reason;return;}
       binding=r;frame.hidden=false;frame.src=r.url;}
@@ -53,15 +55,17 @@
       if(result.config.schema_version===3)summary.append(el('p',`历史主力连续 · 换月 ${result.roll_count??0} 次 · 移仓手续费 ${number(result.roll_commission)} 元（已包含在总手续费） · 完整交易按逻辑交易统计；信号图使用因果拼接价格，成交详情保留实际合约原价。`));
       if(binding?.run_id!==result.run_id){frame.hidden=true;frame.removeAttribute('src');binding=null;}
       const r=await api.get_research_result(result.run_id);if(disposed||current.run_id!==result.run_id)return;if(!r.ok){reason.textContent=r.reason;return;}
-      details=r.details;tradeList.replaceChildren();const t=table(['成交时间（北京时间）','操作','手数','成交价','原因'],[]);const body=t.querySelector('tbody');
+      details=r.details;tradeList.replaceChildren();accountRoot.hidden=!details.account;if(accountView)accountView.update(details.account,[]);
+      const t=table(['成交时间（北京时间）','操作','手数','成交价','原因'],[]);const body=t.querySelector('tbody');
       for(const f of details.fills){const tr=el('tr');for(const text of [time(f.time_ns),fillName(f)+(f.symbol?' · '+f.symbol:'')+(f.role==='roll_out'?'（移仓平旧）':f.role==='roll_in'?'（移仓开新）':''),number(f.volume),number(f.price),'点击查看并定位'])tr.append(el('td',text));
         tr.style.cursor='pointer';tr.onclick=async()=>{showFill(f.key);if(!binding){queued=f.key;await openReplay();}};body.append(tr);}tradeList.append(t);
       if(!details.fills.length)tradeList.append(el('p',emptyFillText(result.fill_count)));}
     function message(e){if(!binding||e.source!==frame.contentWindow||e.origin!==new URL(binding.url).origin||e.data?.run_id!==binding.run_id||e.data?.revision!==binding.revision)return;
       if(e.data.kind==='qf-replay-ready'&&queued){const key=queued;queued=null;showFill(key);}
+      if(e.data.kind==='qf-research-account'&&e.data.account){accountRoot.hidden=false;accountView?.update(e.data.account,[]);}
       if(e.data.kind==='qf-replay-fill')showFill(e.data.fill?.key,false);}
     addEventListener('message',message);refresh().catch(()=>{});
-    return {refresh,render,compare,dispose(){disposed=true;removeEventListener('message',message);frame.removeAttribute('src');}};
+    return {refresh,render,compare,dispose(){disposed=true;removeEventListener('message',message);frame.removeAttribute('src');accountView?.dispose?.();}};
   }
   globalThis.QfResearchResults={create,number,precision,fillName,fillEvent,loadFillDetails,emptyFillText};
 })();

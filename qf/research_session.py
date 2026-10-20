@@ -83,6 +83,8 @@ class ResearchSession:
                     if isinstance(fields.get(key), dict):
                         self._state[key] = {k: v for k, v in fields[key].items() if k in allowed
                                             and isinstance(v, (str, int, float, bool, type(None)))}
+                if isinstance(fields.get('account'), dict):
+                    self._state['account'] = wire(copy.deepcopy(fields['account']))
                 self._state['status'] = 'active' if self._state.get('activate') else 'observing'
 
     def start(self, mode, config, credentials, *, activate=False, resume=None, experiment_ref,

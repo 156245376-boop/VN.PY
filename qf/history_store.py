@@ -81,6 +81,10 @@ class HistoryStore:
             raise ValueError('数据集不存在')
         return DataRequest.from_public(json.loads(row[0]))
 
+    def dataset_request(self, dataset_id):
+        with closing(self.connect()) as db:
+            return self._dataset(db, dataset_id)
+
     @staticmethod
     def _finite(value, name, *, positive=False):
         value = dec(value)

@@ -81,6 +81,15 @@ class ResearchJobsBridge:
         except KeyError:
             return self._error('任务不存在。', 'job_not_found')
 
+    def remove_backtest(self, job_id):
+        try:
+            self.jobs.remove(job_id)
+            return dict(ok=True, reason='任务卡已移除；保存的结果文件未删除。')
+        except KeyError:
+            return self._error('任务不存在。', 'job_not_found')
+        except ValueError:
+            return self._error('运行中的任务需先停止，再移除。', 'job_running')
+
     def set_backtest_watch(self, job_id, enabled):
         if type(enabled) is not bool:
             return self._error('观看参数无效。', 'invalid_watch')

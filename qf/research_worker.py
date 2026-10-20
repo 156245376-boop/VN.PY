@@ -28,6 +28,7 @@ def worker_main(task, credential_pipe, control_pipe, status_queue, frame_queue,
     demand = ViewDemand()
     safe = {'status', 'reason', 'run_id', 'failure_context', 'summary'}
     last_run = [None]
+    latest_state = {}
     sequences = {'status': 0, 'frame': 0}
 
     def control_loop():
@@ -57,14 +58,15 @@ def worker_main(task, credential_pipe, control_pipe, status_queue, frame_queue,
             run_id = fields.get('run_id') or last_run[0]
             if run_id:
                 last_run[0] = run_id
+            allowed = safe | {
+                'details', 'equity', 'commission', 'symbol', 'phase', 'risk',
+                'logical_risk', 'roll', 'account'}
+            latest_state.update({key: value for key, value in fields.items()
+                                 if key in allowed})
+            latest_state['stage'] = stage
             sequences['status'] += 1
-            payload = {'stage': stage, **{key: value for key, value in fields.items()
-                                          if key in safe or key in {
-                                              'details', 'equity', 'commission', 'symbol',
-                                              'phase', 'risk', 'logical_risk', 'roll',
-                                              'account'}}}
             _put_latest(status_queue, message(task, run_id=run_id, stream='status',
-                seq=sequences['status'], kind='state', payload=payload))
+                seq=sequences['status'], kind='state', payload=dict(latest_state)))
 
         def view(frame):
             if not demand.wants_frame():
@@ -78,6 +80,7 @@ def worker_main(task, credential_pipe, control_pipe, status_queue, frame_queue,
                         results_root, credentials,
                         progress=progress, view_progress=view,
                         view_requested=demand.wants_frame,
+                        stop_requested=stop_event.is_set,
                         experiment_ref=task.experiment_ref,
                         fee_multiplier=task.fee_multiplier,
                         job_binding={'job_id': task.job_id, 'epoch': task.epoch})

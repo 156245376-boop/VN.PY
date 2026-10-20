@@ -172,6 +172,10 @@ class WorkbenchBridge:
         with self._lock:
             return self._jobs_bridge.stop_backtest(job_id)
 
+    def remove_backtest(self, job_id):
+        with self._lock:
+            return self._jobs_bridge.remove_backtest(job_id)
+
     def set_backtest_watch(self, job_id, enabled):
         with self._lock:
             return self._jobs_bridge.set_backtest_watch(job_id, enabled)

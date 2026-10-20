@@ -31,6 +31,11 @@ class FakeJobs:
             raise KeyError(job_id)
         self.items[job_id]['status'] = 'stopping'
 
+    def remove(self, job_id):
+        if job_id not in self.items:
+            raise KeyError(job_id)
+        self.items.pop(job_id)
+
     def set_watch(self, job_id, enabled):
         if job_id not in self.items:
             raise KeyError(job_id)
@@ -77,3 +82,11 @@ def test_watch_and_capacity_validate_values(tmp_path):
     assert jobs.watch == [('a'*32, True)]
     assert value.set_backtest_capacity(4)['ok']
     assert not value.set_backtest_capacity(5)['ok']
+
+
+def test_waiting_task_can_be_removed(tmp_path):
+    value, ref, jobs = bridge(tmp_path)
+    value.start_backtest(ref['experiment_id'], ref['revision'])
+    assert value.remove_backtest('a'*32)['ok']
+    assert value.list_backtest_jobs()['jobs'] == []
+    assert not value.remove_backtest('a'*32)['ok']

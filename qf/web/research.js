@@ -12,6 +12,8 @@
     new_run_requires_flat_account:'新模拟实验要求整个账户空仓',new_run_requires_no_orders:'新模拟实验要求账户没有未结委托',
     position_trade_mismatch:'实际持仓与本地成交记录不一致',unexpected_position:'发现超限、双向或其他合约持仓',execution_timeout:'执行等待超时，已冻结后续执行',
     contract_query_or_permission_failed:'合约查询未完成，请核对认证和权限',research_start_or_record_failed:'研究任务或本地记录未能启动',shutdown_unconfirmed:'退出清理超时，状态保留为待核实'};
+  Object.assign(reasons,{capacity:'并发任务已满，正在等待空闲槽位',baseline_pending:'等待基准任务完成后运行费用压力回放',
+    worker_disconnected:'回测子进程意外断开，请查看已完成记录后重新提交'});
   Object.assign(reasons,{historical_main_missing:'该日期没有可核实的历史主力映射',historical_main_invalid:'历史主力不属于所选品种',
     roll_reference_missing:'换月缺少两合约同一时刻的完成参考柱，已停止',prewarm_insufficient:'起始日前历史主力预热不足，未开始交易',
     roll_spec_incompatible:'新旧合约乘数或最小手数不兼容，已停止移仓',roll_unaffordable:'资金不足以按原手数开新，未偷偷减仓',
@@ -37,8 +39,19 @@
     return {terminal,notice,progressText,phaseNotice,showProgress:!!p,progressValue:terminal?(p?.percent??0):warming?p?.warmup_percent:p?.percent,
       showChart:researchState&&(!terminal||!!(p?.completed_bars||p?.fill_count))};
   }
+  function allowBacktestStart(last,key,now){
+    return !last||last.key!==key||now-last.at>=1200;
+  }
+  function jobDisplayState(job){
+    const aliases={waiting:'created',starting:'connecting',stopping:'active',saving:'active',
+      warmup:'active',backtesting:'active',interrupted:'failed'};
+    return {...job,status:aliases[job?.status]||job?.status||'created',
+      running:job?.running===true,mode:'backtest',activate:false,
+      progress:job?.progress||null,account:job?.account||null,risk:job?.risk||{},
+      result:job?.result||null};
+  }
   function create(root,api){
-    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false,acceptedRequest=null,lastTerminalKey='',selectedJob=null;
+    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false,acceptedRequest=null,lastTerminalKey='',selectedJob=null,lastStart=null;
     const el=(tag,text,cls)=>{const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e;};
     const heading=el('h2','双均线交叉 · 策略实验'),intro=el('p','金叉做多、死叉做空；使用已完成K线，反向时先平仓。');
     const picker=el('select');picker.setAttribute('aria-label','已保存实验');
@@ -48,7 +61,10 @@
     let useBacktestJobs=false,capabilityChecked=false,jobChartOpen=false;
     const jobsPanel=globalThis.QfResearchJobs?.create(jobsRoot,api,{
       onSelect(job){selectedJob=job.job_id;jobChartOpen=false;liveFrame.hidden=true;liveFrame.removeAttribute('src');liveBinding=null;if(job.account)ensureAccount?.(job.account);poll();},
-      onChart(answer){jobChartOpen=true;watch.checked=true;liveBinding=answer;liveJob=selectedJob;liveFrame.hidden=false;liveFrame.src=answer.url;},
+      onChart(answer,job){selectedJob=job.job_id;jobsPanel?.select(selectedJob);jobChartOpen=true;watch.checked=true;
+        liveBinding=answer;liveJob=job.job_id;liveFrame.hidden=false;liveFrame.src=answer.url;},
+      onWatch(job,enabled){if(enabled){selectedJob=job.job_id;watch.checked=true;jobChartOpen=false;poll();}
+        else if(liveJob===job.job_id){liveFrame.hidden=true;liveFrame.removeAttribute('src');liveBinding=null;liveJob=null;jobChartOpen=false;}},
       notice(text){notice.textContent=text;}});
     const form=QfResearchForm.create(formRoot,{onChange(key){if(['continuous','start','end'].includes(key)){acceptedRequest=null;contractKey='';}}});
     function checked(response){if(response.ok){form.showErrors({});return response;}
@@ -87,23 +103,33 @@
       liveNote.textContent=description.phaseNotice||(s.job_id?'运行图只显示本次已处理的数据。':'尚未启动回测；运行后可在这里观看交易过程。');
       if(!watch.checked||!s.job_id||openingLive)return;
       if(liveBinding&&liveJob===s.job_id){pauseLive();return;}openingLive=true;
-      try{const response=await api.open_research_live_chart();if(!response.ok){notice.textContent=response.reason;return;}
+      try{const response=useBacktestJobs&&api.open_backtest_chart
+          ?await api.open_backtest_chart(s.job_id):await api.open_research_live_chart();
+        if(!response.ok){notice.textContent=response.reason;return;}
         liveBinding=response;liveJob=s.job_id;liveFrame.src=response.url;
       }finally{openingLive=false;}}
-    watch.onchange=()=>{try{localStorage.setItem('qf-watch-research',String(watch.checked));}catch(_){}pauseLive();syncLive(latestState).catch(()=>{notice.textContent='运行图暂不可用，后台进度仍会继续。';});};
+    watch.onchange=()=>{try{localStorage.setItem('qf-watch-research',String(watch.checked));}catch(_){}
+      if(useBacktestJobs&&latestState.job_id&&api.set_backtest_watch)
+        api.set_backtest_watch(latestState.job_id,watch.checked).then(()=>jobsPanel?.refresh()).catch(()=>{});
+      pauseLive();syncLive(latestState).catch(()=>{notice.textContent='运行图暂不可用，后台进度仍会继续。';});};
     function liveMessage(e){if(!liveBinding||e.source!==liveFrame.contentWindow||e.origin!==new URL(liveBinding.url).origin||e.data?.generation!==liveBinding.generation)return;
       if(liveBinding.run_id&&e.data.run_id!==liveBinding.run_id)return;
       if(e.data.kind==='qf-live-ready'){liveBinding.run_id=e.data.run_id;pauseLive();}
       if(e.data.kind==='qf-research-account'&&e.data.account){accountRoot.hidden=false;accountView?.update(e.data.account,[]);}}
     addEventListener('message',liveMessage);
     const activateLabel=el('label','允许本实验产生快期模拟委托 '),activate=el('input');activate.type='checkbox';activateLabel.prepend(activate);actions.append(activateLabel);
-    const run=button('运行回测',async()=>{if(!await save())return;
+    const run=button('运行回测',async()=>{const intent=JSON.stringify([form.read(),cost.checked]);
       if(useBacktestJobs&&api.start_backtest){
+        const startedAt=globalThis.performance?.now?.()||Date.now();
+        if(!allowBacktestStart(lastStart,intent,startedAt)){notice.textContent='相同参数刚刚已提交；请稍候，避免重复任务。';return;}
+        if(!await save())return;
         const requestId=(globalThis.crypto?.randomUUID?.()||String(Date.now())+Math.random());
         const response=await api.start_backtest(ref.experiment_id,ref.revision,cost.checked,requestId);
-        if(!checked(response))return;selectedJob=response.selected_job_id;
+        if(!checked(response))return;lastStart={key:intent,
+          at:globalThis.performance?.now?.()||Date.now()};selectedJob=response.selected_job_id;
         await jobsPanel?.refresh();jobsPanel?.select(selectedJob);lastTerminalKey='';notice.textContent='回测任务已提交，可在任务卡中切换查看。';return;
       }
+      if(!await save())return;
       stress=cost.checked?{...ref}:null;
       const response=await api.start_research(ref.experiment_id,ref.revision,'backtest');if(!checked(response)){stress=null;return;}lastTerminalKey='';notice.textContent='回测任务已提交，正在核实运行状态。';});
     const paper=button('连接模拟并观察',async()=>{if(activate.checked&&!confirm('允许此策略控制快期主模拟账户并产生模拟委托？请确认账户空仓且无挂单。'))return;
@@ -125,39 +151,52 @@
       if(!capabilityChecked&&api.get_research_capabilities){const capability=await api.get_research_capabilities();useBacktestJobs=capability?.ok&&capability.use_backtest_jobs===true;capabilityChecked=true;}
       let jobState=null;
       if(useBacktestJobs&&api.list_backtest_jobs&&jobsPanel){await jobsPanel.refresh();
+        if(selectedJob&&!jobsPanel.jobs().some(job=>job.job_id===selectedJob)){
+          selectedJob=null;jobChartOpen=false;liveBinding=null;liveJob=null;
+          liveFrame.hidden=true;liveFrame.removeAttribute('src');}
         if(selectedJob){const response=await api.get_backtest_state?.(selectedJob);if(response?.ok)jobState=response.state;}}
       const s=await api.get_research_state();if(disposed)return;
-      const busy=s.running,description=describeState(s);form.setRunning(busy&&s.status!=='discovering');for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
-      stopButton.disabled=!(busy||jobState?.running);flattenButton.disabled=!busy||s.mode!=='paper'||!s.activate;
-      if(s.account)ensureAccount(s.account);else accountRoot.hidden=true;
-      if(jobState){state.textContent=(jobState.config?.name||'任务')+' · '+(jobState.status||'状态待核实')+(jobState.reason?' · '+jobState.reason:'');state.dataset.light=jobState.running?'green':['failed','frozen'].includes(jobState.status)?'red':'yellow';
-        if(jobState.account)ensureAccount(jobState.account);
-        if(jobState.progress){const jobPercent=jobState.progress.percent;progressBar.hidden=false;if(jobPercent==null)progressBar.removeAttribute('value');else progressBar.value=jobPercent;progressText.textContent=`任务进度 ${jobPercent==null?'待核实':jobPercent+'%'} · 已处理 ${jobState.progress.completed_bars||0} 根柱、${jobState.progress.fill_count||0} 笔成交`;}}
+      const legacyBusy=s.running,usingJob=useBacktestJobs&&!!jobState;
+      const display=usingJob?jobDisplayState(jobState):s,busy=display.running===true;
+      const description=describeState(display);
+      form.setRunning(!usingJob&&legacyBusy&&s.status!=='discovering');
+      stopButton.disabled=usingJob?!['starting','active','warmup','backtesting'].includes(jobState?.status):!(legacyBusy||s.status==='connecting');
+      flattenButton.disabled=usingJob||!legacyBusy||s.mode!=='paper'||!s.activate;
+      if(display.account)ensureAccount(display.account);else accountRoot.hidden=true;
+      if(usingJob){state.textContent=(jobState.config?.name||'任务')+' · '+(globalThis.QfResearchJobs?.statusText?.[jobState.status]||'状态待核实')+(jobState.reason?' · '+(reasons[jobState.reason]||'请核对任务状态'):'');
+        state.dataset.light=jobState.running?'green':['failed','frozen'].includes(jobState.status)?'red':'yellow';}
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
       const mainMode=form.read().schema_version===3;
       const valid=mainMode||(matches&&(s.contracts||[]).some(c=>c.symbol===form.read().symbol)&&!form.isLegacy);
-      run.disabled=busy||!valid;paper.disabled=busy||!valid||mainMode;saveButton.disabled=busy||form.isLegacy;
-      query.hidden=mainMode;continuousCopy.hidden=mainMode||!ref;continuousCopy.disabled=busy;
+      run.disabled=!valid||(!usingJob&&legacyBusy);
+      paper.disabled=legacyBusy||busy||!valid||mainMode;
+      saveButton.disabled=(!usingJob&&legacyBusy)||form.isLegacy;
+      query.disabled=legacyBusy;copy.disabled=legacyBusy;
+      query.hidden=mainMode;continuousCopy.hidden=mainMode||!ref;continuousCopy.disabled=legacyBusy;
       if(view==='paper'&&mainMode&&!busy)notice.textContent='当前为主力连续历史实验，仅可回测。请选择“新建实验”创建固定合约模拟模板。';
       if(!busy&&!valid&&!form.isLegacy&&!notice.textContent)notice.textContent='请先查询当前品种和日期的实际合约，再选择月份。';
-      state.textContent=(labels[s.status]||'状态待核实')+(s.reason?' · '+(reasons[s.reason]||'运行状态需要核实'):'');state.dataset.light=['failed','frozen'].includes(s.status)?'red':busy?'green':'yellow';
-      const r=s.risk||{};risk.textContent=`本实验已核实持仓：${r.side===-1?'空':r.side===1?'多':'无方向'} ${r.quantity||0} 手；初始R：${r.initial_r??'—'} 元；保护价：${r.stop_price??'—'}；阶梯：${r.stage??'—'}；权益：${s.equity??'—'} 元；费用：${s.commission??'—'} 元。`;
-      if(s.config?.schema_version===3)risk.textContent+=` 当前实际主力：${s.symbol||'待核实'}；换月 ${s.roll_count??s.result?.summary?.roll_count??0} 次；已完成逻辑交易 ${s.closed_trade_count??s.result?.summary?.closed_trade_count??0} 笔。`;
-      if(s.failure_context?.date)state.textContent+=` · 日期 ${s.failure_context.date} · 合约 ${s.failure_context.symbol||'待核实'} · ${s.failure_context.data_type==='mapping'?'历史主力映射':s.failure_context.data_type==='calendar'?'交易日历':'历史行情'}`;
-      form.setRunState(s);
-      const p=s.progress;progressBar.hidden=!description.showProgress;progressBar.dataset.terminal=String(description.terminal);
+      if(!usingJob){state.textContent=(labels[s.status]||'状态待核实')+(s.reason?' · '+(reasons[s.reason]||'运行状态需要核实'):'');
+        state.dataset.light=['failed','frozen'].includes(s.status)?'red':legacyBusy?'green':'yellow';}
+      const r=display.risk||{},account=display.account||{};
+      const equity=account.equity??display.equity,commission=account.commission??display.commission;
+      risk.textContent=`本实验已核实持仓：${r.side===-1?'空':r.side===1?'多':'无方向'} ${r.quantity||0} 手；初始R：${r.initial_r??'—'} 元；保护价：${r.stop_price??'—'}；阶梯：${r.stage??'—'}；权益：${equity??'—'} 元；费用：${commission??'—'} 元。`;
+      if(display.config?.schema_version===3)risk.textContent+=` 当前实际主力：${display.symbol||'待核实'}；换月 ${display.roll_count??display.result?.summary?.roll_count??0} 次；已完成逻辑交易 ${display.closed_trade_count??display.result?.summary?.closed_trade_count??0} 笔。`;
+      if(display.failure_context?.date)state.textContent+=` · 日期 ${display.failure_context.date} · 合约 ${display.failure_context.symbol||'待核实'} · ${display.failure_context.data_type==='mapping'?'历史主力映射':display.failure_context.data_type==='calendar'?'交易日历':'历史行情'}`;
+      form.setRunState(display);
+      const p=display.progress;progressBar.hidden=!description.showProgress;progressBar.dataset.terminal=String(description.terminal);
       if(p){if(description.progressValue==null)progressBar.removeAttribute('value');else progressBar.value=description.progressValue;}
       progressText.textContent=description.progressText;
-      const terminalKey=JSON.stringify([s.job_id,s.run_id,s.status,s.reason]);
+      const terminalKey=JSON.stringify([display.job_id,display.run_id,display.status,display.reason]);
       if(description.terminal&&terminalKey!==lastTerminalKey){lastTerminalKey=terminalKey;notice.textContent=description.notice;
-        if(s.status!=='backtest_finished')stress=null;}
-      if(!(useBacktestJobs&&jobChartOpen))await syncLive(s);
+        if(display.status!=='backtest_finished')stress=null;}
+      if(!(usingJob&&jobChartOpen))await syncLive(display);
       const key=JSON.stringify([s.request_id,s.contract_request,s.contracts]);if(key!==contractKey&&s.status==='contracts_ready'&&matches&&(!acceptedRequest||acceptedRequest.request_id===s.request_id)){
         contractKey=key;const selection=form.setContracts(s.contracts,form.read().symbol);
         notice.textContent=!s.contracts.length?'区间内未返回实际合约，请核对权限与日期。':!selection.eligibleCount?'返回的月份合约均不能覆盖所选结束日，请缩短结束日后重新查询；软件不会自动修改日期。':!form.read().symbol?'请选择能覆盖结束日的实际月份；列表已标明到期日。':'已返回实际合约，请核对月份、到期日与历史覆盖。';}
-      if(s.result?.run_id&&s.result.run_id!==lastResult){lastResult=s.result.run_id;await results?.refresh();
-        if(s.result.summary)results?.render(s.result.summary);
-        if(stress&&s.status==='backtest_finished'){const next=stress;stress=null;const answer=await api.start_research(next.experiment_id,next.revision,'backtest',false,null,2);
+      const result=jobState?.result||s.result;
+      if(result?.run_id&&result.run_id!==lastResult){lastResult=result.run_id;await results?.refresh();
+        if(result.summary)results?.render(result.summary);
+        if(stress&&display.status==='backtest_finished'){const next=stress;stress=null;const answer=await api.start_research(next.experiment_id,next.revision,'backtest',false,null,2);
           notice.textContent=answer.ok?'基准已保存；开始独立双倍费用压力回放。':answer.reason;}}
     }catch(_){state.textContent='研究状态暂不可用';}finally{polling=false;}}
     const timer=setInterval(poll,700);refresh().catch(()=>{});poll();
@@ -166,5 +205,5 @@
       intro.textContent=view==='paper'?'快期TqKq主模拟账户：默认仅观察。资金由服务端返回，与行情图的本地模拟账户不同。':'选择双均线、品种、周期和起止日期；默认按历史主力自动移仓，可跨年回测。';},
       updateCatalog:rows=>form.setCatalog(rows),prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();accountView?.dispose?.();}};
   }
-  globalThis.QfResearch={create,describeState};
+  globalThis.QfResearch={create,describeState,allowBacktestStart,jobDisplayState};
 })();

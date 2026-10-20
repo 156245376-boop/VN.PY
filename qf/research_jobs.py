@@ -49,7 +49,7 @@ class ResearchJobs:
         job = dict(job_id=job_id, epoch=task.epoch, run_id=None, status='waiting',
                    running=False, config=task.config, experiment_ref=task.experiment_ref,
                    fee_multiplier=1, parent_job_id=None, progress=None, account=None,
-                   risk={}, reason='capacity', task=task)
+                   risk={}, watch=False, reason='capacity', task=task)
         self.jobs[job_id] = job
         self.order.append(job_id)
         ids = [job_id]
@@ -61,7 +61,7 @@ class ResearchJobs:
                 run_id=None, status='waiting', running=False, config=stress_task.config,
                 experiment_ref=stress_task.experiment_ref, fee_multiplier=2,
                 parent_job_id=job_id, progress=None, account=None, risk={},
-                reason='baseline_pending', task=stress_task)
+                watch=False, reason='baseline_pending', task=stress_task)
             self.order.append(stress_id)
             ids.append(stress_id)
         if request_id is not None:
@@ -200,8 +200,54 @@ class ResearchJobs:
             except Exception:
                 pass
 
+    def remove(self, job_id):
+        job = self.jobs.get(job_id)
+        if job is None:
+            raise KeyError('任务不存在')
+        if job.get('running') or job.get('status') in (
+                'starting', 'active', 'warmup', 'backtesting', 'stopping', 'saving'):
+            raise ValueError('运行中的任务需先停止')
+        doomed = [job_id]
+        if not job.get('parent_job_id'):
+            doomed.extend(other['job_id'] for other in self.jobs.values()
+                          if other.get('parent_job_id') == job_id
+                          and not other.get('running'))
+        for current in doomed:
+            removed = self.jobs.pop(current, None)
+            if current in self.order:
+                self.order.remove(current)
+            if removed is not None:
+                self._release(removed)
+        for request_id, ids in list(self.request_jobs.items()):
+            remaining = [current for current in ids if current in self.jobs]
+            if remaining:
+                self.request_jobs[request_id] = remaining
+            else:
+                self.request_jobs.pop(request_id, None)
+        return doomed
+
+    @staticmethod
+    def _release(job):
+        process = job.get('process')
+        if process is not None:
+            try:
+                process.join(.1)
+                if not process.is_alive():
+                    process.close()
+            except (AssertionError, OSError, ValueError):
+                pass
+        for key in ('control', 'terminal'):
+            channel = job.get(key)
+            if channel is not None:
+                try:
+                    channel.close()
+                except (OSError, ValueError):
+                    pass
+
     def set_watch(self, job_id, enabled):
         if job_id is None:
+            for job in self.jobs.values():
+                job['watch'] = False
             for job in self.jobs.values():
                 if job.get('control'):
                     try:
@@ -211,11 +257,20 @@ class ResearchJobs:
                         pass
             return
         job = self.jobs.get(job_id)
-        if job is None or job.get('control') is None:
+        if job is None:
+            raise KeyError('任务不可观看')
+        job['watch'] = bool(enabled)
+        if not job.get('running'):
+            return
+        if job.get('control') is None:
             raise KeyError('任务不可观看')
         generation = int(time.monotonic()*1000)
-        job['control'].send(dict(kind='set_watch', enabled=bool(enabled),
-                                 view_generation=generation))
+        try:
+            job['control'].send(dict(kind='set_watch', enabled=bool(enabled),
+                                     view_generation=generation))
+        except Exception:
+            job['watch'] = False
+            raise
 
     def set_capacity(self, value):
         self.capacity = self._capacity(value)

@@ -87,7 +87,11 @@ def _read(root, run_id):
 
 def read_run(root, run_id):
     from qf.continuous_results import read_continuous_run, schema_at
-    if schema_at(run_path(root, run_id)) == 2:
+    schema = schema_at(run_path(root, run_id))
+    if schema == 3:
+        from qf.local_results import read_local_run
+        return read_local_run(root, run_id)
+    if schema == 2:
         return read_continuous_run(root, run_id)
     config, state, _, _, span = _read(root, run_id)
     return dict(
@@ -111,7 +115,11 @@ def read_run(root, run_id):
 
 def summarize_run(root, run_id):
     from qf.continuous_results import schema_at, summarize_continuous_run
-    if schema_at(run_path(root, run_id)) == 2:
+    schema = schema_at(run_path(root, run_id))
+    if schema == 3:
+        from qf.local_results import summarize_local_run
+        return summarize_local_run(root, run_id)
+    if schema == 2:
         return summarize_continuous_run(root, run_id)
     config, state, fills, equity, _ = _read(root, run_id)
     initial = decimal_value(state.get("initial_equity", config.initial_balance))
@@ -198,7 +206,12 @@ def compare_runs(root, run_ids):
 
 def run_details(root, run_id):
     from qf.continuous_results import read_continuous_run, schema_at
-    if schema_at(run_path(root, run_id)) == 2:
+    schema = schema_at(run_path(root, run_id))
+    if schema == 3:
+        from qf.local_results import local_run_details
+        run_path(root, run_id)
+        return local_run_details(root, run_id)
+    if schema == 2:
         return read_continuous_run(root, run_id, details=True)
     read_run(root, run_id)
     path = run_path(root, run_id)

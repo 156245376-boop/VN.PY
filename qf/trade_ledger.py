@@ -47,6 +47,15 @@ def trade_ledger(db, *, as_of_ns=None, limit=LIMIT):
     if (as_of_ns is not None and (type(as_of_ns) is not int or as_of_ns < 0)
             or type(limit) is not int or not 1 <= limit <= LIMIT):
         raise ValueError('交易账本范围无效')
+    try:
+        schema_row = db.execute(
+            "SELECT value FROM state WHERE key='research_schema'"
+        ).fetchone()
+    except sqlite3.Error:
+        schema_row = None
+    if schema_row is not None and json.loads(schema_row[0]) == 3:
+        from qf.local_results import local_trade_ledger
+        return local_trade_ledger(db)
     tables = {row[0] for row in db.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     required = {'fills', 'logical_fills', 'logical_trades', 'risk_events',

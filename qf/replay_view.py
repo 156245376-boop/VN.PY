@@ -292,8 +292,11 @@ class ReplayView:
                 raise web.HTTPBadRequest(text="保护轨迹窗口无效") from None
 
         async def script(request):
-            name = ('continuous-replay.js' if request.path == '/continuous.js'
-                    else 'native-replay.js')
+            if request.path == '/native-toolbar.js':
+                name = 'native-toolbar.js'
+            else:
+                name = ('continuous-replay.js' if request.path == '/continuous.js'
+                        else 'native-replay.js')
             return web.FileResponse(Path(__file__).with_name("web") / name)
 
         async def locate(request):
@@ -317,6 +320,7 @@ class ReplayView:
         app.router.add_get("/bars", bars)
         app.router.add_get("/account", account)
         app.router.add_get("/protection", protection)
+        app.router.add_get('/native-toolbar.js', script)
         app.router.add_get("/replay.js", script)
         app.router.add_get('/continuous.js', script)
         app.router.add_get('/locate', locate)

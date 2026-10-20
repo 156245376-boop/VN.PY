@@ -2,6 +2,12 @@
 
 import json
 
+NATIVE_TOOLBAR_CSS = (
+    ".qf-native-top-actions{position:absolute!important;top:8px!important;right:12px!important;"
+    "z-index:12!important;display:flex!important;gap:6px!important}\n"
+    ".qf-native-fullscreen{position:relative!important;flex-shrink:0!important}"
+)
+
 
 def chart_html(assets, *, live=None, continuous=False):
     shim = """<script>window.__qfReplay=true;
@@ -19,7 +25,8 @@ window.__replayRequests={};
  if(request)window.__replayRequests[request.chart_id]={...request};return result;};
 }},[['qf-replay-wire','chunk-vendors']]]);</script>
 <style>.tq-button-group-durations{display:none!important}
-.qf-replay-banner{padding:7px;background:#fff1cd;font:13px Microsoft YaHei}</style>"""
+.qf-replay-banner{padding:7px;background:#fff1cd;font:13px Microsoft YaHei}
+""" + NATIVE_TOOLBAR_CSS + """</style>"""
     if live is not None:
         shim = shim.replace('window.__qfReplay=true;',
                             'window.__qfLiveResearch='+json.dumps(live)+';')
@@ -27,6 +34,7 @@ window.__replayRequests={};
     html = html.replace(
         "<title>tqsdk-python-web</title>", "<title>离线复盘 · 双均线实验</title>"
     )
+    html = html.replace("</body>", '<script src="/native-toolbar.js"></script></body>')
     html = html.replace("</body>", '<script src="/replay.js"></script></body>')
     if live is not None:
         html = html.replace('</body>', '<script src="/live.js"></script></body>')

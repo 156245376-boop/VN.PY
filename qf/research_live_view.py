@@ -109,7 +109,11 @@ class LiveResearchView:
             return ws
 
         async def script(request):
-            name = 'native-live-research.js' if request.path == '/live.js' else 'native-replay.js'
+            if request.path == '/native-toolbar.js':
+                name = 'native-toolbar.js'
+            else:
+                name = ('native-live-research.js' if request.path == '/live.js'
+                        else 'native-replay.js')
             return web.FileResponse(Path(__file__).with_name('web')/name)
 
         app = web.Application()
@@ -118,6 +122,7 @@ class LiveResearchView:
         app.router.add_get('/snapshot', snapshot)
         app.router.add_get('/url', urls)
         app.router.add_get('/ws', websocket)
+        app.router.add_get('/native-toolbar.js', script)
         app.router.add_get('/live.js', script)
         app.router.add_get('/replay.js', script)
         app.router.add_static('/web', assets, show_index=False)

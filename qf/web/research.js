@@ -69,7 +69,8 @@
     const costLabel=el('label','附加独立双倍费用回放 '),cost=el('input');cost.type='checkbox';costLabel.prepend(cost);actions.append(costLabel);
     const watchLabel=el('label','观看交易过程（只读） '),watch=el('input');watch.type='checkbox';watch.dataset.watchResearch='true';watchLabel.prepend(watch);actions.append(watchLabel);
     const liveFrame=el('iframe'),liveNote=el('p'),accountRoot=el('div');liveNote.className='research-chart-state';liveNote.hidden=true;liveFrame.className='research-live-frame';liveFrame.title='本次实验交易过程';liveFrame.hidden=true;accountRoot.hidden=true;
-    const accountView=globalThis.QfAccountView?.create(accountRoot,{scenario:'research'});root.append(liveNote,liveFrame,accountRoot);
+    let accountView=null;root.append(liveNote,liveFrame,accountRoot);
+    function ensureAccount(value){if(!value)return;accountRoot.hidden=false;if(!accountView&&globalThis.QfAccountView)accountView=QfAccountView.create(accountRoot,{scenario:'research'});accountView?.update(value,[]);}
     let liveBinding=null,liveJob=null,openingLive=false,latestState={};
     try{watch.checked=localStorage.getItem('qf-watch-research')==='true';}catch(_){}
     function pauseLive(){if(liveBinding?.run_id)liveFrame.contentWindow.postMessage({kind:'qf-live-pause',run_id:liveBinding.run_id,generation:liveBinding.generation,paused:!watch.checked},new URL(liveBinding.url).origin);}
@@ -109,7 +110,7 @@
     async function poll(){if(disposed||polling)return;polling=true;try{const s=await api.get_research_state();if(disposed)return;
       const busy=s.running,description=describeState(s);form.setRunning(busy&&s.status!=='discovering');for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
       stopButton.disabled=!busy;flattenButton.disabled=!busy||s.mode!=='paper'||!s.activate;
-      accountRoot.hidden=!s.account;if(accountView)accountView.update(s.account,[]);
+      if(s.account)ensureAccount(s.account);else accountRoot.hidden=true;
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
       const mainMode=form.read().schema_version===3;
       const valid=mainMode||(matches&&(s.contracts||[]).some(c=>c.symbol===form.read().symbol)&&!form.isLegacy);

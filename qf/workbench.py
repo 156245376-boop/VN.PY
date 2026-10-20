@@ -26,6 +26,7 @@ from qf.research_config import (
     validate_contract_request,
     validate_research_config,
 )
+from qf.research_jobs_bridge import ResearchJobsBridge
 from qf.research_live_view import LiveResearchView
 from qf.research_results import RUN_ID, compare_runs, read_run, run_details, summarize_run
 from qf.research_session import ResearchSession
@@ -92,6 +93,9 @@ class WorkbenchBridge:
         self._live_view = LiveResearchView(self._research.live_snapshot,
                                            state_provider=self._research.snapshot)
         self._live_job = None
+        self._jobs_bridge = ResearchJobsBridge(
+            root, self._experiments, login=self._research_login,
+            contract_state=self._research.snapshot, replay=self._replay)
 
     def list_research_runs(self):
         root = self._root / 'results'
@@ -145,6 +149,36 @@ class WorkbenchBridge:
             return dict(ok=True, details=details)
         except (ValueError, OSError, sqlite3.Error):
             return dict(ok=False, reason='该成交或关联风险证据不存在。')
+
+    def start_backtest(self, experiment_id, revision, include_fee_stress=False,
+                       request_id=None):
+        with self._lock:
+            return self._jobs_bridge.start_backtest(
+                experiment_id, revision, include_fee_stress, request_id)
+
+    def list_backtest_jobs(self):
+        with self._lock:
+            return self._jobs_bridge.list_backtest_jobs()
+
+    def get_backtest_state(self, job_id):
+        with self._lock:
+            return self._jobs_bridge.get_backtest_state(job_id)
+
+    def stop_backtest(self, job_id):
+        with self._lock:
+            return self._jobs_bridge.stop_backtest(job_id)
+
+    def set_backtest_watch(self, job_id, enabled):
+        with self._lock:
+            return self._jobs_bridge.set_backtest_watch(job_id, enabled)
+
+    def open_backtest_chart(self, job_id):
+        with self._lock:
+            return self._jobs_bridge.open_backtest_chart(job_id)
+
+    def set_backtest_capacity(self, value):
+        with self._lock:
+            return self._jobs_bridge.set_backtest_capacity(value)
 
     def open_research_replay(self, run_id):
         with self._lock:
@@ -561,13 +595,14 @@ class WorkbenchBridge:
     def _request_close(self):
         self._indicator_jobs.close()
         self._session.stop()
+        jobs_closed = self._jobs_bridge.close()
         research_closed = self._research.close()
         try:
             self._replay.close()
             self._live_view.close()
         except ValueError:
             return False
-        if research_closed and not self._session.running:
+        if jobs_closed and research_closed and not self._session.running:
             self._research_credentials = None
             return True
         return False

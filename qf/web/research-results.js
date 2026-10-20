@@ -17,7 +17,7 @@
     const el=(tag,text)=>{const e=document.createElement(tag);e.textContent=text??'';return e;};
     const title=el('h3','实验结果与比较'),list=el('div'),compareButton=el('button','比较所选两个运行'),comparison=el('div'),summary=el('div'),reason=el('pre'),frame=document.createElement('iframe'),accountRoot=el('div');
     const selected=new Set(),tradeList=el('div');tradeList.className='table-scroll';reason.style.whiteSpace='pre-wrap';frame.hidden=true;accountRoot.hidden=true;
-    const accountView=globalThis.QfAccountView?.create(accountRoot,{scenario:'research'});
+    let accountView=null;
     const replay=el('button','查看成交K线（离线复盘）');root.replaceChildren(title,list,compareButton,comparison,summary,replay,tradeList,reason,accountRoot,frame);
     function table(headers,rows){const t=el('table'),thead=el('thead'),head=el('tr'),body=el('tbody');for(const h of headers)head.append(el('th',h));thead.append(head);
       for(const row of rows){const tr=el('tr');for(const value of row)tr.append(el('td',value));body.append(tr);}t.append(thead,body);return t;}
@@ -55,7 +55,8 @@
       if(result.config.schema_version===3)summary.append(el('p',`历史主力连续 · 换月 ${result.roll_count??0} 次 · 移仓手续费 ${number(result.roll_commission)} 元（已包含在总手续费） · 完整交易按逻辑交易统计；信号图使用因果拼接价格，成交详情保留实际合约原价。`));
       if(binding?.run_id!==result.run_id){frame.hidden=true;frame.removeAttribute('src');binding=null;}
       const r=await api.get_research_result(result.run_id);if(disposed||current.run_id!==result.run_id)return;if(!r.ok){reason.textContent=r.reason;return;}
-      details=r.details;tradeList.replaceChildren();accountRoot.hidden=!details.account;if(accountView)accountView.update(details.account,[]);
+      details=r.details;tradeList.replaceChildren();accountRoot.hidden=!details.account;
+      if(details.account){if(!accountView&&globalThis.QfAccountView)accountView=QfAccountView.create(accountRoot,{scenario:'research'});accountView?.update(details.account,[]);}
       const t=table(['成交时间（北京时间）','操作','手数','成交价','原因'],[]);const body=t.querySelector('tbody');
       for(const f of details.fills){const tr=el('tr');for(const text of [time(f.time_ns),fillName(f)+(f.symbol?' · '+f.symbol:'')+(f.role==='roll_out'?'（移仓平旧）':f.role==='roll_in'?'（移仓开新）':''),number(f.volume),number(f.price),'点击查看并定位'])tr.append(el('td',text));
         tr.style.cursor='pointer';tr.onclick=async()=>{showFill(f.key);if(!binding){queued=f.key;await openReplay();}};body.append(tr);}tradeList.append(t);

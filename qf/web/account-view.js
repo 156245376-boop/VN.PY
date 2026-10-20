@@ -24,10 +24,11 @@
     const terms={BUY:'买',SELL:'卖',OPEN:'开仓',CLOSE:'平仓',CLOSETODAY:'平今',ALIVE:'未结束',FINISHED:'已结束（不等于全部成交）'};
     const text=(tag,value)=>{const e=document.createElement(tag);e.textContent=value;return e;};
     const value=x=>x==null?'—':typeof x==='number'?x.toLocaleString('zh-CN',{maximumFractionDigits:3}):terms[x]||x;
+    const display=x=>x==null?'—':typeof x==='number'||(typeof x==='string'&&x.trim()!==''&&Number.isFinite(Number(x)))?Number(x).toLocaleString('zh-CN',{maximumFractionDigits:3}):value(x);
     function render(){
       root.querySelector('.account-state').textContent=stateText(snapshot,scenario);
       const metrics=root.querySelector('.account-metrics');metrics.replaceChildren();
-      for(const [name,item,unit] of metricRows(snapshot,scenario))metrics.append(text('span',name+'：'+value(item)+(item==='未记录'?'':' '+unit)));
+      for(const [name,item,unit] of metricRows(snapshot,scenario))metrics.append(text('span',name+'：'+display(item)+(item==='未记录'?'':' '+unit)));
       const head=root.querySelector('thead'),body=root.querySelector('tbody'),tr=document.createElement('tr');head.replaceChildren(tr);body.replaceChildren();
       for(const [,label] of columns[tab])tr.append(text('th',label));
       for(const item of snapshot?.[tab]||[]){const row=document.createElement('tr');

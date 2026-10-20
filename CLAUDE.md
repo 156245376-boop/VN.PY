@@ -48,3 +48,7 @@
 任务卡可把单个任务图放进独立浏览器窗口；账户区增量刷新并提供逐笔交易明细。
 结果默认写入本机SSD应用数据目录，首次使用复制项目旧结果；回测账本使用WAL NORMAL，
 模拟执行仍使用FULL同步。
+下一阶段主路线见`docs/superpowers/specs/2026-10-20-local-fast-research-workbench-design.md`：
+完整只读观察窗与槽位编排先交付，再接入规范化历史数据、本地快速研究引擎和TqSdk一致性验证。
+执行顺序分别见`docs/superpowers/plans/2026-10-20-complete-observer-and-slot-workflow.md`与
+`docs/superpowers/plans/2026-10-20-local-fast-backtest-engine.md`。CUDA仅在真实GPU执行器通过验证后开放。

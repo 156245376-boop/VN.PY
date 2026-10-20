@@ -1,5 +1,10 @@
 # 多实验并行回测与可信观测 Implementation Plan
 
+> 历史状态：本计划的任务池、独立worker、账户和保护证据已实现并从后续主路线继承。
+> 后续性能、完整观察窗、槽位编排和本地快速引擎以
+> `2026-10-20-complete-observer-and-slot-workflow.md`和
+> `2026-10-20-local-fast-backtest-engine.md`为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 用户能核对每笔止损和账户变化，在当前回测继续运行时创建另一品种/周期的并行回测，独立切换、停止、复盘及比较。

@@ -440,11 +440,13 @@ class ContinuousLoop:
 
 def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
                        stop_requested=lambda: False, progress=None, view_progress=None,
-                       experiment_ref=None, view_requested=None):
+                       experiment_ref=None, view_requested=None, job_binding=None):
     j = ContinuousJournal.create(root, 'backtest', config,
                                  provenance() | {'experiment_ref': experiment_ref})
     enable_account_evidence(j)
     j.set('experiment_ref', experiment_ref)
+    if job_binding is not None:
+        j.set('job_binding', job_binding)
     j.set('fee_multiplier', fee_multiplier)
     needed = max(config.slow_period+2, config.risk.pivot_left+config.risk.pivot_right+2)
     engine_start = config.start-timedelta(

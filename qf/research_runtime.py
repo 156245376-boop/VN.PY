@@ -385,7 +385,7 @@ class ResearchLoop:
 def execute_research(mode, config, root, credentials, *, sdk=None, activate=False, resume=None,
                      fee_multiplier=1, stop_requested=lambda: False,
                      flatten_requested=lambda: False, progress=None, experiment_ref=None,
-                     view_progress=None, view_requested=None):
+                     view_progress=None, view_requested=None, job_binding=None):
     config = validate_research_config(config.public())
     if config.schema_version == 3 and mode != 'backtest':
         raise ValueError('主力连续版本只用于历史回测，模拟请使用固定合约实验')
@@ -403,21 +403,23 @@ def execute_research(mode, config, root, credentials, *, sdk=None, activate=Fals
         return execute_continuous(config, root, credentials, sdk=sdk,
             fee_multiplier=fee_multiplier, stop_requested=stop_requested, progress=progress,
             view_progress=view_progress, experiment_ref=experiment_ref,
-            view_requested=view_requested)
+            view_requested=view_requested, job_binding=job_binding)
     with PaperLock(root) if mode == 'paper' else nullcontext():
         return _run(sdk, mode, config, root, credentials, activate, resume, fee_multiplier,
                     stop_requested, flatten_requested, progress, experiment_ref, view_progress,
-                    view_requested)
+                    view_requested, job_binding)
 
 
 def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
          stop_requested, flatten_requested, progress, experiment_ref, view_progress,
-         view_requested=None):
+         view_requested=None, job_binding=None):
     j = (ResearchJournal.resume(run_path(root, resume), config.public()) if resume else
          ResearchJournal.create(root, mode, config.public(),
                                 provenance() | {'experiment_ref': experiment_ref}))
     if mode == 'backtest':
         enable_account_evidence(j)
+    if job_binding is not None:
+        j.set('job_binding', job_binding)
     if not resume:
         j.set('experiment_ref', experiment_ref)
     api, loop, account = None, None, None

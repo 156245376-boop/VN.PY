@@ -29,7 +29,7 @@ def _json(value):
 def _safe_metadata(value, *, path='source'):
     if isinstance(value, dict):
         if any(
-            any(marker in str(key).lower() for marker in SENSITIVE_KEYS)
+            _sensitive_key(key)
             for key in value
         ):
             raise ValueError('来源指纹不得包含凭证或认证字段')
@@ -40,6 +40,13 @@ def _safe_metadata(value, *, path='source'):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     raise ValueError(f'来源指纹字段不可序列化: {path}')
+
+
+def _sensitive_key(key):
+    text = str(key).lower()
+    if '/' in text or '\\' in text or '.' in text:
+        return False
+    return any(marker in text for marker in SENSITIVE_KEYS)
 
 
 def _run_id(root):
@@ -344,7 +351,7 @@ def summarize_local_payload(payload, *, source_fingerprint):
         'status': payload['status'],
         'reason': payload['reason'],
         'precision': payload['precision'],
-        'fee_multiplier': 1,
+        'fee_multiplier': int(payload.get('fee_multiplier', 1)),
         'cost_source': source_fingerprint.get('cost_source'),
         'initial_balance': str(initial),
         'final_equity': str(final),

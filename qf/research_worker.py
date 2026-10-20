@@ -3,6 +3,7 @@
 import queue
 import threading
 
+from qf.local_runtime import execute_local_research
 from qf.research_config import validate_research_config
 from qf.research_protocol import message
 from qf.research_runtime import execute_research
@@ -26,7 +27,15 @@ def _put_latest(target, value):
 def worker_main(task, credential_pipe, control_pipe, status_queue, frame_queue,
                 terminal_pipe, stop_event, results_root, *, execute_fn=None):
     demand = ViewDemand()
-    safe = {'status', 'reason', 'run_id', 'failure_context', 'summary'}
+    safe = {
+        'status',
+        'reason',
+        'run_id',
+        'engine_kind',
+        'dataset_id',
+        'failure_context',
+        'summary',
+    }
     last_run = [None]
     latest_state = {}
     sequences = {'status': 0, 'frame': 0}
@@ -75,15 +84,35 @@ def worker_main(task, credential_pipe, control_pipe, status_queue, frame_queue,
             _put_latest(frame_queue, message(task, run_id=last_run[0], stream='frame',
                 seq=sequences['frame'], kind='frame', payload=frame))
 
-        runner = execute_fn or execute_research
-        result = runner('backtest', validate_research_config(task.config),
-                        results_root, credentials,
-                        progress=progress, view_progress=view,
-                        view_requested=demand.wants_frame,
-                        stop_requested=stop_event.is_set,
-                        experiment_ref=task.experiment_ref,
-                        fee_multiplier=task.fee_multiplier,
-                        job_binding={'job_id': task.job_id, 'epoch': task.epoch})
+        config = validate_research_config(task.config)
+        if task.engine_kind == 'local_research':
+            dataset_id = task.source.get('dataset_id')
+            if not isinstance(dataset_id, str) or not dataset_id:
+                raise ValueError('本地实验缺少数据集')
+            result = execute_local_research(
+                config,
+                results_root,
+                dataset_id,
+                fee_multiplier=task.fee_multiplier,
+                progress=progress,
+                stop_requested=stop_event.is_set,
+                experiment_ref=task.experiment_ref,
+            )
+        else:
+            runner = execute_fn or execute_research
+            result = runner(
+                'backtest',
+                config,
+                results_root,
+                credentials,
+                progress=progress,
+                view_progress=view,
+                view_requested=demand.wants_frame,
+                stop_requested=stop_event.is_set,
+                experiment_ref=task.experiment_ref,
+                fee_multiplier=task.fee_multiplier,
+                job_binding={'job_id': task.job_id, 'epoch': task.epoch},
+            )
     except Exception:
         result = {'status': 'failed', 'reason': 'research_start_or_record_failed',
                   'run_id': last_run[0], 'failure_context': {}}
@@ -94,8 +123,8 @@ def worker_main(task, credential_pipe, control_pipe, status_queue, frame_queue,
         except Exception:
             pass
     safe_result = {key: result[key] for key in ('status', 'reason', 'run_id',
-                                                 'engine_kind', 'failure_context',
-                                                 'summary')
+                                                 'engine_kind', 'dataset_id',
+                                                 'failure_context', 'summary')
                    if key in result}
     sequences['terminal'] = 1
     terminal_pipe.send(message(task, run_id=safe_result.get('run_id'),

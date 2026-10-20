@@ -8,12 +8,18 @@
     return {capacity,slots:slots.map((item,index)=>{
       if(!item||!HEX32.test(item.experiment_id||'')||!Number.isInteger(item.revision)
         ||item.revision<1)throw Error(`槽位${index+1}尚未配置有效实验`);
+      const engineKind=item.engine_kind||'tqsdk_validation',computeBackend=item.compute_backend||'cpu';
+      if(!['local_research','tqsdk_validation'].includes(engineKind))
+        throw Error(`槽位${index+1}研究引擎无效`);
+      if(computeBackend!=='cpu')throw Error(`槽位${index+1}不可用：当前没有经过验证的GPU执行器`);
       return {experiment_id:item.experiment_id,revision:item.revision,
-        include_fee_stress:item.include_fee_stress===true};
+        include_fee_stress:item.include_fee_stress===true,engine_kind:engineKind,
+        compute_backend:computeBackend};
     })};
   }
   function create(root,api,options={}){
     const el=(tag,text)=>{const node=document.createElement(tag);node.textContent=text??'';return node;};
+    const option=(text,value)=>{const node=el('option',text);node.value=value;return node;};
     const title=el('h3','回测计划'),capacityLabel=el('label','并发数 '),capacity=el('input');
     capacity.type='number';capacity.min='1';capacity.max='4';capacity.value='1';
     capacityLabel.append(capacity);
@@ -22,7 +28,10 @@
     const add=el('button','新增回测任务'),startAdded=el('button','开始新增任务');
     startAdded.className='primary';add.hidden=true;startAdded.hidden=true;
     controls.append(start,add,startAdded);root.replaceChildren(title,capacityLabel,list,controls);
-    let slots=[],busy=false,errors={},started=false;
+    let slots=[],busy=false,errors={},started=false,backends={
+      cpu:{available:true,reason:'CPU可用'},
+      cuda:{available:false,reason:'当前没有经过验证的GPU执行器'},
+    };
     function complete(item){return item&&HEX32.test(item.experiment_id||'')&&
       Number.isInteger(item.revision)&&item.revision>0;}
     function render(){
@@ -43,7 +52,19 @@
         const stressLabel=el('label','双倍费用'),stress=el('input');stress.type='checkbox';
         stress.checked=item?.include_fee_stress===true;
         stress.onchange=()=>{if(item)item.include_fee_stress=stress.checked;};
-        stressLabel.prepend(stress);actions.append(configure,stressLabel,remove);
+        const engineLabel=el('label','引擎 '),engine=el('select');
+        engine.append(option('TqSdk验证','tqsdk_validation'),option('快速研究','local_research'));
+        engine.value=item?.engine_kind||'tqsdk_validation';
+        engine.disabled=started;
+        engine.onchange=()=>{if(item)item.engine_kind=engine.value;render();};
+        engineLabel.append(engine);
+        const backendLabel=el('label','计算 '),backend=el('select');
+        const cpu=backends.cpu||{},cuda=backends.cuda||{};
+        backend.append(option(`CPU（${cpu.available?'可用':'不可用'}）`,'cpu'),
+          option(`CUDA（${cuda.available?'可用':'不可用：'+(cuda.reason||'原因待核实')}）`,'cuda'));
+        backend.value=item?.compute_backend||'cpu';backend.disabled=!cuda.available;
+        backendLabel.append(backend);
+        stressLabel.prepend(stress);actions.append(configure,engineLabel,backendLabel,stressLabel,remove);
         row.append(summary,actions);list.append(row);
       });
       start.hidden=started;
@@ -60,7 +81,8 @@
       errors={};
       if(!started){
         if(next>slots.length)while(slots.length<next)slots.push({
-          experiment_id:'',revision:0,include_fee_stress:false});
+          experiment_id:'',revision:0,include_fee_stress:false,
+          engine_kind:'tqsdk_validation',compute_backend:'cpu'});
         slots=slots.slice(0,next);
       }
       capacity.value=String(next);render();
@@ -84,7 +106,8 @@
     startAdded.onclick=()=>submit(true);
     add.onclick=()=>{
       if(slots.length>=4){options.onNotice?.('一次最多准备4个新任务');return;}
-      slots.push({experiment_id:'',revision:0,include_fee_stress:false});render();
+      slots.push({experiment_id:'',revision:0,include_fee_stress:false,
+        engine_kind:'tqsdk_validation',compute_backend:'cpu'});render();
     };
     return {
       setCapacity,
@@ -92,6 +115,7 @@
         slots[index]={...slots[index],...item,include_fee_stress:item.include_fee_stress===true};
         errors={};render();},
       setErrors(value){errors=value&&typeof value==='object'?{...value}:{};render();},
+      setBackends(value){backends=value&&typeof value==='object'?{...value}:backends;render();},
       configureIndex(){return slots.findIndex(item=>!complete(item));},
       slots(){return slots.map(item=>({...item}));},
       addDraft(){add.click();},

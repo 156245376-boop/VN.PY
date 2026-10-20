@@ -44,6 +44,7 @@ class LocalRunResult:
     engine_version: str
     compute_backend: str
     precision: str
+    fee_multiplier: int
     profile: dict
 
     def public(self):
@@ -67,6 +68,7 @@ class LocalRunResult:
             'engine_version': self.engine_version,
             'compute_backend': self.compute_backend,
             'precision': self.precision,
+            'fee_multiplier': self.fee_multiplier,
         })
 
     def fingerprint(self):
@@ -82,11 +84,14 @@ class LocalRunResult:
 
 
 class LocalBacktestEngine:
-    def __init__(self, *, fill_fraction=Decimal(1)):
+    def __init__(self, *, fill_fraction=Decimal(1), fee_multiplier=1):
         fill_fraction = decimal_value(fill_fraction)
         if not ZERO < fill_fraction <= Decimal(1):
             raise ValueError('成交比例必须在0到1之间')
+        if fee_multiplier not in (1, 2):
+            raise ValueError('费用倍数必须为1或2')
         self.fill_fraction = fill_fraction
+        self.fee_multiplier = fee_multiplier
 
     def run(self, dataset, config, progress=None, cancel=None):
         started = time.perf_counter()
@@ -102,10 +107,16 @@ class LocalBacktestEngine:
             except _LocalFailure as exc:
                 return runner._result('failed', exc.code)
         except _LocalFailure as exc:
-            return self._failed_result(dataset, config, exc.code, started)
+            return self._failed_result(
+                dataset, config, exc.code, started, self.fee_multiplier
+            )
         except (ArithmeticError, KeyError, TypeError, ValueError):
             return self._failed_result(
-                dataset, config, 'local_engine_input_invalid', started
+                dataset,
+                config,
+                'local_engine_input_invalid',
+                started,
+                self.fee_multiplier,
             )
 
     @staticmethod
@@ -150,7 +161,7 @@ class LocalBacktestEngine:
             raise _LocalFailure('contract_spec_missing')
 
     @staticmethod
-    def _failed_result(dataset, config, reason, started):
+    def _failed_result(dataset, config, reason, started, fee_multiplier):
         return LocalRunResult(
             dataset_id=str(getattr(dataset, 'dataset_id', '')),
             config=config.public(),
@@ -171,6 +182,7 @@ class LocalBacktestEngine:
             engine_version='local_research_v1',
             compute_backend='cpu',
             precision=config.precision,
+            fee_multiplier=fee_multiplier,
             profile={
                 'elapsed_seconds': time.perf_counter()-started,
                 'bars_processed': 0,
@@ -427,7 +439,7 @@ class _LocalRunner:
             execution_bar=bar_index,
             signal_bar=signal['bar_index'],
             trade_id=trade_id,
-            fee=spec.commission_per_lot*quantity,
+            fee=self._commission(spec, quantity),
         )
         state = LogicalRisk(trade_id=trade_id)
         state = apply_logical_fill(
@@ -494,7 +506,7 @@ class _LocalRunner:
             execution_bar=bar_index,
             signal_bar=None,
             trade_id=self.risk.trade_id,
-            fee=spec.commission_per_lot*quantity,
+            fee=self._commission(spec, quantity),
             intrabar_resolution=intrabar_resolution,
             price_source=price_source,
         )
@@ -570,7 +582,7 @@ class _LocalRunner:
             execution_bar=bar_index,
             signal_bar=None,
             trade_id=self.risk.trade_id,
-            fee=new_spec.commission_per_lot*quantity,
+            fee=self._commission(new_spec, quantity),
             price_source='new_contract_open',
         )
         self.risk = apply_logical_fill(
@@ -811,6 +823,9 @@ class _LocalRunner:
             return requested
         return raw-raw % lot_step
 
+    def _commission(self, spec, quantity):
+        return spec.commission_per_lot*quantity*self.engine.fee_multiplier
+
     def _available(self):
         realized = (
             self.risk.realized_gross
@@ -919,6 +934,7 @@ class _LocalRunner:
             engine_version='local_research_v1',
             compute_backend='cpu',
             precision=self.config.precision,
+            fee_multiplier=self.engine.fee_multiplier,
             profile={
                 'elapsed_seconds': time.perf_counter()-self.started,
                 'bars_processed': len(self.equity),

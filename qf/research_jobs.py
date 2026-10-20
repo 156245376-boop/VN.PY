@@ -37,15 +37,21 @@ class ResearchJobs:
         return value
 
     def submit(self, config, *, credentials, experiment_ref=None,
-               include_fee_stress=False, request_id=None):
+               include_fee_stress=False, request_id=None,
+               engine_kind='tqsdk_validation', compute_backend='cpu',
+               dataset_id=None):
         result = self.submit_many(
             [config], credentials=credentials, experiment_refs=[experiment_ref],
-            include_fee_stress=[include_fee_stress], request_id=request_id)
+            include_fee_stress=[include_fee_stress], request_id=request_id,
+            engine_kinds=[engine_kind], compute_backends=[compute_backend],
+            dataset_ids=[dataset_id])
         return dict(job_ids=result['groups'][0],
                     selected_job_id=result['selected_job_id'])
 
     def submit_many(self, configs, *, credentials, experiment_refs=None,
-                    include_fee_stress=None, request_id=None):
+                    include_fee_stress=None, request_id=None,
+                    engine_kinds=None, compute_backends=None,
+                    dataset_ids=None):
         if self._closed:
             raise ValueError('任务池已关闭')
         if request_id is not None and request_id in self.request_jobs:
@@ -59,33 +65,70 @@ class ResearchJobs:
             experiment_refs = [None]*len(configs)
         if include_fee_stress is None:
             include_fee_stress = [False]*len(configs)
+        if engine_kinds is None:
+            engine_kinds = ['tqsdk_validation']*len(configs)
+        if compute_backends is None:
+            compute_backends = ['cpu']*len(configs)
+        if dataset_ids is None:
+            dataset_ids = [None]*len(configs)
         if (not isinstance(experiment_refs, list)
                 or not isinstance(include_fee_stress, list)
+                or not isinstance(engine_kinds, list)
+                or not isinstance(compute_backends, list)
+                or not isinstance(dataset_ids, list)
                 or len(experiment_refs) != len(configs)
                 or len(include_fee_stress) != len(configs)
+                or len(engine_kinds) != len(configs)
+                or len(compute_backends) != len(configs)
+                or len(dataset_ids) != len(configs)
                 or any(type(value) is not bool for value in include_fee_stress)):
             raise ValueError('批量回测参数不一致')
 
         prepared = []
         groups = []
-        for config, experiment_ref, stress in zip(
-                configs, experiment_refs, include_fee_stress, strict=True):
+        for (config, experiment_ref, stress, engine_kind,
+             compute_backend, dataset_id) in zip(
+                configs, experiment_refs, include_fee_stress,
+                engine_kinds, compute_backends, dataset_ids, strict=True):
+            source = {'dataset_id': dataset_id} if dataset_id else None
+            if engine_kind == 'local_research' and not dataset_id:
+                raise ValueError('快速研究必须指定本机数据集')
             job_id = uuid.uuid4().hex
-            task = freeze_backtest(config, experiment_ref, job_id=job_id)
+            task = freeze_backtest(
+                config,
+                experiment_ref,
+                job_id=job_id,
+                source=source,
+                engine_kind=engine_kind,
+                compute_backend=compute_backend,
+            )
             job = dict(job_id=job_id, epoch=task.epoch, run_id=None, status='waiting',
                        running=False, config=task.config,
                        experiment_ref=task.experiment_ref, fee_multiplier=1,
+                       engine_kind=task.engine_kind,
+                       compute_backend=task.compute_backend,
+                       dataset_id=dataset_id,
                        parent_job_id=None, progress=None, account=None, risk={},
                        watch=False, reason='capacity', task=task)
             group = [job]
             if stress:
                 stress_id = uuid.uuid4().hex
                 stress_task = freeze_backtest(
-                    config, experiment_ref, job_id=stress_id, fee_multiplier=2)
+                    config,
+                    experiment_ref,
+                    job_id=stress_id,
+                    fee_multiplier=2,
+                    source=source,
+                    engine_kind=engine_kind,
+                    compute_backend=compute_backend,
+                )
                 group.append(dict(
                     job_id=stress_id, epoch=stress_task.epoch, run_id=None,
                     status='waiting', running=False, config=stress_task.config,
                     experiment_ref=stress_task.experiment_ref, fee_multiplier=2,
+                    engine_kind=stress_task.engine_kind,
+                    compute_backend=stress_task.compute_backend,
+                    dataset_id=dataset_id,
                     parent_job_id=job_id, progress=None, account=None, risk={},
                     watch=False, reason='baseline_pending', task=stress_task))
             prepared.extend(group)
@@ -182,8 +225,11 @@ class ResearchJobs:
                 payload = raw['payload']
                 job.update(status=payload.get('status', 'failed'), running=False,
                            reason=payload.get('reason'), run_id=payload.get('run_id'),
+                           engine_kind=payload.get('engine_kind', job.get('engine_kind')),
+                           dataset_id=payload.get('dataset_id', job.get('dataset_id')),
                            result={key: value for key, value in payload.items()
                                    if key in ('status', 'reason', 'run_id',
+                                              'engine_kind', 'dataset_id',
                                               'failure_context', 'summary')})
                 job['bound_run_id'] = job['bound_run_id'] or payload.get('run_id')
                 try:

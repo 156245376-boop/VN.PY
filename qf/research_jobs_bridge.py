@@ -7,7 +7,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from qf.backtest_plan import BacktestPlan
+from qf.compute_backend import ComputeBackend
 from qf.continuous_results import ContinuousReader, schema_at
+from qf.local_dataset_builder import ensure_local_dataset
 from qf.research_config import ResearchValidationError
 from qf.research_jobs import ResearchJobs
 from qf.research_live_view import LiveResearchView
@@ -76,13 +78,17 @@ class ResearchJobsBridge:
     def list_backtest_jobs(self):
         return dict(ok=True, jobs=self.jobs.list())
 
+    def get_compute_backends(self):
+        return dict(ok=True, backends=ComputeBackend.catalog())
+
     def start_backtest_batch(self, raw_plan, request_id=None, *, allow_partial=False):
         try:
             plan = BacktestPlan.validate(raw_plan, allow_partial=allow_partial)
         except (TypeError, ValueError) as exc:
             return self._error(str(exc) or '回测计划无效。', 'invalid_backtest_plan',
                                {'plan': str(exc) or '回测计划无效'})
-        configs, refs, stress, errors = [], [], [], {}
+        configs, refs, stress, engines, backends, datasets = [], [], [], [], [], []
+        errors = {}
         for index, slot in enumerate(plan.slots, 1):
             try:
                 config = self.experiments.load(slot.experiment_id, slot.revision)
@@ -112,20 +118,36 @@ class ResearchJobsBridge:
                 refs.append(dict(experiment_id=slot.experiment_id,
                                  revision=slot.revision))
                 stress.append(slot.include_fee_stress)
+                engines.append(slot.engine_kind)
+                backends.append(slot.compute_backend)
+                datasets.append(
+                    ensure_local_dataset(self._jobs_args[0], config)
+                    if slot.engine_kind == 'local_research'
+                    else None
+                )
             except (KeyError, TypeError, ValueError, OSError, ResearchValidationError):
-                errors[f'slot_{index}'] = '实验修订、合约或参数无效。'
+                errors[f'slot_{index}'] = (
+                    '快速研究缺少可复用的已核实数据。'
+                    if slot.engine_kind == 'local_research'
+                    else '实验修订、合约或参数无效。'
+                )
         if errors:
             return self._error('批量回测未启动：请核对标记槽位。',
                                'batch_validation_failed', errors)
-        credentials = self.login()
-        if not credentials:
+        credentials = self.login() if 'tqsdk_validation' in engines else ('', '')
+        if not credentials and 'tqsdk_validation' in engines:
             return self._error('请先保存快期凭证。', 'credentials_required')
         previous = self.jobs.capacity
         try:
             self.jobs.set_capacity(plan.capacity)
             result = self.jobs.submit_many(
                 configs, credentials=credentials, experiment_refs=refs,
-                include_fee_stress=stress, request_id=request_id)
+                include_fee_stress=stress,
+                engine_kinds=engines,
+                compute_backends=backends,
+                dataset_ids=datasets,
+                request_id=request_id,
+            )
             return dict(ok=True, reason=f'已提交{len(plan.slots)}个回测槽位。',
                         capacity=plan.capacity, **result)
         except (KeyError, TypeError, ValueError, OSError):
@@ -194,11 +216,18 @@ class ResearchJobsBridge:
                 truncated=False, reason='该任务尚未生成成交账本。')
         root = self._jobs_args[0]
         path = run_path(root, run_id)
-        if schema_at(path) != 2:
-            return dict(
-                available=False, trades=[], fills=[], reconciled=False,
-                truncated=False, reason='固定月份旧实验没有逻辑交易账本。')
-        return ContinuousReader(path).trade_ledger()
+        schema = schema_at(path)
+        if schema == 2:
+            return ContinuousReader(path).trade_ledger()
+        if schema == 3:
+            from qf.local_results import local_trade_ledger
+            with sqlite3.connect(
+                (path/'journal.sqlite3').as_uri()+'?mode=ro', uri=True
+            ) as db:
+                return local_trade_ledger(db)
+        return dict(
+            available=False, trades=[], fills=[], reconciled=False,
+            truncated=False, reason='固定月份旧实验没有逻辑交易账本。')
 
     def get_trade_ledger(self, job_id):
         try:

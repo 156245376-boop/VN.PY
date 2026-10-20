@@ -99,6 +99,9 @@
         if(response&&!response.ok)notice.textContent=response.reason;},
       onNotice(text){notice.textContent=text;},
     });
+    api.get_compute_backends?.().then(response=>{
+      if(response?.ok)planner?.setBackends(response.backends);
+    }).catch(()=>{});
     planner?.setCapacity(1);planner?.show(false);
     function checked(response){if(response.ok){form.showErrors({});return response;}
       form.showErrors(response.field_errors||{});notice.textContent=response.reason||'操作未完成，请重新核对。';return null;}
@@ -223,7 +226,8 @@
       flattenButton.disabled=usingJob||!legacyBusy||s.mode!=='paper'||!s.activate;
       if(display.account||ledgerCache?.available)ensureAccount(display.account,ledgerCache);
       else accountRoot.hidden=true;
-      if(usingJob){state.textContent=(jobState.config?.name||'任务')+' · '+(globalThis.QfResearchJobs?.statusText?.[jobState.status]||'状态待核实')+(jobState.reason?' · '+(reasons[jobState.reason]||'请核对任务状态'):'');
+      if(usingJob){const engine=jobState.engine_kind==='local_research'?' · 快速研究（CPU）':jobState.engine_kind==='tqsdk_validation'?' · TqSdk验证（CPU）':'';
+        state.textContent=(jobState.config?.name||'任务')+engine+' · '+(globalThis.QfResearchJobs?.statusText?.[jobState.status]||'状态待核实')+(jobState.reason?' · '+(reasons[jobState.reason]||'请核对任务状态'):'');
         state.dataset.light=jobState.running?'green':['failed','frozen'].includes(jobState.status)?'red':'yellow';}
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
       const mainMode=form.read().schema_version===3;

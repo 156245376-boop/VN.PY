@@ -32,16 +32,20 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   assert.equal(byText(root,'开始全部回测').disabled,true);
   byText(root,'配置策略').click();
   assert.equal(configured[0][0],0);
-  planner.configure(0,{experiment_id:'a'.repeat(32),revision:1,name:'A'});
+  planner.configure(0,{experiment_id:'a'.repeat(32),revision:1,name:'A',
+    engine_kind:'local_research',compute_backend:'cpu'});
   planner.configure(1,{experiment_id:'b'.repeat(32),revision:1,name:'B',
     include_fee_stress:true});
   assert.equal(byText(root,'开始全部回测').disabled,false);
   const response=await byText(root,'开始全部回测').click();
   assert.equal(response.ok,true);
   assert.deepEqual(starts[0],{capacity:2,slots:[
-    {experiment_id:'a'.repeat(32),revision:1,include_fee_stress:false},
-    {experiment_id:'b'.repeat(32),revision:1,include_fee_stress:true},
+    {experiment_id:'a'.repeat(32),revision:1,include_fee_stress:false,
+      engine_kind:'local_research',compute_backend:'cpu'},
+    {experiment_id:'b'.repeat(32),revision:1,include_fee_stress:true,
+      engine_kind:'tqsdk_validation',compute_backend:'cpu'},
   ]});
+  assert.equal(starts[0].slots[0].engine_kind,'local_research');
   assert.equal(byText(root,'开始全部回测').hidden,true);
   assert.equal(byText(root,'新增回测任务').hidden,false);
   byText(root,'新增回测任务').click();
@@ -50,7 +54,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   await byText(root,'开始新增任务').click();
   assert.deepEqual(startOptions[1],{allowPartial:true});
   assert.deepEqual(starts[1],{capacity:2,slots:[
-    {experiment_id:'c'.repeat(32),revision:1,include_fee_stress:false}]});
+    {experiment_id:'c'.repeat(32),revision:1,include_fee_stress:false,
+      engine_kind:'tqsdk_validation',compute_backend:'cpu'}]});
   assert.throws(()=>QfResearchPlanner.buildPlan(2,[
     {experiment_id:'a'.repeat(32),revision:1}]));
   assert.throws(()=>QfResearchPlanner.buildPlan(1,[

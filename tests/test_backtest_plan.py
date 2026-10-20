@@ -3,9 +3,16 @@ import pytest
 from qf.backtest_plan import BacktestPlan
 
 
-def item(seed='a', *, stress=False):
+def item(
+    seed='a',
+    *,
+    stress=False,
+    engine='tqsdk_validation',
+    backend='cpu',
+):
     return {'experiment_id': seed*32, 'revision': 1,
-            'include_fee_stress': stress}
+            'include_fee_stress': stress, 'engine_kind': engine,
+            'compute_backend': backend}
 
 
 def test_plan_is_ordered_and_requires_capacity_slots_for_initial_batch():
@@ -16,6 +23,8 @@ def test_plan_is_ordered_and_requires_capacity_slots_for_initial_batch():
     assert plan.capacity == 2
     assert [slot.experiment_id for slot in plan.slots] == ['a'*32, 'b'*32]
     assert plan.slots[1].include_fee_stress is True
+    assert plan.slots[0].engine_kind == 'tqsdk_validation'
+    assert plan.slots[0].compute_backend == 'cpu'
     with pytest.raises(ValueError):
         BacktestPlan.validate({'capacity': 3, 'slots': [item('a')]})
 
@@ -35,6 +44,8 @@ def test_added_batch_can_be_partial_but_still_bounded():
         {'capacity': 1, 'slots': [item('a')]*5},
         {'capacity': 1, 'slots': [{**item('a'), 'password': 'private'}]},
         {'capacity': 1, 'slots': [{**item('a'), 'revision': True}]},
+        {'capacity': 1, 'slots': [{**item('a'), 'compute_backend': 'cuda'}]},
+        {'capacity': 1, 'slots': [{**item('a'), 'engine_kind': 'unknown'}]},
     ):
         with pytest.raises(ValueError):
             BacktestPlan.validate(bad, allow_partial=True)
@@ -46,6 +57,11 @@ def test_plan_does_not_mutate_input_and_returns_safe_public_values():
     raw['slots'][0]['revision'] = 2
     assert plan.public() == {
         'capacity': 1,
-        'slots': [{'experiment_id': 'a'*32, 'revision': 1,
-                   'include_fee_stress': False}],
+        'slots': [{
+            'experiment_id': 'a'*32,
+            'revision': 1,
+            'include_fee_stress': False,
+            'engine_kind': 'tqsdk_validation',
+            'compute_backend': 'cpu',
+        }],
     }

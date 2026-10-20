@@ -4,6 +4,8 @@ from dataclasses import replace
 import pytest
 from research_worker_probe import launch, launch_controlled
 from test_continuous_runtime import config
+from test_local_dataset_builder import build_local_dataset_from_validation, write_validation
+from test_local_dataset_builder import config as local_config
 
 from qf.research_jobs import ResearchJobs
 
@@ -169,5 +171,34 @@ def test_submit_many_keeps_slot_order_and_request_idempotency(tmp_path):
         assert again['job_ids'] == first['job_ids']
         for job_id in first['job_ids']:
             assert wait(jobs, job_id, timeout=8)['status'] == 'backtest_finished'
+    finally:
+        assert jobs.close()
+
+
+def test_local_job_uses_frozen_dataset_without_account_connection(tmp_path):
+    results = tmp_path/'results'
+    cfg, validation_id = write_validation(results)
+    dataset_id, _dataset = build_local_dataset_from_validation(
+        results, validation_id, cfg
+    )
+    jobs = ResearchJobs(
+        results,
+        tmp_path/'jobs',
+        capacity=1,
+        worker_target=launch,
+    )
+    try:
+        submitted = jobs.submit(
+            local_config(),
+            credentials=('', ''),
+            experiment_ref={'experiment_id': 'local', 'revision': 1},
+            engine_kind='local_research',
+            compute_backend='cpu',
+            dataset_id=dataset_id,
+        )
+        state = wait(jobs, submitted['selected_job_id'], timeout=10)
+        assert state['status'] == 'backtest_finished'
+        assert state['engine_kind'] == 'local_research'
+        assert state['dataset_id'] == dataset_id
     finally:
         assert jobs.close()

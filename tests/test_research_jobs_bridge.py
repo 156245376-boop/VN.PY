@@ -1,5 +1,6 @@
 from test_continuous_config import continuous_data
 from test_continuous_results import finished
+from test_local_dataset_builder import write_validation
 
 from qf.experiment_store import ExperimentStore
 from qf.research_config import validate_research_config
@@ -23,10 +24,27 @@ class FakeJobs:
     def list(self):
         return list(self.items.values())
 
-    def submit_many(self, configs, *, credentials, experiment_refs,
-                    include_fee_stress, request_id=None):
+    def submit_many(
+        self,
+        configs,
+        *,
+        credentials,
+        experiment_refs,
+        include_fee_stress,
+        request_id=None,
+        engine_kinds=None,
+        compute_backends=None,
+        dataset_ids=None,
+    ):
         self.batch_submitted.append((
-            configs, experiment_refs, include_fee_stress, request_id))
+            configs,
+            experiment_refs,
+            include_fee_stress,
+            request_id,
+            engine_kinds,
+            compute_backends,
+            dataset_ids,
+        ))
         ids = []
         groups = []
         for index, _config in enumerate(configs):
@@ -171,11 +189,46 @@ def test_batch_plan_submits_every_slot_in_order(tmp_path):
     assert response['ok']
     assert response['job_ids'] == ['0'*31+'1', '0'*31+'2']
     assert len(jobs.batch_submitted) == 1
-    configs, refs, stress, request_id = jobs.batch_submitted[0]
+    (configs, refs, stress, request_id, engines, backends,
+     datasets) = jobs.batch_submitted[0]
     assert [config.schema_version for config in configs] == [3, 3]
     assert [item['experiment_id'] for item in refs] == [
         ref['experiment_id'], second['experiment_id']]
     assert stress == [False, True] and request_id == 'batch-1'
+    assert engines == ['tqsdk_validation', 'tqsdk_validation']
+    assert backends == ['cpu', 'cpu']
+    assert datasets == [None, None]
+
+
+def test_local_batch_reuses_verified_result_without_credentials(tmp_path):
+    results = tmp_path/'results'
+    cfg, _validation_id = write_validation(results)
+    store = ExperimentStore(tmp_path/'experiments')
+    ref = store.save(cfg)
+    jobs = FakeJobs()
+    value = ResearchJobsBridge(
+        tmp_path,
+        store,
+        jobs=jobs,
+        login=lambda: None,
+    )
+    response = value.start_backtest_batch({
+        'capacity': 1,
+        'slots': [{
+            'experiment_id': ref['experiment_id'],
+            'revision': ref['revision'],
+            'include_fee_stress': False,
+            'engine_kind': 'local_research',
+            'compute_backend': 'cpu',
+        }],
+    })
+    assert response['ok'], response
+    _configs, _refs, _stress, _request, engines, backends, datasets = (
+        jobs.batch_submitted[0]
+    )
+    assert engines == ['local_research']
+    assert backends == ['cpu']
+    assert datasets[0]
 
 
 def test_batch_plan_validation_blocks_entire_batch(tmp_path):

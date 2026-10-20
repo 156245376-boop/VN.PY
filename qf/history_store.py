@@ -85,6 +85,25 @@ class HistoryStore:
         with closing(self.connect()) as db:
             return self._dataset(db, dataset_id)
 
+    def find_ready(self, request):
+        request.validate()
+        dataset_id = self._dataset_id(request)
+        with closing(self.connect()) as db:
+            row = db.execute(
+                'SELECT status FROM data_sets WHERE dataset_id=?',
+                (dataset_id,),
+            ).fetchone()
+            if row is None or row[0] != 'ready':
+                return None
+            coverage = db.execute(
+                'SELECT data FROM coverage WHERE dataset_id=?',
+                (dataset_id,),
+            ).fetchone()
+            if coverage is None:
+                return None
+            report = json.loads(coverage[0])
+            return dataset_id if report.get('complete') is True else None
+
     @staticmethod
     def _finite(value, name, *, positive=False):
         value = dec(value)

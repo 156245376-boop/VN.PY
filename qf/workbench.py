@@ -115,6 +115,9 @@ class WorkbenchBridge:
     def get_research_capabilities(self):
         return dict(ok=True, use_backtest_jobs=self._backtest_jobs_enabled)
 
+    def get_compute_backends(self):
+        return self._jobs_bridge.get_compute_backends()
+
     def get_research_result(self, run_id):
         try:
             return dict(ok=True, result=summarize_run(self._results_root, run_id),

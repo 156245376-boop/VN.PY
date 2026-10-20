@@ -5,6 +5,7 @@ import re
 import uuid
 from dataclasses import dataclass
 
+from qf.compute_backend import BackendRequest
 from qf.research_config import validate_research_config
 
 HEX32 = re.compile(r'^[0-9a-f]{32}$')
@@ -20,6 +21,8 @@ class FrozenBacktest:
     experiment_ref_json: str
     fee_multiplier: int
     source_json: str
+    engine_kind: str = 'tqsdk_validation'
+    compute_backend: str = 'cpu'
 
     @property
     def config(self):
@@ -35,10 +38,12 @@ class FrozenBacktest:
 
 
 def freeze_backtest(config, experiment_ref=None, *, job_id=None, epoch=None,
-                    fee_multiplier=1, source=None):
+                    fee_multiplier=1, source=None,
+                    engine_kind='tqsdk_validation', compute_backend='cpu'):
     config = validate_research_config(config.public())
     if config.schema_version not in (2, 3) or fee_multiplier not in (1, 2):
         raise ValueError('回测任务类型无效')
+    BackendRequest.validate(compute_backend, config.strategy_id, engine_kind)
     job_id = job_id or uuid.uuid4().hex
     epoch = epoch or uuid.uuid4().hex
     if not HEX32.fullmatch(job_id) or not HEX32.fullmatch(epoch):
@@ -47,7 +52,9 @@ def freeze_backtest(config, experiment_ref=None, *, job_id=None, epoch=None,
                           json.dumps(config.public(), ensure_ascii=False, sort_keys=True),
                           json.dumps(experiment_ref or {}, ensure_ascii=False, sort_keys=True),
                           fee_multiplier,
-                          json.dumps(source or {}, ensure_ascii=False, sort_keys=True))
+                          json.dumps(source or {}, ensure_ascii=False, sort_keys=True),
+                          engine_kind,
+                          compute_backend)
 
 
 def message(task, *, run_id, stream, seq, kind, payload):

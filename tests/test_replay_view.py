@@ -3,7 +3,12 @@ from urllib.request import urlopen
 
 import pytest
 from research_helpers import config_data
+from test_local_dataset_builder import (
+    build_local_dataset_from_validation,
+    write_validation,
+)
 
+from qf.local_runtime import execute_local_research
 from qf.replay_view import ReplayView
 from qf.research_journal import ResearchJournal
 
@@ -51,3 +56,29 @@ def test_replay_rejects_path_traversal_old_schema_and_missing_bars(tmp_path):
     with pytest.raises(ValueError):
         view.open(identity)
     view.close()
+
+
+def test_local_replay_reads_normalized_dataset_without_sdk(tmp_path, monkeypatch):
+    config, validation_id = write_validation(tmp_path)
+    dataset_id, _dataset = build_local_dataset_from_validation(
+        tmp_path, validation_id, config
+    )
+    run = execute_local_research(
+        config,
+        tmp_path,
+        dataset_id,
+        stop_requested=lambda: False,
+    )
+    monkeypatch.setattr('tqsdk.TqApi', lambda *a, **k: pytest.fail('不能创建账户会话'))
+    view = ReplayView(tmp_path)
+    try:
+        url = view.open(run['run_id'])
+        payload = json.loads(urlopen(url+'replay').read())
+        assert payload['engine_kind'] == 'local_research'
+        assert payload['actual_symbols'] == ['SHFE.rb2505']
+        assert payload['ma_series']
+        page = json.loads(urlopen(url+'bars?offset=0&limit=20').read())
+        assert page['total_bars'] == 1
+        assert page['bars'][0]['close'] == 280
+    finally:
+        view.close()

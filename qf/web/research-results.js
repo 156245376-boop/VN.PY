@@ -66,7 +66,7 @@
       summary.append(el('p','毛盈利不含手续费；期末持仓没有自动平仓，净收益包含市值变动。SDK成本不代表历史真实交易成本。'));
       if(result.config.schema_version===3)summary.append(el('p',`历史主力连续 · 换月 ${result.roll_count??0} 次 · 移仓手续费 ${number(result.roll_commission)} 元（已包含在总手续费） · 完整交易按逻辑交易统计；信号图使用因果拼接价格，成交详情保留实际合约原价。`));
       if(result.engine_kind==='local_research')summary.append(el('p','本结果来自本机快速研究引擎；成交与权益已按分钟OHLC保守排序，最终候选仍须用TqSdk验证结果核对。'));
-      replay.disabled=result.engine_kind==='local_research';replay.textContent=replay.disabled?'快速研究结果暂不提供独立K线窗口':'查看成交K线（离线复盘）';
+      replay.disabled=false;replay.textContent='查看成交K线（离线复盘）';
       if(binding?.run_id!==result.run_id){frame.hidden=true;frame.removeAttribute('src');binding=null;}
       const r=await api.get_research_result(result.run_id);if(disposed||current.run_id!==result.run_id)return;if(!r.ok){reason.textContent=r.reason;return;}
       details=r.details;tradeList.replaceChildren();accountRoot.hidden=!details.account;

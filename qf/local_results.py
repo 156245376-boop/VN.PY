@@ -10,6 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from qf.history_store import HistoryStore
 from qf.local_backtest import LocalRunResult
 from qf.research_config import decimal_value, public_values, validate_research_config
 
@@ -297,6 +298,7 @@ def read_local_run(root, run_id):
                 'dataset_id': payload.get('dataset_id'),
                 'precision': payload.get('precision'),
                 'source_fingerprint': state['source_fingerprint'],
+                **_dataset_coverage(root, payload.get('dataset_id')),
             }
     except (OSError, sqlite3.Error, KeyError, TypeError, json.JSONDecodeError):
         raise ValueError('本地实验文件缺失、版本不支持或记录不完整') from None
@@ -319,6 +321,7 @@ def summarize_local_run(root, run_id):
         'fee_total': ledger['fee_total'],
         'reconciled': ledger['reconciled'],
     }
+    summary.update(_dataset_coverage(root, payload.get('dataset_id')))
     return public_values({'run_id': run_id, **summary})
 
 
@@ -469,3 +472,36 @@ def _equity_csv(points):
             for key in columns
         ))
     return '\n'.join(output)+'\n'
+
+
+def _dataset_coverage(root, dataset_id):
+    if not isinstance(dataset_id, str) or not dataset_id:
+        return {
+            'coverage': {'first_ns': None, 'last_ns': None, 'bars': 0},
+            'actual_symbols': [],
+        }
+    try:
+        summary = HistoryStore(
+            Path(root)/'history'
+        ).dataset_summary(dataset_id)
+    except (OSError, ValueError):
+        return {
+            'coverage': {'first_ns': None, 'last_ns': None, 'bars': 0},
+            'actual_symbols': [],
+        }
+    return {
+        'coverage': {
+            'first_ns': (
+                str(summary['first_ns'])
+                if summary['first_ns'] is not None
+                else None
+            ),
+            'last_ns': (
+                str(summary['last_ns'])
+                if summary['last_ns'] is not None
+                else None
+            ),
+            'bars': summary['bars'],
+        },
+        'actual_symbols': summary['symbols'],
+    }

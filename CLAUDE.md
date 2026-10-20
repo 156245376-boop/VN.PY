@@ -1,8 +1,8 @@
 # 当前项目地图
 
 个人国内期货策略研究项目，基础能力使用天勤 TqSdk。
-当前阶段：完整观察窗、交易统计、批量槽位和运行中新增已实现；本地快速引擎待实施；
-历史回测和模拟委托待联网验收。
+当前阶段：完整观察窗、交易统计、批量槽位、运行中新增和CPU本地快速研究已实现；
+真实账户数据权限、短区间本地/TqSdk一致性和模拟委托待联网验收。
 需求入口：`docs/requirements.md`。
 
 | 路径 | 用途 |
@@ -17,6 +17,10 @@
 | `qf/gui.py`、`qf/desktop.py` | 内存凭证、后台运行、停止和结果展示 |
 | `qf/catalog_gui.py`、`qf/native_catalog.py` | 天勤现成功能目录、示例只读查看与资源核对 |
 | `qf/storage.py`、`qf/trade_ledger.py` | SSD研究结果目录与迁移；逐笔逻辑交易证据 |
+| `qf/data_catalog.py`、`qf/history_store.py`、`qf/data_acquisition.py` | 数据请求、覆盖、规范化SQLite与权限感知下载适配 |
+| `qf/local_dataset_builder.py`、`qf/local_data.py`、`qf/local_signals.py` | 从已核实验证结果生成本机数据、连续数组与向量化信号 |
+| `qf/local_backtest.py`、`qf/local_results.py`、`qf/local_runtime.py` | 内存顺序执行、完整性结果账本与独立快速研究任务入口 |
+| `qf/backtest_parity.py`、`qf/compute_backend.py` | 本地/TqSdk一致性报告与诚实的CPU/CUDA能力目录 |
 | `tools/setup.ps1` | 锁定安装，隔离旧环境变量 |
 | `tools/check.ps1` | 封存完整性、环境身份、依赖与开发检查 |
 | `tools/run.ps1` | data-check、backtest、paper；模拟默认观察 |
@@ -51,7 +55,11 @@
 独立窗口现为完整只读研究观察窗，包含K线、进度、账户和可筛选交易明细。
 结果默认写入本机SSD应用数据目录，首次使用复制项目旧结果；回测账本使用WAL NORMAL，
 模拟执行仍使用FULL同步。
-下一阶段主路线见`docs/superpowers/specs/2026-10-20-local-fast-research-workbench-design.md`：
-完整只读观察窗与槽位编排已交付；接下来接入规范化历史数据、本地快速研究引擎和TqSdk一致性验证。
+主路线见`docs/superpowers/specs/2026-10-20-local-fast-research-workbench-design.md`：
+规范化历史数据、本地快速研究、结果持久化、TqSdk一致性报告和CPU/CUDA能力已交付；
+下一步使用实际账户核对权限和短区间一致性，再评估更长区间和模拟闭环。
+2026-10-21只读核对已看到分钟/Tick数据，但账号无`tq_dl`；本地与原版回放仍有成交价、
+持仓和权益差异，因此`local_research`仅供快速筛选。验收记录见
+`docs/superpowers/reports/2026-10-21-local-fast-engine-verification.md`。
 执行顺序分别见`docs/superpowers/plans/2026-10-20-complete-observer-and-slot-workflow.md`与
 `docs/superpowers/plans/2026-10-20-local-fast-backtest-engine.md`。CUDA仅在真实GPU执行器通过验证后开放。

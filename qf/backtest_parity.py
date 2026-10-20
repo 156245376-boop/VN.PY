@@ -2,8 +2,11 @@
 
 import hashlib
 import json
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 
 from qf.research_config import decimal_value, public_values
 
@@ -35,10 +38,16 @@ class ParityReport:
 
 
 def compare_runs(local_run, tqsdk_run, *, fee_tolerance=Decimal('0.01'),
-                 equity_tolerance=Decimal('0.01')):
+                 equity_tolerance=Decimal('0.01'),
+                 time_tolerance_ns=1_000_000_000):
     fee_tolerance = decimal_value(fee_tolerance)
     equity_tolerance = decimal_value(equity_tolerance)
-    if fee_tolerance < 0 or equity_tolerance < 0:
+    if (
+        fee_tolerance < 0
+        or equity_tolerance < 0
+        or type(time_tolerance_ns) is not int
+        or time_tolerance_ns < 0
+    ):
         raise ValueError('一致性容差不能为负数')
     local = _evidence(local_run)
     validation = _evidence(tqsdk_run)
@@ -51,6 +60,7 @@ def compare_runs(local_run, tqsdk_run, *, fee_tolerance=Decimal('0.01'),
         'tolerance': {
             'fee': _text(fee_tolerance),
             'equity': _text(equity_tolerance),
+            'time_ns': str(time_tolerance_ns),
         },
     }
     if (
@@ -73,12 +83,22 @@ def compare_runs(local_run, tqsdk_run, *, fee_tolerance=Decimal('0.01'),
     ):
         return _incomplete(base, 'comparison_evidence_missing')
 
-    local_signals = _signals(local['signals'])
-    validation_signals = _signals(validation['signals'])
-    local_fills = _fills(local['fills'])
-    validation_fills = _fills(validation['fills'])
-    signal_difference, signal_first = _list_difference(
-        local_signals, validation_signals, kind='signal'
+    local_signals = _signals(
+        _actionable_signal_rows(local['signals'], local['fills']),
+        time_tolerance_ns,
+    )
+    validation_signals = _signals(
+        _actionable_signal_rows(
+            validation['signals'], validation['fills']
+        ),
+        time_tolerance_ns,
+    )
+    local_fills = _fills(local['fills'], time_tolerance_ns)
+    validation_fills = _fills(
+        validation['fills'], time_tolerance_ns
+    )
+    signal_difference, signal_first = _signal_difference(
+        local_signals, validation_signals
     )
     fill_difference, fill_first = _list_difference(
         local_fills, validation_fills, kind='fill'
@@ -96,7 +116,14 @@ def compare_runs(local_run, tqsdk_run, *, fee_tolerance=Decimal('0.01'),
         decimal_value(local['final_equity'])
         - decimal_value(validation['final_equity'])
     )
-    first = signal_first or fill_first
+    timed = [
+        item
+        for item in (signal_first, fill_first)
+        if item is not None and item.get('time_ns') is not None
+    ]
+    first = min(timed, key=lambda item: int(item['time_ns'])) if timed else (
+        signal_first or fill_first
+    )
     if first is None and fee_difference > fee_tolerance:
         first = {
             'kind': 'fee',
@@ -147,6 +174,111 @@ def compare_runs(local_run, tqsdk_run, *, fee_tolerance=Decimal('0.01'),
 
 def compare_saved_evidence(local_evidence, validation_evidence, **kwargs):
     return compare_runs(local_evidence, validation_evidence, **kwargs)
+
+
+def evidence_for_run(root, run_id):
+    """读取整份已保存证据；不复用仅有界页面并避免比较截断数据。"""
+    from qf.continuous_results import schema_at
+    from qf.local_results import local_run_details
+    from qf.research_results import run_path, summarize_run
+
+    root = Path(root)
+    summary = summarize_run(root, run_id)
+    base = {
+        'run_id': run_id,
+        'engine_kind': summary.get('engine_kind'),
+        'status': summary.get('status'),
+        'dataset_id': summary.get('dataset_id'),
+        'summary': summary,
+    }
+    schema = schema_at(run_path(root, run_id))
+    if schema == 3:
+        details = local_run_details(root, run_id)
+        return base | {
+            'signals': details.get('signals', []),
+            'fills': details.get('fills', []),
+            'fees': summary.get('commission'),
+            'closed_trade_count': summary.get('closed_trade_count'),
+            'open_position': summary.get('open_position'),
+            'final_equity': summary.get('final_equity'),
+        }
+    path = run_path(root, run_id)
+    with closing(sqlite3.connect(
+        (path/'journal.sqlite3').as_uri()+'?mode=ro', uri=True
+    )) as db:
+        signals = []
+        for _stamp, payload in db.execute(
+            "SELECT time_ns,payload FROM risk_events "
+            "WHERE kind='signal' ORDER BY time_ns,rowid"
+        ):
+            content = json.loads(payload)
+            signal = content.get('signal', content)
+            if isinstance(signal, dict):
+                signals.append(signal)
+        has_fee = {
+            row[1]
+            for row in db.execute('PRAGMA table_info(fills)')
+        }
+        if 'fee' in has_fee:
+            rows = db.execute(
+                'SELECT key,order_id,symbol,direction,offset,volume,price,'
+                'time_ns,fee FROM fills ORDER BY time_ns,rowid'
+            ).fetchall()
+            fills = [
+                dict(
+                    zip(
+                        (
+                            'key',
+                            'order_id',
+                            'symbol',
+                            'direction',
+                            'offset',
+                            'volume',
+                            'price',
+                            'time_ns',
+                            'fee',
+                        ),
+                        row,
+                        strict=True,
+                    )
+                )
+                for row in rows
+            ]
+        else:
+            joined = db.execute(
+                'SELECT f.key,f.order_id,f.symbol,f.direction,f.offset,'
+                'f.volume,f.price,f.time_ns,l.fee FROM fills f '
+                'LEFT JOIN logical_fills l ON l.fill_key=f.key '
+                'ORDER BY f.time_ns,f.rowid'
+            ).fetchall()
+            fills = [
+                dict(
+                    zip(
+                        (
+                            'key',
+                            'order_id',
+                            'symbol',
+                            'direction',
+                            'offset',
+                            'volume',
+                            'price',
+                            'time_ns',
+                            'fee',
+                        ),
+                        row,
+                        strict=True,
+                    )
+                )
+                for row in joined
+            ]
+    return base | {
+        'signals': signals,
+        'fills': fills,
+        'fees': summary.get('commission'),
+        'closed_trade_count': summary.get('closed_trade_count'),
+        'open_position': summary.get('open_position'),
+        'final_equity': summary.get('final_equity'),
+    }
 
 
 def _incomplete(base, reason):
@@ -244,28 +376,53 @@ def _evidence(source):
     }
 
 
-def _signals(raw):
+def _signals(raw, tolerance_ns):
     if not isinstance(raw, list):
         return None
     try:
         return [
             {
-                'time_ns': str(item['time_ns']),
+                'time_ns': _time_bucket(
+                    item.get('completed_ns') or item.get('time_ns'),
+                    tolerance_ns,
+                ),
                 'direction': int(item['direction']),
             }
-            for item in sorted(raw, key=lambda item: int(item['time_ns']))
+            for item in sorted(
+                raw,
+                key=lambda item: int(
+                    item.get('completed_ns', item.get('time_ns'))
+                ),
+            )
         ]
     except (KeyError, TypeError, ValueError):
         return None
 
 
-def _fills(raw):
+def _actionable_signal_rows(signals, fills):
+    if not isinstance(signals, list) or not isinstance(fills, list):
+        return signals
+    indexes = {
+        fill.get('signal_bar')
+        for fill in fills
+        if type(fill.get('signal_bar')) is int
+    }
+    if not indexes:
+        return signals
+    return [
+        signal
+        for signal in signals
+        if signal.get('bar_index') in indexes
+    ]
+
+
+def _fills(raw, tolerance_ns):
     if not isinstance(raw, list):
         return None
     try:
         return [
             {
-                'time_ns': str(item['time_ns']),
+                'time_ns': _time_bucket(item['time_ns'], tolerance_ns),
                 'symbol': str(item['symbol']),
                 'direction': str(item['direction']),
                 'offset': str(item['offset']),
@@ -300,10 +457,48 @@ def _list_difference(left, right, *, kind):
             first = {
                 'kind': kind,
                 'index': index,
+                'time_ns': (
+                    local.get('time_ns')
+                    if local is not None
+                    else validation.get('time_ns')
+                    if validation is not None
+                    else None
+                ),
                 'local': local,
                 'validation': validation,
             }
     return difference, first
+
+
+def _signal_difference(left, right):
+    if left is None or right is None:
+        return None, None
+    left_keys = {
+        (item['time_ns'], item['direction'])
+        for item in left
+    }
+    right_keys = {
+        (item['time_ns'], item['direction'])
+        for item in right
+    }
+    local_only = sorted(left_keys-right_keys)
+    validation_only = sorted(right_keys-left_keys)
+    difference = len(local_only)+len(validation_only)
+    if not difference:
+        return 0, None
+    if local_only and (not validation_only or local_only[0] <= validation_only[0]):
+        return difference, {
+            'kind': 'signal',
+            'time_ns': local_only[0][0],
+            'local_direction': local_only[0][1],
+            'validation_direction': None,
+        }
+    return difference, {
+        'kind': 'signal',
+        'time_ns': validation_only[0][0],
+        'local_direction': None,
+        'validation_direction': validation_only[0][1],
+    }
 
 
 def _fingerprint(value):
@@ -317,6 +512,14 @@ def _fingerprint(value):
             separators=(',', ':'),
         ).encode('utf-8')
     ).hexdigest()
+
+
+def _time_bucket(value, tolerance_ns):
+    stamp = int(value)
+    if tolerance_ns == 0:
+        return str(stamp)
+    half = tolerance_ns//2
+    return str((stamp+half)//tolerance_ns*tolerance_ns)
 
 
 def _text(value):

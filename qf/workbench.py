@@ -136,17 +136,11 @@ class WorkbenchBridge:
             if not isinstance(run_ids, list) or len(run_ids) != 2:
                 raise ValueError('请选择两个运行')
             from qf.backtest_parity import compare_runs as compare_evidence
-            evidence = []
-            for run_id in run_ids:
-                summary = summarize_run(self._results_root, run_id)
-                details = run_details(self._results_root, run_id)
-                evidence.append({
-                    'run_id': run_id,
-                    'engine_kind': summary.get('engine_kind'),
-                    'status': summary.get('status'),
-                    'summary': summary,
-                    'details': details,
-                })
+            from qf.backtest_parity import evidence_for_run
+            evidence = [
+                evidence_for_run(self._results_root, run_id)
+                for run_id in run_ids
+            ]
             return dict(
                 ok=True,
                 comparison=compare_evidence(*evidence).public(),

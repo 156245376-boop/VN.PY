@@ -316,6 +316,18 @@ def test_partial_entry_uses_actual_fill_quantity_for_r_and_fees():
     assert result.final_equity == Decimal('99408')
 
 
+def test_double_fee_replay_changes_only_costs():
+    baseline = LocalBacktestEngine().run(
+        dataset(), config(), progress=None, cancel=lambda: False
+    )
+    stressed = LocalBacktestEngine(fee_multiplier=2).run(
+        dataset(), config(), progress=None, cancel=lambda: False
+    )
+    assert stressed.fees == baseline.fees*2
+    assert stressed.gross_pnl == baseline.gross_pnl
+    assert stressed.final_equity == baseline.final_equity-baseline.fees
+
+
 def test_incomplete_coverage_and_tick_precision_fail_before_execution():
     incomplete = replace(dataset(), coverage_complete=False)
     result = LocalBacktestEngine().run(

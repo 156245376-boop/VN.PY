@@ -269,6 +269,29 @@ class HistoryStore:
                 'close_oi,completed FROM bars WHERE dataset_id=? AND symbol=? '
                 'ORDER BY time_ns', db, params=(dataset_id, symbol))
 
+    def dataset_summary(self, dataset_id):
+        with closing(self.connect()) as db:
+            self._dataset(db, dataset_id)
+            first, last, bars = db.execute(
+                'SELECT min(time_ns),max(time_ns),count(*) FROM bars '
+                'WHERE dataset_id=?',
+                (dataset_id,),
+            ).fetchone()
+            symbols = [
+                row[0]
+                for row in db.execute(
+                    'SELECT DISTINCT symbol FROM bars WHERE dataset_id=? '
+                    'ORDER BY symbol',
+                    (dataset_id,),
+                )
+            ]
+            return {
+                'first_ns': first,
+                'last_ns': last,
+                'bars': bars,
+                'symbols': symbols,
+            }
+
     def load_instruments(self, dataset_id):
         with closing(self.connect()) as db:
             self._dataset(db, dataset_id)

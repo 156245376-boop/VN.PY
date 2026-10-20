@@ -4,6 +4,7 @@ import sqlite3
 import pytest
 from test_local_backtest import config, dataset
 
+from qf.backtest_parity import evidence_for_run
 from qf.local_backtest import LocalBacktestEngine
 from qf.local_results import save_local_result
 from qf.research_results import compare_runs, read_run, summarize_run
@@ -117,3 +118,12 @@ def test_workbench_reads_local_fill_and_trade_evidence(tmp_path):
     trade = bridge.get_research_trade(run_id, fill['key'])
     assert trade['ok'] is True
     assert trade['details']['initial_r'] == '960'
+
+
+def test_parity_evidence_reads_full_saved_local_result(tmp_path):
+    run_id = save_local_result(tmp_path, result(), source_fingerprint())
+    evidence = evidence_for_run(tmp_path, run_id)
+    assert evidence['engine_kind'] == 'local_research'
+    assert len(evidence['signals']) == 2
+    assert len(evidence['fills']) == 2
+    assert evidence['fees'] == '64'

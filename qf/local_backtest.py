@@ -3,6 +3,7 @@
 import hashlib
 import json
 import time
+from bisect import bisect_right
 from dataclasses import dataclass, replace
 from decimal import Decimal
 
@@ -17,7 +18,7 @@ from qf.continuous_risk import (
     seal_logical,
 )
 from qf.local_signals import ma_cross_signals
-from qf.pivot_stop import Pivot, latest_confirmed_pivot, plan_pivot_entry
+from qf.pivot_stop import Pivot, plan_pivot_entry
 from qf.research_config import decimal_value, public_values
 
 ZERO = Decimal(0)
@@ -222,6 +223,8 @@ class _LocalRunner:
         self.sequence = 0
         self.intrabar_stop = False
         self.public_signals = []
+        self.pivots = {1: [], -1: []}
+        self.pivot_confirmations = {1: [], -1: []}
 
     def execute(self):
         signals = ma_cross_signals(
@@ -257,6 +260,7 @@ class _LocalRunner:
         if not eligible:
             raise _LocalFailure('requested_range_empty')
         eligible_set = set(eligible)
+        self.pivots = self._build_pivots()
 
         for index, row in enumerate(self.frame.itertuples(index=False)):
             if index not in eligible_set:
@@ -366,24 +370,7 @@ class _LocalRunner:
 
     def _open_position(self, signal, row, bar_index):
         spec = self.dataset.specs[str(row.symbol)]
-        prefix = self.frame.iloc[:signal['bar_index']+1]
-        pivot_rows = []
-        for item in prefix.itertuples(index=False):
-            pivot_rows.append({
-                'datetime': int(item.time_ns),
-                'end_ns': int(item.completed_ns),
-                'completed': bool(item.completed),
-                'low': float(item.low),
-                'high': float(item.high),
-            })
-        pivot = latest_confirmed_pivot(
-            pivot_rows,
-            side=signal['direction'],
-            left=self.config.risk.pivot_left,
-            right=self.config.risk.pivot_right,
-            as_of_ns=int(signal['completed_ns']),
-            allow_nonpositive=True,
-        )
+        pivot = self._pivot_at(signal['direction'], int(signal['completed_ns']))
         actual_pivot = None
         offset = self._decimal(row.offset)
         if pivot is not None:
@@ -479,6 +466,57 @@ class _LocalRunner:
             'fill_count': 0,
         }
         self._record_fill(fill)
+
+    def _build_pivots(self):
+        rows = [
+            item
+            for item in self.frame.itertuples(index=False)
+            if bool(item.completed)
+        ]
+        left = self.config.risk.pivot_left
+        right = self.config.risk.pivot_right
+        result = {1: [], -1: []}
+        for index in range(left, len(rows)-right):
+            source = rows[index]
+            neighbors = rows[index-left:index]+rows[index+1:index+right+1]
+            confirmed_ns = int(rows[index+right].completed_ns)
+            for side, kind, key, comparison in (
+                (1, 'low', 'low', lambda value, other: value < other),
+                (-1, 'high', 'high', lambda value, other: value > other),
+            ):
+                value = self._decimal(getattr(source, key))
+                if all(
+                    comparison(value, self._decimal(getattr(item, key)))
+                    for item in neighbors
+                ):
+                    result[side].append({
+                        'confirmed_ns': confirmed_ns,
+                        'pivot': Pivot(
+                            kind,
+                            value,
+                            int(source.time_ns),
+                            confirmed_ns,
+                            left,
+                            right,
+                        ),
+                    })
+        for events in result.values():
+            events.sort(
+                key=lambda item: (
+                    item['confirmed_ns'],
+                    item['pivot'].bar_start_ns,
+                )
+            )
+        self.pivot_confirmations = {
+            side: [item['confirmed_ns'] for item in events]
+            for side, events in result.items()
+        }
+        return result
+
+    def _pivot_at(self, side, as_of_ns):
+        events = self.pivots[side]
+        position = bisect_right(self.pivot_confirmations[side], as_of_ns)-1
+        return events[position]['pivot'] if position >= 0 else None
 
     def _close_position(
         self,

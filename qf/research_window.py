@@ -21,7 +21,8 @@ from qf.trade_analytics import (
 JOB_ID = re.compile(r'^[0-9a-f]{32}$')
 ASSETS = {'research-window.js', 'research-window.css', 'account-view.js', 'labels.js'}
 STATE_FIELDS = {'job_id', 'status', 'running', 'reason', 'run_id', 'config',
-                'progress', 'account', 'risk', 'mode'}
+                'progress', 'account', 'risk', 'mode', 'engine_kind',
+                'compute_backend', 'dataset_id'}
 
 
 class ResearchWindowView:

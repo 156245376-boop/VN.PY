@@ -16,26 +16,42 @@ window.__researchJobsSmoke=null;
   const taskCard=text=>[...document.querySelectorAll('.research-job-card')]
     .find(card=>card.textContent.includes(text));
   const jobList=async()=>(await api.list_backtest_jobs()).jobs;
+  const plannerRows=()=>[...document.querySelectorAll('#research-planner .research-plan-row')];
+  const configureSlot=async(index,name)=>{
+    const row=plannerRows()[index];
+    assert(row,'缺少槽位 '+(index+1));
+    button(row,'配置策略').click();
+    await wait(()=>button(document,'保存并应用到槽位 '+(index+1)),'打开槽位编辑器');
+    input('name',name);input('risk.risk_budget','1000');
+    button(document,'保存并应用到槽位 '+(index+1)).click();
+    await wait(()=>plannerRows()[index].textContent.includes(name),'保存槽位 '+(index+1));
+  };
 
   document.querySelector('[data-open-research]').click();
-  await wait(()=>button(document,'运行回测')&&!button(document,'运行回测').disabled,
-    '研究页可用');
-  input('name','任务板验收');
-  input('risk.risk_budget','1000');
-  button(document,'运行回测').click();
+  await wait(()=>document.querySelector('#research-planner')
+    &&!document.querySelector('#research-planner').hidden,'回测计划');
+  const capacity=document.querySelector('#research-planner input[type=number]');
+  capacity.value='2';capacity.dispatchEvent(new Event('change'));
+  await wait(()=>plannerRows().length===2,'创建两个槽位');
+  await configureSlot(0,'任务A');
+  await configureSlot(1,'任务B');
+
+  const startAll=button(document,'开始全部回测');
+  assert(startAll&&!startAll.disabled,'开始按钮应可用');
+  startAll.click();startAll.click();
   await wait(async()=>{
     const jobs=await jobList();
-    return jobs.length===1&&jobs[0].status==='active';
-  },'提交首个任务');
+    return jobs.length===2&&jobs.every(job=>job.status==='active');
+  },'批量提交两个任务');
+  await sleep(300);
+  assert((await jobList()).length===2,'快速双击不能重复提交批次');
+
   await wait(()=>document.querySelector('.research-progress').textContent.includes('37%')
     &&!document.querySelector('#research-content progress').hidden,'显示任务进度');
   assert(document.querySelector('#research-content progress').value===37,'进度条应为37');
   assert(document.querySelector('#research-content').textContent.includes('101,000'),
     '账户权益应来自当前任务');
-  await wait(()=>!button(document,'运行回测').disabled,'按钮恢复');
-  button(document,'运行回测').click();
-  await sleep(250);
-  assert((await jobList()).length===1,'快速重复点击不能创建第二个任务');
+
   await wait(()=>document.querySelector('.account-view tbody tr'),'账户明细');
   const tabs=[...document.querySelectorAll('.account-view [data-tab]')];
   tabs.find(tab=>tab.dataset.tab==='orders').click();
@@ -52,17 +68,6 @@ window.__researchJobsSmoke=null;
     &&document.querySelector('.account-view').textContent.includes('669.58'),'完整交易明细');
   assert(document.querySelector('.account-view').textContent.includes('反向交叉'),'退出原因');
 
-  await sleep(1300);
-  await wait(()=>!button(document,'运行回测').disabled,'冷却结束');
-  button(document,'运行回测').click();
-  await wait(async()=>(await jobList()).length===2,'新增等待任务');
-  const waiting=taskCard('等待空闲');
-  assert(waiting,'应显示等待任务卡');
-  const remove=button(waiting,'移除任务');
-  assert(remove&&!remove.disabled,'等待任务应可移除');
-  remove.click();
-  await wait(async()=>(await jobList()).length===1,'移除等待任务');
-
   const active=taskCard('运行中');
   assert(active,'应保留运行任务卡');
   assert(button(active,'移除任务').disabled,'运行任务不能直接移除');
@@ -74,8 +79,11 @@ window.__researchJobsSmoke=null;
   const chartSrc=document.querySelector('.research-live-frame').getAttribute('src');
 
   button(active,'停止本任务').click();
-  await wait(async()=>(await jobList())[0].status==='stopped','停止当前任务');
+  await wait(async()=>{
+    const jobs=await jobList();
+    return jobs.some(job=>job.status==='stopped');
+  },'停止当前任务');
   await wait(()=>taskCard('已停止'),'任务卡显示已停止');
   window.__researchJobsSmoke={done:true,chartSrc};
 })().catch(error=>window.__researchJobsSmoke={error:String(error),
-  stage:window.__researchJobsStage,text:document.body.innerText.slice(-800)});
+  stage:window.__researchJobsStage,text:document.body.innerText.slice(-1000)});

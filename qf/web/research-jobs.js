@@ -10,7 +10,9 @@
     const el=(tag,text)=>{const e=document.createElement(tag);e.textContent=text??'';return e;};
     const title=el('h3','回测任务'),capacityLabel=el('label','并发数 '),capacity=el('input');
     capacity.type='number';capacity.min='1';capacity.max='4';capacity.value='2';capacityLabel.append(capacity);
-    const list=el('div');root.replaceChildren(title,capacityLabel,list);
+    const list=el('div');
+    if(options.showCapacity===false)root.replaceChildren(title,list);
+    else root.replaceChildren(title,capacityLabel,list);
     async function refresh(){
       if(disposed||busy)return jobs;busy=true;
       try{const response=await api.list_backtest_jobs?.();if(response?.ok){jobs=response.jobs||[];

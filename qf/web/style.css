@@ -58,6 +58,19 @@
 .research-job-card{border:1px solid #d7e2db;border-radius:7px;margin:6px 0;padding:8px;display:flex;justify-content:space-between;gap:10px;align-items:center}
 .research-job-card.selected{border-color:#2d8165;background:#eef7f2}.research-job-select{border:0;background:transparent;text-align:left;flex:1;cursor:pointer}
 .research-job-card span{display:flex;gap:5px;flex-wrap:wrap}.research-job-card button{padding:4px 8px;font-size:11px}
+#research-planner{margin:16px 0;padding:14px;border:1px solid #d5e3da;border-radius:9px;background:#f8fbf9}
+#research-planner>label{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:#61776d}
+#research-planner>label input{width:70px;padding:6px 8px}
+#research-planner>button{margin-top:10px}
+.research-plan-row{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid #e2ebe5;padding:10px 0}
+.research-plan-row>div:first-child{min-width:0}.research-plan-row strong{display:block;font-size:12px}
+.research-plan-row small{display:block;color:#7d9187;margin-top:4px;overflow-wrap:anywhere}
+.research-plan-row>div:last-child{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.research-plan-row label{display:flex;align-items:center;gap:5px;font-size:11px;color:#61776d}
+.research-plan-row button{padding:4px 8px;font-size:11px}
+#research-content>details{margin:12px 0;border:1px solid #dbe6df;border-radius:8px;padding:10px 12px;background:#fbfdfc}
+#research-content>details>summary{cursor:pointer;font-weight:600;font-size:12px}
+#research-content>details>div{padding-top:12px}
 .account-split{height:12px;min-height:12px;flex-shrink:0;margin:0 12px;cursor:row-resize;touch-action:none;position:relative;border-radius:4px}
 .account-split::before{content:'';position:absolute;left:0;right:0;top:5px;height:2px;background:#c8d9d0}
 .account-split::after{content:'';position:absolute;left:calc(50% - 24px);width:48px;top:3px;height:6px;border-radius:3px;background:#8eafa0}

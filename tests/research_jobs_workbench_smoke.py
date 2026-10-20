@@ -32,7 +32,7 @@ class MemoryJobs:
                include_fee_stress=False, request_id=None):
         self.submits += 1
         job_id = f'{self.submits:032x}'
-        running = self.submits == 1
+        running = self.submits <= self.capacity
         self.items.append(dict(
             job_id=job_id, epoch=uuid.uuid4().hex, run_id='fixture-run-'+job_id[:8],
             status='active' if running else 'waiting', running=running,
@@ -63,6 +63,17 @@ class MemoryJobs:
                       stage=1) if running else {},
             reason=None if running else 'capacity'))
         return dict(job_ids=[job_id], selected_job_id=job_id)
+
+    def submit_many(self, configs, *, credentials, experiment_refs,
+                    include_fee_stress, request_id=None):
+        groups, ids = [], []
+        for config, ref in zip(configs, experiment_refs, strict=True):
+            result = self.submit(
+                config, credentials=credentials, experiment_ref=ref,
+                include_fee_stress=False, request_id=None)
+            groups.append(result['job_ids'])
+            ids.extend(result['job_ids'])
+        return dict(job_ids=ids, groups=groups, selected_job_id=ids[0])
 
     def _get(self, job_id):
         return next(job for job in self.items if job['job_id'] == job_id)
@@ -197,7 +208,8 @@ def main():
         if not harness.result or not harness.result.get('done'):
             raise SystemExit(1)
         assert jobs.submits == 2
-        assert jobs.removed == ['0'*31+'2']
+        assert jobs.capacity == 2
+        assert jobs.removed == []
         assert jobs.items[0]['status'] == 'stopped'
         print('RESEARCH_JOBS_WORKBENCH_OK')
 

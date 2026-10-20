@@ -57,9 +57,14 @@
     const picker=el('select');picker.setAttribute('aria-label','已保存实验');
     const formRoot=el('div'),actions=el('div',null,'research-actions'),notice=el('p',null,'research-notice'),state=el('p',null,'research-status'),risk=el('p');
     const progressBar=el('progress'),progressText=el('p');progressBar.max=100;progressBar.hidden=true;progressText.className='research-progress';
-    const jobsRoot=el('div');jobsRoot.id='research-jobs';root.replaceChildren(heading,intro,picker,formRoot,actions,notice,state,progressBar,progressText,risk,jobsRoot);
-    let useBacktestJobs=false,capabilityChecked=false,jobChartOpen=false;
+    const plannerRoot=el('div');plannerRoot.id='research-planner';plannerRoot.hidden=true;
+    const editorDetails=el('details'),editorSummary=el('summary','新建或编辑回测策略'),editorBody=el('div');
+    editorDetails.append(editorSummary,editorBody);editorBody.append(picker,formRoot,actions);
+    const jobsRoot=el('div');jobsRoot.id='research-jobs';
+    root.replaceChildren(heading,intro,plannerRoot,editorDetails,notice,state,progressBar,progressText,risk,jobsRoot);
+    let useBacktestJobs=false,capabilityChecked=false,jobChartOpen=false,activeSlot=null;
     const jobsPanel=globalThis.QfResearchJobs?.create(jobsRoot,api,{
+      showCapacity:false,
       onSelect(job){selectedJob=job.job_id;ledgerKey='';ledgerCache=null;jobChartOpen=false;liveFrame.hidden=true;liveFrame.removeAttribute('src');liveBinding=null;if(job.account)ensureAccount?.(job.account);poll();},
       onChart(answer,job){selectedJob=job.job_id;jobsPanel?.select(selectedJob);jobChartOpen=true;watch.checked=true;
         liveBinding=answer;liveJob=job.job_id;liveFrame.hidden=false;liveFrame.src=answer.url;},
@@ -67,6 +72,33 @@
         else if(liveJob===job.job_id){liveFrame.hidden=true;liveFrame.removeAttribute('src');liveBinding=null;liveJob=null;jobChartOpen=false;}},
       notice(text){notice.textContent=text;}});
     const form=QfResearchForm.create(formRoot,{onChange(key){if(['continuous','start','end'].includes(key)){acceptedRequest=null;contractKey='';}}});
+    const planner=globalThis.QfResearchPlanner?.create(plannerRoot,api,{
+      onConfigure(index,item){
+        activeSlot=index;editorDetails.open=true;slotApply.hidden=false;
+        slotApply.textContent=`保存并应用到槽位 ${index+1}`;
+        if(item?.experiment_id){
+          ref={experiment_id:item.experiment_id,revision:item.revision};
+          const saved=picker.selectedOptions[0]?._experiment;
+          form.render(item.config||saved?.config||QfResearchForm.defaults('historical_main'));
+          picker.value=item.experiment_id;form.setSaved(true);
+        }else{
+          ref=null;picker.value='';form.render(QfResearchForm.defaults('historical_main'));form.setSaved(false);
+        }
+        notice.textContent=`正在配置回测槽位 ${index+1}。`;
+      },
+      async onStart(plan){
+        const requestId=(globalThis.crypto?.randomUUID?.()||String(Date.now())+Math.random());
+        const response=await api.start_backtest_batch(plan,requestId);
+        if(!response.ok){planner.setErrors(response.field_errors||{});notice.textContent=response.reason;return response;}
+        selectedJob=response.job_ids?.[0]||null;
+        await jobsPanel?.refresh();if(selectedJob)jobsPanel?.select(selectedJob);
+        notice.textContent=response.reason;return response;
+      },
+      async onCapacity(value){const response=await api.set_backtest_capacity?.(value);
+        if(response&&!response.ok)notice.textContent=response.reason;},
+      onNotice(text){notice.textContent=text;},
+    });
+    planner?.setCapacity(1);planner?.show(false);
     function checked(response){if(response.ok){form.showErrors({});return response;}
       form.showErrors(response.field_errors||{});notice.textContent=response.reason||'操作未完成，请重新核对。';return null;}
     const button=(text,fn)=>{const b=el('button',text);b.onclick=async()=>{if(commandPending)return;commandPending=true;b.disabled=true;
@@ -81,6 +113,16 @@
     const query=button('查询区间实际合约',async()=>{const c=form.readContractRequest(),response=await api.get_research_contracts(c.continuous,c.start,c.end);
       notice.textContent=response.reason;if(checked(response)){acceptedRequest={...c,request_id:response.request_id};contractKey='';}});
     const saveButton=button('保存实验',save);
+    const slotApply=button('保存并应用到槽位',async()=>{
+      if(activeSlot==null)return;
+      const saved=await save();if(!saved)return;
+      const config=structuredClone(form.read());
+      planner?.configure(activeSlot,{experiment_id:ref.experiment_id,revision:ref.revision,
+        name:config.name,config,include_fee_stress:planner.slots()[activeSlot]?.include_fee_stress});
+      notice.textContent=`槽位 ${activeSlot+1} 已保存：${config.name}。`;
+      editorDetails.open=false;
+    });
+    slotApply.hidden=true;
     const copy=button('复制实验',async()=>{const old=form.isLegacy;if(!old&&!await save())return;if(!ref)return;
       const name=Array.from(form.read().name).slice(0,72).join('')+' · 副本';const response=await api.copy_experiment(ref.experiment_id,ref.revision,name,old);
       if(!checked(response))return;ref=response.experiment;form.render(response.config);copy.textContent='复制实验';await refresh();notice.textContent=old?'已复制为新版拐点实验；保留旧上限，请核对新止损规则。':'已复制，可修改均线或风险参数后另行回测。';});
@@ -155,6 +197,7 @@
       copy.textContent=form.isLegacy?'复制为新版拐点实验':'复制实验';poll();};
     async function poll(){if(disposed||polling)return;polling=true;try{
       if(!capabilityChecked&&api.get_research_capabilities){const capability=await api.get_research_capabilities();useBacktestJobs=capability?.ok&&capability.use_backtest_jobs===true;capabilityChecked=true;}
+      planner?.show(useBacktestJobs&&view!=='paper');
       let jobState=null;
       if(useBacktestJobs&&api.list_backtest_jobs&&jobsPanel){await jobsPanel.refresh();
         if(selectedJob&&!jobsPanel.jobs().some(job=>job.job_id===selectedJob)){
@@ -184,6 +227,7 @@
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
       const mainMode=form.read().schema_version===3;
       const valid=mainMode||(matches&&(s.contracts||[]).some(c=>c.symbol===form.read().symbol)&&!form.isLegacy);
+      run.hidden=view==='paper'||useBacktestJobs;costLabel.hidden=view==='paper'||useBacktestJobs;
       run.disabled=!valid||(!usingJob&&legacyBusy);
       paper.disabled=legacyBusy||busy||!valid||mainMode;
       saveButton.disabled=(!usingJob&&legacyBusy)||form.isLegacy;
@@ -216,7 +260,13 @@
           notice.textContent=answer.ok?'基准已保存；开始独立双倍费用压力回放。':answer.reason;}}
     }catch(_){state.textContent='研究状态暂不可用';}finally{polling=false;}}
     const timer=setInterval(poll,700);refresh().catch(()=>{});poll();
-    return {show(next){const paperTransition=(view==='paper')!==(next==='paper');view=next;root.hidden=!['strategy','backtests','paper'].includes(view);run.hidden=view==='paper';costLabel.hidden=view==='paper';activateLabel.hidden=view!=='paper';paper.hidden=view!=='paper';
+    return {show(next){const paperTransition=(view==='paper')!==(next==='paper');view=next;
+      root.hidden=!['strategy','backtests','paper'].includes(view);
+      run.hidden=view==='paper'||useBacktestJobs;
+      costLabel.hidden=view==='paper'||useBacktestJobs;
+      activateLabel.hidden=view!=='paper';paper.hidden=view!=='paper';
+      planner?.show(useBacktestJobs&&view!=='paper');
+      if(view==='paper')editorDetails.open=true;
       if(!ref&&paperTransition)form.render(QfResearchForm.defaults(view==='paper'?'fixed':'historical_main'));
       intro.textContent=view==='paper'?'快期TqKq主模拟账户：默认仅观察。资金由服务端返回，与行情图的本地模拟账户不同。':'选择双均线、品种、周期和起止日期；默认按历史主力自动移仓，可跨年回测。';},
       updateCatalog:rows=>{catalog=rows;form.setCatalog(rows);},prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();accountView?.dispose?.();}};

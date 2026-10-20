@@ -115,17 +115,22 @@ def test_independent_chart_window_uses_validated_local_url(tmp_path, monkeypatch
     monkeypatch.setattr('qf.research_jobs_bridge.webbrowser.open_new',
                         lambda url: opened.append(url) or True)
 
-    class Replay:
-        revision = 'fixture'
+    class Window:
+        def __init__(self, job_id, state_provider, ledger_provider, chart_provider):
+            self.job_id = job_id
+            self.closed = False
         @staticmethod
-        def open(run_id):
-            return 'http://127.0.0.1:23456/'+run_id
+        def open():
+            return 'http://127.0.0.1:23456/'
+        def close(self):
+            self.closed = True
 
-    value.replay = Replay()
+    monkeypatch.setattr('qf.research_jobs_bridge.ResearchWindowView', Window)
     response = value.open_backtest_window('a'*32)
     assert response['ok']
-    assert opened == ['http://127.0.0.1:23456/20261020T000000-abcdef123456']
+    assert opened == ['http://127.0.0.1:23456/']
     assert '独立浏览器窗口' in response['reason']
+    assert '完整研究观察窗' in response['reason']
 
 
 def test_bridge_uses_explicit_ssd_results_root(tmp_path):
@@ -161,5 +166,30 @@ def test_each_task_keeps_its_own_live_chart_server(tmp_path, monkeypatch):
     second = value.open_backtest_chart('b'*32)
     assert first['ok'] and second['ok'] and first['url'] != second['url']
     assert len(created) == 2
+    value.close()
+    assert all(view.closed for view in created)
+
+
+def test_each_task_keeps_its_own_complete_research_window(tmp_path, monkeypatch):
+    value, ref, jobs = bridge(tmp_path)
+    jobs.items['a'*32] = dict(job_id='a'*32, status='active', running=True)
+    jobs.items['b'*32] = dict(job_id='b'*32, status='active', running=True)
+    created = []
+
+    class FakeWindow:
+        def __init__(self, job_id, state_provider, ledger_provider, chart_provider):
+            self.job_id = job_id
+            self.closed = False
+            created.append(self)
+        def open(self):
+            return f'http://127.0.0.1:{42000+len(created)}/'
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr('qf.research_jobs_bridge.ResearchWindowView', FakeWindow)
+    first = value.open_research_window('a'*32)
+    second = value.open_research_window('b'*32)
+    assert first['ok'] and second['ok'] and first['url'] != second['url']
+    assert {view.job_id for view in created} == {'a'*32, 'b'*32}
     value.close()
     assert all(view.closed for view in created)

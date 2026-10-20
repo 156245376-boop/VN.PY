@@ -191,6 +191,10 @@ class WorkbenchBridge:
         with self._lock:
             return self._jobs_bridge.open_backtest_window(job_id)
 
+    def open_research_window(self, job_id):
+        with self._lock:
+            return self._jobs_bridge.open_research_window(job_id)
+
     def get_backtest_trade_ledger(self, job_id):
         with self._lock:
             return self._jobs_bridge.get_trade_ledger(job_id)

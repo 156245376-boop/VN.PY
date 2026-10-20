@@ -11,6 +11,7 @@ from qf.research_config import ResearchValidationError
 from qf.research_jobs import ResearchJobs
 from qf.research_live_view import LiveResearchView
 from qf.research_results import run_path
+from qf.research_window import ResearchWindowView
 
 
 class ResearchJobsBridge:
@@ -26,6 +27,7 @@ class ResearchJobsBridge:
         self.contract_state = contract_state or (lambda: {})
         self.replay = replay
         self.live_views = {}
+        self.window_views = {}
 
     @property
     def jobs(self):
@@ -90,6 +92,7 @@ class ResearchJobsBridge:
         try:
             self.jobs.remove(job_id)
             self._close_live(job_id)
+            self._close_window(job_id)
             return dict(ok=True, reason='任务卡已移除；保存的结果文件未删除。')
         except KeyError:
             return self._error('任务不存在。', 'job_not_found')
@@ -113,22 +116,32 @@ class ResearchJobsBridge:
             except (OSError, ValueError):
                 pass
 
+    def _close_window(self, job_id):
+        view = self.window_views.pop(job_id, None)
+        if view is not None:
+            try:
+                view.close()
+            except (OSError, ValueError):
+                pass
+
+    def _ledger(self, job_id):
+        state = self.jobs.snapshot(job_id)
+        run_id = state.get('run_id')
+        if not run_id:
+            return dict(
+                available=False, trades=[], fills=[], reconciled=False,
+                truncated=False, reason='该任务尚未生成成交账本。')
+        root = self._jobs_args[0]
+        path = run_path(root, run_id)
+        if schema_at(path) != 2:
+            return dict(
+                available=False, trades=[], fills=[], reconciled=False,
+                truncated=False, reason='固定月份旧实验没有逻辑交易账本。')
+        return ContinuousReader(path).trade_ledger()
+
     def get_trade_ledger(self, job_id):
         try:
-            state = self.jobs.snapshot(job_id)
-            run_id = state.get('run_id')
-            if not run_id:
-                return dict(ok=True, ledger=dict(
-                    available=False, trades=[], fills=[], reconciled=False,
-                    truncated=False, reason='该任务尚未生成成交账本。'))
-            root = self._jobs_args[0]
-            path = run_path(root, run_id)
-            if schema_at(path) != 2:
-                return dict(ok=True, ledger=dict(
-                    available=False, trades=[], fills=[], reconciled=False,
-                    truncated=False, reason='固定月份旧实验没有逻辑交易账本。'))
-            ledger = ContinuousReader(path).trade_ledger()
-            return dict(ok=True, ledger=ledger)
+            return dict(ok=True, ledger=self._ledger(job_id))
         except (KeyError, ValueError, OSError, sqlite3.Error):
             return self._error('逐笔交易账本暂不可用；后台计算不受影响。',
                                'trade_ledger_unavailable')
@@ -154,8 +167,30 @@ class ResearchJobsBridge:
         except (KeyError, ValueError, OSError):
             return self._error('运行图不可用，请核对任务状态。', 'chart_unavailable')
 
+    def open_research_window(self, job_id):
+        try:
+            view = self.window_views.get(job_id)
+            if view is None:
+                def chart_url():
+                    result = self.open_backtest_chart(job_id)
+                    if not result.get('ok'):
+                        raise ValueError(result.get('reason') or '运行图不可用')
+                    return result['url']
+
+                view = ResearchWindowView(
+                    job_id,
+                    lambda: self.jobs.snapshot(job_id),
+                    lambda: self._ledger(job_id),
+                    chart_url,
+                )
+                self.window_views[job_id] = view
+            return dict(ok=True, url=view.open(), job_id=job_id)
+        except (KeyError, OSError, TypeError, ValueError):
+            return self._error('完整研究窗口不可用，请核对任务状态。',
+                               'research_window_unavailable')
+
     def open_backtest_window(self, job_id):
-        result = self.open_backtest_chart(job_id)
+        result = self.open_research_window(job_id)
         if not result.get('ok'):
             return result
         try:
@@ -166,7 +201,8 @@ class ResearchJobsBridge:
         if not opened:
             return self._error('未能启动本机浏览器；请检查默认浏览器设置。',
                                'chart_window_failed')
-        return result | dict(reason='已在独立浏览器窗口打开；关闭主工作台后实时图会停止更新。')
+        return result | dict(
+            reason='已在独立浏览器窗口打开完整研究观察窗；关闭主工作台后实时更新停止。')
 
     def set_backtest_capacity(self, value):
         try:
@@ -178,4 +214,6 @@ class ResearchJobsBridge:
     def close(self):
         for job_id in list(self.live_views):
             self._close_live(job_id)
+        for job_id in list(self.window_views):
+            self._close_window(job_id)
         return True if self._jobs is None else self._jobs.close()

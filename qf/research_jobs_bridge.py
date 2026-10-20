@@ -6,6 +6,7 @@ import webbrowser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from qf.backtest_plan import BacktestPlan
 from qf.continuous_results import ContinuousReader, schema_at
 from qf.research_config import ResearchValidationError
 from qf.research_jobs import ResearchJobs
@@ -74,6 +75,66 @@ class ResearchJobsBridge:
 
     def list_backtest_jobs(self):
         return dict(ok=True, jobs=self.jobs.list())
+
+    def start_backtest_batch(self, raw_plan, request_id=None, *, allow_partial=False):
+        try:
+            plan = BacktestPlan.validate(raw_plan, allow_partial=allow_partial)
+        except (TypeError, ValueError) as exc:
+            return self._error(str(exc) or '回测计划无效。', 'invalid_backtest_plan',
+                               {'plan': str(exc) or '回测计划无效'})
+        configs, refs, stress, errors = [], [], [], {}
+        for index, slot in enumerate(plan.slots, 1):
+            try:
+                config = self.experiments.load(slot.experiment_id, slot.revision)
+                if config.strategy_version not in (2, 3):
+                    errors[f'slot_{index}'] = '旧版实验只读，请复制为新版。'
+                    continue
+                if config.schema_version == 2:
+                    state = self.contract_state() or {}
+                    expected = dict(continuous=config.continuous,
+                                    start=str(config.start), end=str(config.end))
+                    symbols = {row['symbol'] for row in state.get('contracts', [])}
+                    if (state.get('contract_request') != expected
+                            or config.symbol not in symbols):
+                        errors[f'slot_{index}'] = '请先查询并选择该槽位的实际合约。'
+                        continue
+                    row = next(row for row in state['contracts']
+                               if row['symbol'] == config.symbol)
+                    expiry = row.get('expire_datetime')
+                    if type(expiry) in (int, float) and math.isfinite(expiry):
+                        day = datetime.fromtimestamp(
+                            expiry, timezone(timedelta(hours=8))).date()
+                        if config.end > day:
+                            errors[f'slot_{index}'] = (
+                                f'{config.symbol} 不能覆盖结束日 {config.end}。')
+                            continue
+                configs.append(config)
+                refs.append(dict(experiment_id=slot.experiment_id,
+                                 revision=slot.revision))
+                stress.append(slot.include_fee_stress)
+            except (KeyError, TypeError, ValueError, OSError, ResearchValidationError):
+                errors[f'slot_{index}'] = '实验修订、合约或参数无效。'
+        if errors:
+            return self._error('批量回测未启动：请核对标记槽位。',
+                               'batch_validation_failed', errors)
+        credentials = self.login()
+        if not credentials:
+            return self._error('请先保存快期凭证。', 'credentials_required')
+        previous = self.jobs.capacity
+        try:
+            self.jobs.set_capacity(plan.capacity)
+            result = self.jobs.submit_many(
+                configs, credentials=credentials, experiment_refs=refs,
+                include_fee_stress=stress, request_id=request_id)
+            return dict(ok=True, reason=f'已提交{len(plan.slots)}个回测槽位。',
+                        capacity=plan.capacity, **result)
+        except (KeyError, TypeError, ValueError, OSError):
+            try:
+                self.jobs.set_capacity(previous)
+            except ValueError:
+                pass
+            return self._error('批量回测未提交：任务池拒绝本次计划。',
+                               'batch_submit_failed')
 
     def get_backtest_state(self, job_id):
         try:

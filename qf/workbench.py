@@ -163,6 +163,11 @@ class WorkbenchBridge:
             return self._jobs_bridge.start_backtest(
                 experiment_id, revision, include_fee_stress, request_id)
 
+    def start_backtest_batch(self, plan, request_id=None, allow_partial=False):
+        with self._lock:
+            return self._jobs_bridge.start_backtest_batch(
+                plan, request_id, allow_partial=allow_partial)
+
     def list_backtest_jobs(self):
         with self._lock:
             return self._jobs_bridge.list_backtest_jobs()

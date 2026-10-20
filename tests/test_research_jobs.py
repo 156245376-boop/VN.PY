@@ -1,4 +1,5 @@
 import time
+from dataclasses import replace
 
 import pytest
 from research_worker_probe import launch, launch_controlled
@@ -121,5 +122,52 @@ def test_finished_job_records_watch_without_writing_to_dead_worker(tmp_path):
         assert wait(jobs, job_id)['status'] == 'backtest_finished'
         jobs.set_watch(job_id, True)
         assert jobs.snapshot(job_id)['watch'] is True
+    finally:
+        assert jobs.close()
+
+
+def test_submit_many_is_atomic_when_any_config_is_invalid(tmp_path):
+    jobs = ResearchJobs(tmp_path/'results', tmp_path/'jobs', capacity=2,
+                        worker_target=launch)
+    try:
+        valid = config()
+        invalid = replace(valid, bar_seconds=0)
+        try:
+            jobs.submit_many(
+                [valid, invalid], credentials=('u', 'p'),
+                experiment_refs=[{'experiment_id': 'a', 'revision': 1},
+                                 {'experiment_id': 'b', 'revision': 1}],
+                include_fee_stress=[False, False],
+                request_id='batch-failed')
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('invalid batch must fail')
+        assert jobs.list() == []
+    finally:
+        assert jobs.close()
+
+
+def test_submit_many_keeps_slot_order_and_request_idempotency(tmp_path):
+    jobs = ResearchJobs(tmp_path/'results', tmp_path/'jobs', capacity=2,
+                        worker_target=launch)
+    try:
+        configs = [config(), config(), config()]
+        refs = [{'experiment_id': 'a', 'revision': 1},
+                {'experiment_id': 'b', 'revision': 1},
+                {'experiment_id': 'c', 'revision': 1}]
+        first = jobs.submit_many(
+            configs, credentials=('u', 'p'), experiment_refs=refs,
+            include_fee_stress=[False, True, False], request_id='batch-same')
+        assert len(first['groups']) == 3
+        assert [len(group) for group in first['groups']] == [1, 2, 1]
+        assert first['job_ids'] == [job_id for group in first['groups']
+                                    for job_id in group]
+        again = jobs.submit_many(
+            configs, credentials=('u', 'p'), experiment_refs=refs,
+            include_fee_stress=[False, True, False], request_id='batch-same')
+        assert again['job_ids'] == first['job_ids']
+        for job_id in first['job_ids']:
+            assert wait(jobs, job_id, timeout=8)['status'] == 'backtest_finished'
     finally:
         assert jobs.close()

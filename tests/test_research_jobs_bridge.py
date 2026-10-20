@@ -10,6 +10,7 @@ class FakeJobs:
     def __init__(self):
         self.capacity = 2
         self.submitted = []
+        self.batch_submitted = []
         self.items = {}
         self.watch = []
 
@@ -21,6 +22,20 @@ class FakeJobs:
 
     def list(self):
         return list(self.items.values())
+
+    def submit_many(self, configs, *, credentials, experiment_refs,
+                    include_fee_stress, request_id=None):
+        self.batch_submitted.append((
+            configs, experiment_refs, include_fee_stress, request_id))
+        ids = []
+        groups = []
+        for index, _config in enumerate(configs):
+            job_id = f'{index+1:032x}'
+            self.items[job_id] = {'job_id': job_id, 'status': 'waiting',
+                                  'running': False}
+            ids.append(job_id)
+            groups.append([job_id])
+        return {'job_ids': ids, 'groups': groups, 'selected_job_id': ids[0]}
 
     def snapshot(self, job_id):
         if job_id not in self.items:
@@ -139,6 +154,44 @@ def test_bridge_uses_explicit_ssd_results_root(tmp_path):
     value = ResearchJobsBridge(tmp_path, store, results_root=target,
                                jobs=FakeJobs(), login=lambda: ('u', 'p'))
     assert value._jobs_args[0] == target
+
+
+def test_batch_plan_submits_every_slot_in_order(tmp_path):
+    value, ref, jobs = bridge(tmp_path)
+    second = value.experiments.save(validate_research_config(continuous_data()))
+    response = value.start_backtest_batch({
+        'capacity': 2,
+        'slots': [
+            {'experiment_id': ref['experiment_id'], 'revision': ref['revision'],
+             'include_fee_stress': False},
+            {'experiment_id': second['experiment_id'], 'revision': second['revision'],
+             'include_fee_stress': True},
+        ],
+    }, request_id='batch-1')
+    assert response['ok']
+    assert response['job_ids'] == ['0'*31+'1', '0'*31+'2']
+    assert len(jobs.batch_submitted) == 1
+    configs, refs, stress, request_id = jobs.batch_submitted[0]
+    assert [config.schema_version for config in configs] == [3, 3]
+    assert [item['experiment_id'] for item in refs] == [
+        ref['experiment_id'], second['experiment_id']]
+    assert stress == [False, True] and request_id == 'batch-1'
+
+
+def test_batch_plan_validation_blocks_entire_batch(tmp_path):
+    value, ref, jobs = bridge(tmp_path)
+    response = value.start_backtest_batch({
+        'capacity': 2,
+        'slots': [
+            {'experiment_id': ref['experiment_id'], 'revision': ref['revision'],
+             'include_fee_stress': False},
+            {'experiment_id': 'f'*32, 'revision': 1,
+             'include_fee_stress': False},
+        ],
+    })
+    assert not response['ok']
+    assert jobs.batch_submitted == []
+    assert 'slot_2' in response['field_errors']
 
 
 def test_each_task_keeps_its_own_live_chart_server(tmp_path, monkeypatch):

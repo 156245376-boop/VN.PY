@@ -24,7 +24,7 @@ class ResearchJobs:
         self.capacity = self._capacity(capacity)
         self.context = context or multiprocessing.get_context('spawn')
         self.worker_target = worker_target or worker_main
-        self.jobs, self.order, self.request_jobs = {}, [], {}
+        self.jobs, self.order, self.request_jobs, self.request_groups = {}, [], {}, {}
         self._credentials = None
         self._lock = PaperLock(self.jobs_root)
         self._lock.__enter__()
@@ -38,37 +38,68 @@ class ResearchJobs:
 
     def submit(self, config, *, credentials, experiment_ref=None,
                include_fee_stress=False, request_id=None):
+        result = self.submit_many(
+            [config], credentials=credentials, experiment_refs=[experiment_ref],
+            include_fee_stress=[include_fee_stress], request_id=request_id)
+        return dict(job_ids=result['groups'][0],
+                    selected_job_id=result['selected_job_id'])
+
+    def submit_many(self, configs, *, credentials, experiment_refs=None,
+                    include_fee_stress=None, request_id=None):
         if self._closed:
             raise ValueError('任务池已关闭')
         if request_id is not None and request_id in self.request_jobs:
             ids = self.request_jobs[request_id]
-            return dict(job_ids=ids, selected_job_id=ids[0])
+            groups = self.request_groups.get(request_id, [ids])
+            return dict(job_ids=ids, groups=groups, selected_job_id=ids[0])
         import uuid
-        job_id = uuid.uuid4().hex
-        task = freeze_backtest(config, experiment_ref, job_id=job_id)
-        job = dict(job_id=job_id, epoch=task.epoch, run_id=None, status='waiting',
-                   running=False, config=task.config, experiment_ref=task.experiment_ref,
-                   fee_multiplier=1, parent_job_id=None, progress=None, account=None,
-                   risk={}, watch=False, reason='capacity', task=task)
-        self.jobs[job_id] = job
-        self.order.append(job_id)
-        ids = [job_id]
-        if include_fee_stress:
-            stress_id = uuid.uuid4().hex
-            stress_task = freeze_backtest(config, experiment_ref, job_id=stress_id,
-                                           fee_multiplier=2)
-            self.jobs[stress_id] = dict(job_id=stress_id, epoch=stress_task.epoch,
-                run_id=None, status='waiting', running=False, config=stress_task.config,
-                experiment_ref=stress_task.experiment_ref, fee_multiplier=2,
-                parent_job_id=job_id, progress=None, account=None, risk={},
-                watch=False, reason='baseline_pending', task=stress_task)
-            self.order.append(stress_id)
-            ids.append(stress_id)
+        if not isinstance(configs, list) or not 1 <= len(configs) <= 4:
+            raise ValueError('批量回测必须具备1—4项')
+        if experiment_refs is None:
+            experiment_refs = [None]*len(configs)
+        if include_fee_stress is None:
+            include_fee_stress = [False]*len(configs)
+        if (not isinstance(experiment_refs, list)
+                or not isinstance(include_fee_stress, list)
+                or len(experiment_refs) != len(configs)
+                or len(include_fee_stress) != len(configs)
+                or any(type(value) is not bool for value in include_fee_stress)):
+            raise ValueError('批量回测参数不一致')
+
+        prepared = []
+        groups = []
+        for config, experiment_ref, stress in zip(
+                configs, experiment_refs, include_fee_stress, strict=True):
+            job_id = uuid.uuid4().hex
+            task = freeze_backtest(config, experiment_ref, job_id=job_id)
+            job = dict(job_id=job_id, epoch=task.epoch, run_id=None, status='waiting',
+                       running=False, config=task.config,
+                       experiment_ref=task.experiment_ref, fee_multiplier=1,
+                       parent_job_id=None, progress=None, account=None, risk={},
+                       watch=False, reason='capacity', task=task)
+            group = [job]
+            if stress:
+                stress_id = uuid.uuid4().hex
+                stress_task = freeze_backtest(
+                    config, experiment_ref, job_id=stress_id, fee_multiplier=2)
+                group.append(dict(
+                    job_id=stress_id, epoch=stress_task.epoch, run_id=None,
+                    status='waiting', running=False, config=stress_task.config,
+                    experiment_ref=stress_task.experiment_ref, fee_multiplier=2,
+                    parent_job_id=job_id, progress=None, account=None, risk={},
+                    watch=False, reason='baseline_pending', task=stress_task))
+            prepared.extend(group)
+            groups.append([item['job_id'] for item in group])
+        for job in prepared:
+            self.jobs[job['job_id']] = job
+            self.order.append(job['job_id'])
+        ids = [job_id for group in groups for job_id in group]
         if request_id is not None:
             self.request_jobs[request_id] = ids
+            self.request_groups[request_id] = groups
         self._credentials = tuple(credentials)
         self._start_available(credentials)
-        return dict(job_ids=ids, selected_job_id=job_id)
+        return dict(job_ids=ids, groups=groups, selected_job_id=groups[0][0])
 
     def _start_available(self, credentials):
         active = sum(1 for job in self.jobs.values() if job['running'])
@@ -222,8 +253,13 @@ class ResearchJobs:
             remaining = [current for current in ids if current in self.jobs]
             if remaining:
                 self.request_jobs[request_id] = remaining
+                self.request_groups[request_id] = [
+                    [current for current in group if current in remaining]
+                    for group in self.request_groups.get(request_id, [])
+                    if any(current in remaining for current in group)]
             else:
                 self.request_jobs.pop(request_id, None)
+                self.request_groups.pop(request_id, None)
         return doomed
 
     @staticmethod

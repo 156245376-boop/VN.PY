@@ -1,7 +1,8 @@
 # 当前项目地图
 
 个人国内期货策略研究项目，基础能力使用天勤 TqSdk。
-当前阶段：首次快期模拟只读连接及数据就绪已核对；历史回测和模拟委托待联网验收。
+当前阶段：完整观察窗、交易统计、批量槽位和运行中新增已实现；本地快速引擎待实施；
+历史回测和模拟委托待联网验收。
 需求入口：`docs/requirements.md`。
 
 | 路径 | 用途 |
@@ -46,9 +47,11 @@
 并行回测任务池、独立工作进程和账户证据按需查`docs/superpowers/specs/2026-10-19-parallel-backtest-observability-design.md`；
 任务卡与账户/止损观察的操作说明见`docs/research-paper-guide.md`第9节。
 任务卡可把单个任务图放进独立浏览器窗口；账户区增量刷新并提供逐笔交易明细。
+回测计划按并发数创建槽位，逐槽配置后统一启动；运行中可新增排队任务而不改变并发数。
+独立窗口现为完整只读研究观察窗，包含K线、进度、账户和可筛选交易明细。
 结果默认写入本机SSD应用数据目录，首次使用复制项目旧结果；回测账本使用WAL NORMAL，
 模拟执行仍使用FULL同步。
 下一阶段主路线见`docs/superpowers/specs/2026-10-20-local-fast-research-workbench-design.md`：
-完整只读观察窗与槽位编排先交付，再接入规范化历史数据、本地快速研究引擎和TqSdk一致性验证。
+完整只读观察窗与槽位编排已交付；接下来接入规范化历史数据、本地快速研究引擎和TqSdk一致性验证。
 执行顺序分别见`docs/superpowers/plans/2026-10-20-complete-observer-and-slot-workflow.md`与
 `docs/superpowers/plans/2026-10-20-local-fast-backtest-engine.md`。CUDA仅在真实GPU执行器通过验证后开放。

@@ -199,12 +199,15 @@
 
 ## 2026-10-20 完整观察窗、槽位编排与本地快速研究路线
 
-现有并行任务、账户、保护轨迹、逐笔交易和SSD结果继续复用。后续主路线调整为：
+现有并行任务、账户、保护轨迹、逐笔交易和SSD结果继续复用。2026-10-20已完成工作台层第一步：
 
 - 回测前按并发数N配置N个槽位，每个槽位独立配置策略，统一点击一次开始；运行中可新增任务，
   不必修改并发输入。
 - 每个任务可在独立完整观察窗查看进度、K线、账户、持仓、委托、成交和交易明细，并可筛选统计、
   导出CSV。天勤原生全屏按钮固定在右上，不与合约信息重叠。
+
+以下数据与引擎目标仍待实施：
+
 - 用户选择的历史范围先检查数据权限和覆盖；能够取得的数据写入本机规范化存储，后续实验直接复用。
 - 新增`local_research`本地快速引擎，在内存中计算信号并按顺序执行持仓、成交、止损和资金；
   `tqsdk_validation`保留为权威回放，用于少量候选策略的一致性核对。
@@ -218,3 +221,6 @@
 - `docs/superpowers/specs/2026-10-20-local-fast-research-workbench-design.md`
 - `docs/superpowers/plans/2026-10-20-complete-observer-and-slot-workflow.md`
 - `docs/superpowers/plans/2026-10-20-local-fast-backtest-engine.md`
+
+工作台层计划`2026-10-20-complete-observer-and-slot-workflow.md`已实施并通过全量检查；
+本地数据与快速引擎计划尚未开始。

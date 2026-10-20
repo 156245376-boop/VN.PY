@@ -385,7 +385,7 @@ class ResearchLoop:
 def execute_research(mode, config, root, credentials, *, sdk=None, activate=False, resume=None,
                      fee_multiplier=1, stop_requested=lambda: False,
                      flatten_requested=lambda: False, progress=None, experiment_ref=None,
-                     view_progress=None):
+                     view_progress=None, view_requested=None):
     config = validate_research_config(config.public())
     if config.schema_version == 3 and mode != 'backtest':
         raise ValueError('主力连续版本只用于历史回测，模拟请使用固定合约实验')
@@ -402,14 +402,17 @@ def execute_research(mode, config, root, credentials, *, sdk=None, activate=Fals
         from qf.continuous_runtime import execute_continuous
         return execute_continuous(config, root, credentials, sdk=sdk,
             fee_multiplier=fee_multiplier, stop_requested=stop_requested, progress=progress,
-            view_progress=view_progress, experiment_ref=experiment_ref)
+            view_progress=view_progress, experiment_ref=experiment_ref,
+            view_requested=view_requested)
     with PaperLock(root) if mode == 'paper' else nullcontext():
         return _run(sdk, mode, config, root, credentials, activate, resume, fee_multiplier,
-                    stop_requested, flatten_requested, progress, experiment_ref, view_progress)
+                    stop_requested, flatten_requested, progress, experiment_ref, view_progress,
+                    view_requested)
 
 
 def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
-         stop_requested, flatten_requested, progress, experiment_ref, view_progress):
+         stop_requested, flatten_requested, progress, experiment_ref, view_progress,
+         view_requested=None):
     j = (ResearchJournal.resume(run_path(root, resume), config.public()) if resume else
          ResearchJournal.create(root, mode, config.public(),
                                 provenance() | {'experiment_ref': experiment_ref}))
@@ -438,6 +441,7 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
             state['percent'] = None
         emit_progress(progress, 'research_progress', details=state)
         if (view_progress is not None and quote is not None and loop is not None
+                and (view_requested is None or view_requested())
                 and (force or time.monotonic()-last_publish >= .2)):
             revision += 1
             frame = view_snapshot(j, config, quote, now=max(loop.as_of_ns, tracker.current or 0),

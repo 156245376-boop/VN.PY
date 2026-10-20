@@ -41,6 +41,7 @@ from qf.research_contract import contract_spec, make_target_task
 from qf.research_coverage import assess_coverage
 from qf.research_journal import bar_end_ns, research_trade_key
 from qf.research_progress import BacktestProgress
+from qf.research_serial_cursor import SerialCursor
 from qf.runtime import (
     check_connections,
     emit_progress,
@@ -99,6 +100,7 @@ class ContinuousLoop:
         self.series = SignalSeries(config.bar_seconds,
             max_window=max(config.slow_period+2, config.risk.pivot_left+config.risk.pivot_right+2))
         self.quotes, self.serials, self.specs = {}, {}, {}
+        self.cursors = {}
         self.tasks, self.targets, self.roles, self.cancelled = {}, {}, {}, set()
         self.deferred_targets = {}
         self.entry_plan, self.pending_mapping = None, None
@@ -113,9 +115,14 @@ class ContinuousLoop:
         self.account_evidence = account_schema(journal.db)
         self.latest_account = None
 
-    def closed_rows(self, symbol, now):
-        return completed_rows(self.serials[symbol], self.config.bar_seconds, now,
-                              backtest=self.backtest, symbol=symbol)
+    def closed_rows(self, symbol, now, *, for_reference=False):
+        complete = lambda: completed_rows(  # noqa: E731
+            self.serials[symbol], self.config.bar_seconds, now,
+            backtest=self.backtest, symbol=symbol)
+        if for_reference:
+            return complete()
+        cursor = self.cursors.setdefault(symbol, SerialCursor())
+        return cursor.read(complete)
 
     def consume(self, symbol, rows):
         signal = None
@@ -339,15 +346,16 @@ class ContinuousLoop:
             if new != mapped:
                 raise Frozen('roll_mapping_changed')
             old = self.series.symbol
-            old_rows = self.closed_rows(old, detected) if old else []
-            new_rows = self.closed_rows(new, detected)
+            old_rows_ref = self.closed_rows(old, detected, for_reference=True) if old else []
+            new_rows_ref = self.closed_rows(new, detected, for_reference=True)
             if old:
+                old_rows = self.closed_rows(old, detected)
                 self.capture(old, old_rows)
                 signal = self.consume(old, old_rows)
-            self.capture(new, new_rows)
+            self.capture(new, self.closed_rows(new, detected))
             try:
                 evidence = self.series.switch(old_symbol=old, new_symbol=new,
-                    detected_ns=detected, old_rows=old_rows, new_rows=new_rows)
+                    detected_ns=detected, old_rows=old_rows_ref, new_rows=new_rows_ref)
             except ValueError:
                 raise Frozen('roll_reference_missing') from None
             self.j.record_mapping(evidence)
@@ -432,7 +440,7 @@ class ContinuousLoop:
 
 def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
                        stop_requested=lambda: False, progress=None, view_progress=None,
-                       experiment_ref=None):
+                       experiment_ref=None, view_requested=None):
     j = ContinuousJournal.create(root, 'backtest', config,
                                  provenance() | {'experiment_ref': experiment_ref})
     enable_account_evidence(j)
@@ -468,7 +476,9 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
                 logical_risk=public_values(asdict(loop.risk)), roll=asdict(loop.roll.state),
                 equity=api.get_account().balance, commission=api.get_account().commission,
                 account=loop.latest_account)
-        if view_progress and loop and quote and (force or time.monotonic()-last_publish >= .2):
+        if (view_progress and loop and quote
+                and (view_requested is None or view_requested())
+                and (force or time.monotonic()-last_publish >= .2)):
             revision += 1
             frame = continuous_snapshot(j, config, quote, now=loop.now, revision=revision,
                                         progress=details, terminal=terminal)

@@ -275,7 +275,8 @@ class ContinuousJournal(ResearchJournal):
                                       (values[2],)).fetchone()
                 if raw is None:
                     raise ValueError('成交缺少已核实规格和费用模型')
-                expected[values[0]] = json.loads(raw[0])['commission_per_lot']
+                expected[values[0]] = (dec(json.loads(raw[0])['commission_per_lot'])
+                                       * values[5])
             for entry in fees:
                 if dec(entry['amount']) != dec(expected[entry['fill_key']]):
                     raise ValueError('成交费用证据与合约规格不一致')

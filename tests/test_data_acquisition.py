@@ -1,9 +1,16 @@
 from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
+
+import pandas as pd
+import pytest
 
 from qf.data_acquisition import (
     AcquiredData,
     DataCancelled,
     DataPermissionError,
+    DataUnavailableError,
+    TqSdkDownloadProvider,
     prepare_dataset,
 )
 from qf.data_catalog import DataCapability, DataRequest
@@ -108,3 +115,141 @@ def test_explicit_download_permission_error_is_sanitized(tmp_path):
         progress=lambda *_a, **_k: None, cancel=lambda: False)
     assert result['status'] == 'permission_required'
     assert result['reason'] == '需要tq_dl权限'
+
+
+class DownloaderApi:
+    def __init__(self, *, expired=False, missing_price_tick=False):
+        self.closed = False
+        self.expired = expired
+        self.missing_price_tick = missing_price_tick
+        self._account = SimpleNamespace(
+            get_margin=lambda _symbol: 3000.0,
+            get_commission=lambda _symbol: 2.0,
+        )
+
+    def get_trading_calendar(self, start_dt, end_dt):
+        days = pd.date_range(start_dt, end_dt, freq='D')
+        return pd.DataFrame({
+            'date': days,
+            'trading': [day.weekday() < 5 for day in days],
+        })
+
+    def query_symbol_info(self, symbol):
+        row = {
+            'instrument_id': symbol,
+            'price_tick': 1.0,
+            'volume_multiple': 10.0,
+            'open_min_limit_order_volume': 1,
+            'expire_datetime': 1735689599 if self.expired else 4102444800,
+        }
+        if self.missing_price_tick:
+            row.pop('price_tick')
+        return pd.DataFrame([row])
+
+    def close(self):
+        self.closed = True
+
+
+def downloader_factory(*, expired=False, missing_price_tick=False, api_box=None):
+    def build(api):
+        if api_box is not None:
+            api_box.append(api)
+
+        class Task:
+            def is_finished(self):
+                return True
+
+            def get_progress(self):
+                return 100.0
+
+        return Task()
+
+    return build
+
+
+def test_tqsdk_provider_uses_independent_calendar_and_normalizes_prefixed_csv(
+    tmp_path,
+):
+    box = []
+    api = DownloaderApi()
+
+    class Downloader:
+        def __init__(
+            self,
+            _api,
+            *,
+            symbol_list,
+            dur_sec,
+            start_dt,
+            end_dt,
+            csv_file_name,
+        ):
+            assert symbol_list == 'SHFE.rb2505'
+            assert dur_sec == 60
+            stamp = int(pd.Timestamp('2025-01-02 09:00', tz='Asia/Shanghai').value)
+            Path(csv_file_name).write_text(
+                'datetime,datetime_nano,SHFE.rb2505.open,'
+                'SHFE.rb2505.high,SHFE.rb2505.low,SHFE.rb2505.close,'
+                'SHFE.rb2505.volume,SHFE.rb2505.close_oi\n'
+                f'2025-01-02 09:00:00.000000000,{stamp},'
+                '3300,3310,3290,3305,100,200\n',
+                encoding='utf-8',
+            )
+            self._finished = True
+
+        def is_finished(self):
+            return self._finished
+
+        def get_progress(self):
+            return 100.0
+
+    provider = TqSdkDownloadProvider(
+        lambda: api,
+        downloader_factory=Downloader,
+    )
+    acquired = provider.download(
+        request(),
+        tmp_path,
+        progress=lambda *_a, **_k: None,
+        cancel=lambda: False,
+    )
+    assert acquired.expected_days == [date(2025, 1, 2), date(2025, 1, 3)]
+    assert acquired.observed_days == [date(2025, 1, 2)]
+    assert acquired.bars[0]['symbol'] == 'SHFE.rb2505'
+    assert acquired.bars[0]['time_ns'] == int(
+        pd.Timestamp('2025-01-02 09:00', tz='Asia/Shanghai').value
+    )
+    assert acquired.instruments[0]['price_tick'] == '1.0'
+    assert acquired.instruments[0]['volume_multiple'] == '10.0'
+    assert acquired.instruments[0]['margin_per_lot'] == '3000.0'
+    assert acquired.instruments[0]['commission_per_lot'] == '2.0'
+    assert api.closed is True
+    assert box == []
+
+
+def test_tqsdk_provider_rejects_missing_contract_metadata(tmp_path):
+    provider = TqSdkDownloadProvider(
+        lambda: DownloaderApi(missing_price_tick=True),
+        downloader_factory=downloader_factory(),
+    )
+    with pytest.raises(DataUnavailableError, match='合约规格'):
+        provider.download(
+            request(),
+            tmp_path,
+            progress=lambda *_a, **_k: None,
+            cancel=lambda: False,
+        )
+
+
+def test_tqsdk_provider_rejects_contract_expired_before_requested_end(tmp_path):
+    provider = TqSdkDownloadProvider(
+        lambda: DownloaderApi(expired=True),
+        downloader_factory=downloader_factory(expired=True),
+    )
+    with pytest.raises(DataUnavailableError, match='到期'):
+        provider.download(
+            request(),
+            tmp_path,
+            progress=lambda *_a, **_k: None,
+            cancel=lambda: False,
+        )

@@ -212,6 +212,14 @@ class HistoryStore:
             db.execute("UPDATE data_sets SET status=? WHERE dataset_id=?",
                        ('ready' if report.complete() else 'incomplete', dataset_id))
 
+    def set_status(self, dataset_id, status):
+        if status not in {'created', 'writing', 'ready', 'incomplete', 'cancelled', 'failed'}:
+            raise ValueError('数据集状态无效')
+        with closing(self.connect()) as db, db:
+            self._dataset(db, dataset_id)
+            db.execute('UPDATE data_sets SET status=? WHERE dataset_id=?',
+                       (status, dataset_id))
+
     def coverage(self, dataset_id):
         with closing(self.connect()) as db:
             self._dataset(db, dataset_id)

@@ -1,0 +1,19 @@
+:root{font-family:"Microsoft YaHei UI","Segoe UI",sans-serif;color:#203b40;background:#f1f5f2;font-size:13px}
+*{box-sizing:border-box}body{margin:0;padding:20px}h1{font-size:20px;margin:4px 0}h2{font-size:15px;margin:0}
+p{line-height:1.7;color:#687d75}.eyebrow{font-size:10px;letter-spacing:1.5px;color:#81988e}
+.window-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:14px}
+.job-progress{display:flex;align-items:center;gap:10px;min-width:280px;padding-top:18px}
+.job-progress progress{width:220px;height:16px;accent-color:#1d8064}.job-progress span{font-weight:600;color:#256750}
+main{display:grid;gap:14px}.card{background:#fff;border:1px solid #dae5dd;border-radius:10px;box-shadow:0 2px 10px #193b2c0c;overflow:hidden}
+.section-title{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid #e7eee9}
+.section-title span{font-size:10px;color:#84978d}
+.chart-card iframe{display:block;width:100%;height:520px;border:0;background:#fafcfb}
+#account-root{padding:0 8px 8px}.account-view{border-top:0!important}.account-view .table-scroll{max-height:300px}
+.ledger-panel{padding-bottom:12px}.filter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;padding:14px 16px}
+.filter-grid label{display:grid;gap:5px;font-size:11px;color:#687e74}.filter-grid input,.filter-grid select{padding:7px 9px;border:1px solid #d4e0d9;border-radius:6px;background:#fbfdfc}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;padding:0 16px 10px}
+.stat{border:1px solid #dfe9e3;border-radius:7px;background:#f5faf7;padding:9px;min-width:0}
+.stat span{display:block;font-size:10px;color:#7e9187}.stat strong{display:block;margin-top:5px;font-size:15px;color:#1d5545;overflow-wrap:anywhere}
+.button{display:inline-block;padding:8px 12px;border:1px solid #176d57;border-radius:7px;background:#176d57;color:#fff;text-decoration:none;white-space:nowrap}
+.warning{margin:0 16px 10px;padding:8px 10px;border:1px solid #e8d4a5;border-radius:6px;background:#fff5df;color:#7c5d25}
+@media(max-width:760px){body{padding:10px}.window-head{display:block}.job-progress{min-width:0;padding-top:8px}.job-progress progress{flex:1;width:auto}.chart-card iframe{height:420px}}

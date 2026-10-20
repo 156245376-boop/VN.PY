@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>研究观察窗</title>
+  <link rel="stylesheet" href="/assets/research-window.css">
+</head>
+<body>
+  <header class="window-head">
+    <div>
+      <span class="eyebrow">本机只读研究观察</span>
+      <h1 id="job-title">正在读取任务</h1>
+      <p id="job-state">等待任务状态。</p>
+    </div>
+    <div class="job-progress">
+      <progress id="job-progress" max="100"></progress>
+      <span id="job-percent">—</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card chart-card">
+      <div class="section-title">
+        <div><h2>K线与成交过程</h2><span id="chart-note">正在读取任务图表。</span></div>
+      </div>
+      <iframe id="research-chart" title="任务K线与成交"></iframe>
+    </section>
+
+    <section class="card">
+      <div class="section-title">
+        <div><h2>账户与交易</h2><span>账户和账本只读取当前任务结果。</span></div>
+      </div>
+      <div id="account-root"></div>
+    </section>
+
+    <section class="card ledger-panel">
+      <div class="section-title">
+        <div><h2>交易统计与导出</h2><span>筛选只改变显示和CSV，不改写原始成交。</span></div>
+        <a id="export-filtered" class="button" href="/ledger.csv">导出当前筛选 CSV</a>
+      </div>
+      <form id="ledger-filters" class="filter-grid">
+        <label>起始日期<input data-ledger-filter="start" type="date"></label>
+        <label>结束日期<input data-ledger-filter="end" type="date"></label>
+        <label>方向<select data-ledger-filter="direction"><option value="">全部</option><option value="1">多</option><option value="-1">空</option></select></label>
+        <label>状态<select data-ledger-filter="status"><option value="">全部</option><option value="open">持仓中</option><option value="closed">已平仓</option></select></label>
+        <label>合约<input data-ledger-filter="symbol" placeholder="例如 SHFE.rb2505"></label>
+        <label>退出原因<input data-ledger-filter="reason" placeholder="例如 ma_reverse"></label>
+        <label>最小净盈亏<input data-ledger-filter="min_net" type="number" step="any"></label>
+        <label>最大净盈亏<input data-ledger-filter="max_net" type="number" step="any"></label>
+      </form>
+      <div id="ledger-stats" class="stat-grid"></div>
+      <p id="ledger-warning" class="warning" hidden></p>
+    </section>
+  </main>
+
+  <script src="/assets/labels.js"></script>
+  <script src="/assets/account-view.js"></script>
+  <script src="/assets/research-window.js"></script>
+</body>
+</html>

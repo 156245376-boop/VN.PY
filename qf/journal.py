@@ -42,6 +42,8 @@ class Journal:
         self.db = sqlite3.connect(path / "journal.sqlite3")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
+        self.db.execute("PRAGMA temp_store=MEMORY")
+        self.db.execute("PRAGMA cache_size=-32768")
         self.db.executescript("""
             CREATE TABLE IF NOT EXISTS signals (minute INTEGER PRIMARY KEY, target INTEGER,
                                                 applied INTEGER DEFAULT 0, input TEXT);
@@ -63,10 +65,18 @@ class Journal:
         journal = cls(path)
         journal.set("config", config)
         journal.set("mode", mode)
+        journal.set_durability(mode)
         payload = dict(metadata or {}, run_id=run_id, mode=mode, config=config)
         (path / "metadata.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2),
                                           encoding="utf-8")
         return journal
+
+    def set_durability(self, mode):
+        if mode not in ('data-check', 'backtest', 'paper'):
+            raise ValueError("研究模式无效")
+        # 回测是可重放的派生结果，WAL NORMAL 在崩溃时最多丢失最后一个未完成提交；
+        # 模拟交易仍保持 FULL，避免把速度优化带到执行路径。
+        self.db.execute("PRAGMA synchronous=" + ("NORMAL" if mode == "backtest" else "FULL"))
 
     @classmethod
     def resume(cls, path, config):
@@ -117,8 +127,11 @@ class Journal:
         return self.db.execute("SELECT coalesce(sum(CASE WHEN direction='BUY' THEN volume "
                                "ELSE -volume END),0) FROM fills").fetchone()[0]
 
-    def equity(self, time_ns, balance, commission):
+    def equity(self, time_ns, balance, commission, total_commission=None):
         with self.db:
+            if total_commission is not None:
+                self.db.execute("INSERT OR REPLACE INTO state VALUES ('total_commission',?)",
+                                (json.dumps(str(total_commission)),))
             self.db.execute("INSERT OR REPLACE INTO equity VALUES (?,?,?)",
                             (time_ns, balance, commission))
 

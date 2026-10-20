@@ -51,7 +51,7 @@
       result:job?.result||null};
   }
   function create(root,api){
-    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false,acceptedRequest=null,lastTerminalKey='',selectedJob=null,lastStart=null;
+    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false,acceptedRequest=null,lastTerminalKey='',selectedJob=null,lastStart=null,catalog=[],ledgerCache=null,ledgerKey='';
     const el=(tag,text,cls)=>{const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e;};
     const heading=el('h2','双均线交叉 · 策略实验'),intro=el('p','金叉做多、死叉做空；使用已完成K线，反向时先平仓。');
     const picker=el('select');picker.setAttribute('aria-label','已保存实验');
@@ -60,7 +60,7 @@
     const jobsRoot=el('div');jobsRoot.id='research-jobs';root.replaceChildren(heading,intro,picker,formRoot,actions,notice,state,progressBar,progressText,risk,jobsRoot);
     let useBacktestJobs=false,capabilityChecked=false,jobChartOpen=false;
     const jobsPanel=globalThis.QfResearchJobs?.create(jobsRoot,api,{
-      onSelect(job){selectedJob=job.job_id;jobChartOpen=false;liveFrame.hidden=true;liveFrame.removeAttribute('src');liveBinding=null;if(job.account)ensureAccount?.(job.account);poll();},
+      onSelect(job){selectedJob=job.job_id;ledgerKey='';ledgerCache=null;jobChartOpen=false;liveFrame.hidden=true;liveFrame.removeAttribute('src');liveBinding=null;if(job.account)ensureAccount?.(job.account);poll();},
       onChart(answer,job){selectedJob=job.job_id;jobsPanel?.select(selectedJob);jobChartOpen=true;watch.checked=true;
         liveBinding=answer;liveJob=job.job_id;liveFrame.hidden=false;liveFrame.src=answer.url;},
       onWatch(job,enabled){if(enabled){selectedJob=job.job_id;watch.checked=true;jobChartOpen=false;poll();}
@@ -91,7 +91,12 @@
     const watchLabel=el('label','观看交易过程（只读） '),watch=el('input');watch.type='checkbox';watch.dataset.watchResearch='true';watchLabel.prepend(watch);actions.append(watchLabel);
     const liveFrame=el('iframe'),liveNote=el('p'),accountRoot=el('div');liveNote.className='research-chart-state';liveNote.hidden=true;liveFrame.className='research-live-frame';liveFrame.title='本次实验交易过程';liveFrame.hidden=true;accountRoot.hidden=true;
     let accountView=null;root.append(liveNote,liveFrame,accountRoot);
-    function ensureAccount(value){if(!value)return;accountRoot.hidden=false;if(!accountView&&globalThis.QfAccountView)accountView=QfAccountView.create(accountRoot,{scenario:'research'});accountView?.update(value,[]);}
+    function ensureAccount(value,nextLedger=ledgerCache){
+      if(!value&&!nextLedger?.available)return;
+      accountRoot.hidden=false;
+      if(!accountView&&globalThis.QfAccountView)accountView=QfAccountView.create(accountRoot,{scenario:'research'});
+      accountView?.update(value||null,catalog,nextLedger);
+    }
     let liveBinding=null,liveJob=null,openingLive=false,latestState={};
     try{watch.checked=localStorage.getItem('qf-watch-research')==='true';}catch(_){}
     function pauseLive(){if(liveBinding?.run_id)liveFrame.contentWindow.postMessage({kind:'qf-live-pause',run_id:liveBinding.run_id,generation:liveBinding.generation,paused:!watch.checked},new URL(liveBinding.url).origin);}
@@ -115,7 +120,8 @@
     function liveMessage(e){if(!liveBinding||e.source!==liveFrame.contentWindow||e.origin!==new URL(liveBinding.url).origin||e.data?.generation!==liveBinding.generation)return;
       if(liveBinding.run_id&&e.data.run_id!==liveBinding.run_id)return;
       if(e.data.kind==='qf-live-ready'){liveBinding.run_id=e.data.run_id;pauseLive();}
-      if(e.data.kind==='qf-research-account'&&e.data.account){accountRoot.hidden=false;accountView?.update(e.data.account,[]);}}
+      if(!useBacktestJobs&&e.data.kind==='qf-research-account'&&e.data.account){
+        accountRoot.hidden=false;accountView?.update(e.data.account,catalog,ledgerCache);}}
     addEventListener('message',liveMessage);
     const activateLabel=el('label','允许本实验产生快期模拟委托 '),activate=el('input');activate.type='checkbox';activateLabel.prepend(activate);actions.append(activateLabel);
     const run=button('运行回测',async()=>{const intent=JSON.stringify([form.read(),cost.checked]);
@@ -159,10 +165,20 @@
       const legacyBusy=s.running,usingJob=useBacktestJobs&&!!jobState;
       const display=usingJob?jobDisplayState(jobState):s,busy=display.running===true;
       const description=describeState(display);
+      if(usingJob&&jobState.run_id&&api.get_backtest_trade_ledger){
+        const key=[jobState.job_id,jobState.run_id,jobState.progress?.fill_count??0,
+          jobState.status].join('|');
+        if(key!==ledgerKey){ledgerKey=key;
+          try{const answer=await api.get_backtest_trade_ledger(jobState.job_id);
+            ledgerCache=answer?.ok?answer.ledger:null;
+          }catch(_){ledgerCache=null;}
+        }
+      }else if(!usingJob||!jobState?.run_id){ledgerCache=null;ledgerKey='';}
       form.setRunning(!usingJob&&legacyBusy&&s.status!=='discovering');
       stopButton.disabled=usingJob?!['starting','active','warmup','backtesting'].includes(jobState?.status):!(legacyBusy||s.status==='connecting');
       flattenButton.disabled=usingJob||!legacyBusy||s.mode!=='paper'||!s.activate;
-      if(display.account)ensureAccount(display.account);else accountRoot.hidden=true;
+      if(display.account||ledgerCache?.available)ensureAccount(display.account,ledgerCache);
+      else accountRoot.hidden=true;
       if(usingJob){state.textContent=(jobState.config?.name||'任务')+' · '+(globalThis.QfResearchJobs?.statusText?.[jobState.status]||'状态待核实')+(jobState.reason?' · '+(reasons[jobState.reason]||'请核对任务状态'):'');
         state.dataset.light=jobState.running?'green':['failed','frozen'].includes(jobState.status)?'red':'yellow';}
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
@@ -203,7 +219,7 @@
     return {show(next){const paperTransition=(view==='paper')!==(next==='paper');view=next;root.hidden=!['strategy','backtests','paper'].includes(view);run.hidden=view==='paper';costLabel.hidden=view==='paper';activateLabel.hidden=view!=='paper';paper.hidden=view!=='paper';
       if(!ref&&paperTransition)form.render(QfResearchForm.defaults(view==='paper'?'fixed':'historical_main'));
       intro.textContent=view==='paper'?'快期TqKq主模拟账户：默认仅观察。资金由服务端返回，与行情图的本地模拟账户不同。':'选择双均线、品种、周期和起止日期；默认按历史主力自动移仓，可跨年回测。';},
-      updateCatalog:rows=>form.setCatalog(rows),prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();accountView?.dispose?.();}};
+      updateCatalog:rows=>{catalog=rows;form.setCatalog(rows);},prepareExit(){disposed=true;clearInterval(timer);form.setRunning(true);liveFrame.removeAttribute('src');return Promise.resolve();},dispose(){disposed=true;clearInterval(timer);removeEventListener('message',liveMessage);liveFrame.removeAttribute('src');results?.dispose();form.dispose();accountView?.dispose?.();}};
   }
   globalThis.QfResearch={create,describeState,allowBacktestStart,jobDisplayState};
 })();

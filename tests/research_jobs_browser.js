@@ -30,13 +30,27 @@ window.__researchJobsSmoke=null;
   await wait(()=>document.querySelector('.research-progress').textContent.includes('37%')
     &&!document.querySelector('#research-content progress').hidden,'显示任务进度');
   assert(document.querySelector('#research-content progress').value===37,'进度条应为37');
-  assert(document.querySelector('#research-content').textContent.includes('101000'),
+  assert(document.querySelector('#research-content').textContent.includes('101,000'),
     '账户权益应来自当前任务');
-
   await wait(()=>!button(document,'运行回测').disabled,'按钮恢复');
   button(document,'运行回测').click();
   await sleep(250);
   assert((await jobList()).length===1,'快速重复点击不能创建第二个任务');
+  await wait(()=>document.querySelector('.account-view tbody tr'),'账户明细');
+  const tabs=[...document.querySelectorAll('.account-view [data-tab]')];
+  tabs.find(tab=>tab.dataset.tab==='orders').click();
+  await wait(()=>document.querySelector('.account-view tbody tr'),'委托记录');
+  window.__accountStableRow=document.querySelector('.account-view tbody tr');
+  await sleep(1600);
+  assert(window.__accountStableRow===document.querySelector('.account-view tbody tr')
+    &&window.__accountStableRow.isConnected,'相同账户快照不能重建表格行');
+  tabs.find(tab=>tab.dataset.tab==='trades').click();
+  await wait(()=>document.querySelector('.account-view').textContent.includes('15.21')
+    &&document.querySelector('.account-view').textContent.includes('669.58'),'逐笔成交费用与盈亏');
+  tabs.find(tab=>tab.dataset.tab==='ledger').click();
+  await wait(()=>document.querySelector('.account-view').textContent.includes('3,284')
+    &&document.querySelector('.account-view').textContent.includes('669.58'),'完整交易明细');
+  assert(document.querySelector('.account-view').textContent.includes('反向交叉'),'退出原因');
 
   await sleep(1300);
   await wait(()=>!button(document,'运行回测').disabled,'冷却结束');

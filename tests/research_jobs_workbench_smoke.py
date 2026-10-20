@@ -41,7 +41,24 @@ class MemoryJobs:
             progress=dict(stage='backtesting', percent=37, completed_bars=120,
                           fill_count=2, elapsed_seconds=12, last_advance_age_seconds=0,
                           current_ns='1730700000000000000') if running else None,
-            account=dict(equity='101000', commission='20') if running else None,
+            account=dict(
+                kind='backtest', time_ns='1730700000000000000', status='active',
+                summary=dict(balance='101000', float_profit='700', margin='3000',
+                             available='98000', commission='30.42',
+                             commission_total='30.42', roll_commission='0',
+                             actual_fill_count=2, closed_trade_count=1,
+                             open_position=0),
+                positions=[dict(symbol='SHFE.rb2505', pos_long=0, pos_short=0,
+                                float_profit=0, margin=0)],
+                orders=[dict(symbol='SHFE.rb2505', direction='BUY', offset='OPEN',
+                             volume_orign=5, volume_left=0, limit_price='3301',
+                             status='FINISHED')],
+                trades=[dict(symbol='SHFE.rb2505', direction='BUY', offset='OPEN',
+                             volume=5, price=3301, trade_date_time=1735780439000000000)],
+                availability=dict(summary='recorded', positions='recorded',
+                                  orders='recorded', trades='recorded'),
+                truncated=dict(positions=False, orders=False, trades=False),
+            ) if running else None,
             risk=dict(side=1, quantity=1, initial_r='1000', stop_price='3284',
                       stage=1) if running else {},
             reason=None if running else 'capacity'))
@@ -85,6 +102,34 @@ class Replay:
 
     def open(self, run_id):
         return 'http://127.0.0.1:9/'+run_id
+
+
+TRADE_LEDGER = dict(
+    available=True, reconciled=True, truncated=False, fee_total='30.42',
+    fee_reconciled_difference='0', total=1,
+    trades=[dict(
+        trade_id='trade-1', status='closed', direction=1, first_symbol='SHFE.rb2505',
+        last_symbol='SHFE.rb2505', quantity=5, entry_time_ns='1735780439000000000',
+        entry_price='3301', exit_time_ns='1735782539000000000', exit_price='3315',
+        initial_stop='3284', final_stop='3302', exit_reason='ma_reverse',
+        fee='30.42', gross_pnl='700', net_pnl='669.58', fill_count=2,
+        fills=[
+            dict(key='fill-open', trade_id='trade-1', symbol='SHFE.rb2505',
+                 direction='BUY', offset='OPEN', role='strategy_open', volume=5,
+                 price='3301', time_ns='1735780439000000000', fee='15.21',
+                 trade_status='closed', entry_price='3301', exit_price='3315',
+                 initial_stop='3284', final_stop='3302', trade_net_pnl='669.58',
+                 exit_reason='ma_reverse'),
+            dict(key='fill-close', trade_id='trade-1', symbol='SHFE.rb2505',
+                 direction='SELL', offset='CLOSETODAY', role='strategy_close', volume=5,
+                 price='3315', time_ns='1735782539000000000', fee='15.21',
+                 trade_status='closed', entry_price='3301', exit_price='3315',
+                 initial_stop='3284', final_stop='3302', trade_net_pnl='669.58',
+                 exit_reason='ma_reverse')]),
+    ],
+    fills=[],
+)
+TRADE_LEDGER['fills'] = TRADE_LEDGER['trades'][0]['fills']
 
 
 class Harness:
@@ -135,7 +180,12 @@ def main():
         root = Path(directory)
         store = MemoryStore()
         store.save('fixture-user', 'fixture-password')
-        bridge = WorkbenchBridge(root, MarketFixture(), credential_store=store)
+
+        class FixtureBridge(WorkbenchBridge):
+            def get_backtest_trade_ledger(self, job_id):
+                return dict(ok=True, ledger=TRADE_LEDGER)
+
+        bridge = FixtureBridge(root, MarketFixture(), credential_store=store)
         jobs = MemoryJobs()
         bridge._jobs_bridge._jobs = jobs
         bridge._jobs_bridge.replay = Replay()

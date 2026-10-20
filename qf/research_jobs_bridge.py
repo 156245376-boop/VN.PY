@@ -1,26 +1,31 @@
 """研究任务池的窄桥接；页面不能传进程、路径或任意Python入口。"""
 
 import math
+import sqlite3
+import webbrowser
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
+from qf.continuous_results import ContinuousReader, schema_at
 from qf.research_config import ResearchValidationError
 from qf.research_jobs import ResearchJobs
 from qf.research_live_view import LiveResearchView
+from qf.research_results import run_path
 
 
 class ResearchJobsBridge:
     def __init__(self, root, experiments, *, jobs=None, login=None,
-                 contract_state=None, replay=None, capacity=2):
+                 contract_state=None, replay=None, capacity=2, results_root=None):
         self.root = root
         self.experiments = experiments
         self._jobs = jobs
-        self._jobs_args = (root/'results', root/'data/workbench/backtest-jobs')
+        self._jobs_args = (Path(results_root or root/'results').resolve(),
+                           root/'data/workbench/backtest-jobs')
         self._jobs_capacity = capacity
         self.login = login or (lambda: None)
         self.contract_state = contract_state or (lambda: {})
         self.replay = replay
-        self.live = None
-        self.live_job = None
+        self.live_views = {}
 
     @property
     def jobs(self):
@@ -84,6 +89,7 @@ class ResearchJobsBridge:
     def remove_backtest(self, job_id):
         try:
             self.jobs.remove(job_id)
+            self._close_live(job_id)
             return dict(ok=True, reason='任务卡已移除；保存的结果文件未删除。')
         except KeyError:
             return self._error('任务不存在。', 'job_not_found')
@@ -99,6 +105,34 @@ class ResearchJobsBridge:
         except (KeyError, OSError):
             return self._error('任务不可观看。', 'job_not_watchable')
 
+    def _close_live(self, job_id):
+        view = self.live_views.pop(job_id, None)
+        if view is not None:
+            try:
+                view.close()
+            except (OSError, ValueError):
+                pass
+
+    def get_trade_ledger(self, job_id):
+        try:
+            state = self.jobs.snapshot(job_id)
+            run_id = state.get('run_id')
+            if not run_id:
+                return dict(ok=True, ledger=dict(
+                    available=False, trades=[], fills=[], reconciled=False,
+                    truncated=False, reason='该任务尚未生成成交账本。'))
+            root = self._jobs_args[0]
+            path = run_path(root, run_id)
+            if schema_at(path) != 2:
+                return dict(ok=True, ledger=dict(
+                    available=False, trades=[], fills=[], reconciled=False,
+                    truncated=False, reason='固定月份旧实验没有逻辑交易账本。'))
+            ledger = ContinuousReader(path).trade_ledger()
+            return dict(ok=True, ledger=ledger)
+        except (KeyError, ValueError, OSError, sqlite3.Error):
+            return self._error('逐笔交易账本暂不可用；后台计算不受影响。',
+                               'trade_ledger_unavailable')
+
     def open_backtest_chart(self, job_id):
         try:
             state = self.jobs.snapshot(job_id)
@@ -109,15 +143,30 @@ class ResearchJobsBridge:
                     return dict(ok=True, url=url, run_id=state['run_id'],
                                 revision=self.replay.revision, mode='replay')
                 return self._error('该任务没有可显示的结果。', 'replay_unavailable')
-            if self.live is None or self.live_job != job_id:
-                self.live = LiveResearchView(
+            live = self.live_views.get(job_id)
+            if live is None:
+                live = LiveResearchView(
                     lambda: self.jobs.live_snapshot(job_id),
                     state_provider=lambda: self.jobs.snapshot(job_id))
-                self.live_job = job_id
-            return dict(ok=True, url=self.live.open(), run_id=state.get('run_id'),
-                        generation=self.live.generation, mode='live')
+                self.live_views[job_id] = live
+            return dict(ok=True, url=live.open(), run_id=state.get('run_id'),
+                        generation=live.generation, mode='live')
         except (KeyError, ValueError, OSError):
             return self._error('运行图不可用，请核对任务状态。', 'chart_unavailable')
+
+    def open_backtest_window(self, job_id):
+        result = self.open_backtest_chart(job_id)
+        if not result.get('ok'):
+            return result
+        try:
+            opened = webbrowser.open_new(result['url'])
+        except (OSError, webbrowser.Error):
+            return self._error('独立图表窗口未能打开，请允许浏览器访问本机图表。',
+                               'chart_window_failed')
+        if not opened:
+            return self._error('未能启动本机浏览器；请检查默认浏览器设置。',
+                               'chart_window_failed')
+        return result | dict(reason='已在独立浏览器窗口打开；关闭主工作台后实时图会停止更新。')
 
     def set_backtest_capacity(self, value):
         try:
@@ -127,9 +176,6 @@ class ResearchJobsBridge:
             return self._error('并发数必须为1—4。', 'invalid_capacity')
 
     def close(self):
-        if self.live is not None:
-            try:
-                self.live.close()
-            except Exception:
-                pass
+        for job_id in list(self.live_views):
+            self._close_live(job_id)
         return True if self._jobs is None else self._jobs.close()

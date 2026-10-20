@@ -14,7 +14,7 @@ TOTAL_KEYS = {'commission_total', 'roll_commission', 'actual_fill_count',
 POSITION_FIELDS = ('pos_long', 'pos_short', 'open_price_long', 'open_price_short',
                    'float_profit', 'margin')
 ORDER_FIELDS = ('direction', 'offset', 'status', 'volume_orign', 'volume_left', 'limit_price')
-TRADE_FIELDS = ('direction', 'offset', 'volume', 'price')
+TRADE_FIELDS = ('direction', 'offset', 'volume', 'price', 'trade_date_time')
 TRIGGERS = {'bar_close', 'fill', 'protection', 'roll', 'terminal'}
 STATUSES = {'active', 'last_snapshot', 'legacy_partial'}
 ROLES = {'strategy_open', 'strategy_close', 'roll_out', 'roll_in'}
@@ -64,8 +64,11 @@ def _rows(collection, fields):
         clean = {'symbol': symbol}
         for field in fields:
             value = _value(row, field)
-            clean[field] = _number(value) if field not in {
-                'direction', 'offset', 'status'} else (
+            if field == 'trade_date_time':
+                clean[field] = str(value) if type(value) in (int, float) and value > 0 else None
+            else:
+                clean[field] = _number(value) if field not in {
+                    'direction', 'offset', 'status'} else (
                     value if value in ('BUY', 'SELL', 'OPEN', 'CLOSE', 'CLOSETODAY',
                                        'ALIVE', 'FINISHED') else None)
         result.append(clean)
@@ -92,22 +95,42 @@ def _totals(raw):
             **counts, 'open_position': position}
 
 
-def account_snapshot(api, *, time_ns, totals, status):
+def account_snapshot(api, *, time_ns, totals, status, details=True):
     if type(time_ns) is not int or time_ns < 0 or status not in STATUSES - {'legacy_partial'}:
         raise ValueError('账户快照状态无效')
     summary = _totals(totals)
     account = api.get_account()
     for key in SUMMARY:
         summary[key] = _number(_value(account, key))
-    positions, position_cut = _rows(api.get_position(), POSITION_FIELDS)
-    orders, order_cut = _rows(api.get_order(), ORDER_FIELDS)
-    trades, trade_cut = _rows(api.get_trade(), TRADE_FIELDS)
+    if details:
+        positions, position_cut = _rows(api.get_position(), POSITION_FIELDS)
+        orders, order_cut = _rows(api.get_order(), ORDER_FIELDS)
+        trades, trade_cut = _rows(api.get_trade(), TRADE_FIELDS)
+    else:
+        positions, orders, trades = [], [], []
+        position_cut = order_cut = trade_cut = False
     return {
         'kind': 'backtest', 'time_ns': str(time_ns), 'status': status,
         'summary': summary, 'positions': positions, 'orders': orders, 'trades': trades,
         'truncated': {'positions': position_cut, 'orders': order_cut, 'trades': trade_cut},
-        'availability': {'summary': 'recorded', 'positions': 'recorded',
-                         'orders': 'recorded', 'trades': 'recorded'},
+        'availability': {'summary': 'recorded',
+                         'positions': 'recorded' if details else 'unrecorded',
+                         'orders': 'recorded' if details else 'unrecorded',
+                         'trades': 'recorded' if details else 'unrecorded'},
+    }
+
+
+def compact_account_snapshot(snapshot):
+    """分钟内账户只保存汇总，完整持仓/委托/成交留给变化时点和末次快照。"""
+    if not isinstance(snapshot, dict) or snapshot.get('kind') != 'backtest':
+        raise ValueError('账户快照格式无效')
+    return {
+        'kind': 'backtest', 'time_ns': snapshot.get('time_ns'),
+        'status': snapshot.get('status'), 'summary': dict(snapshot.get('summary') or {}),
+        'positions': [], 'orders': [], 'trades': [],
+        'truncated': {'positions': False, 'orders': False, 'trades': False},
+        'availability': {'summary': 'recorded', 'positions': 'unrecorded',
+                         'orders': 'unrecorded', 'trades': 'unrecorded'},
     }
 
 

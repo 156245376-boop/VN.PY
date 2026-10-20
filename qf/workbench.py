@@ -1,6 +1,7 @@
 """可信桌面页面的最小业务桥接；不向网页暴露文件或命令执行接口。"""
 
 import math
+import os
 import re
 import subprocess
 import threading
@@ -30,6 +31,7 @@ from qf.research_jobs_bridge import ResearchJobsBridge
 from qf.research_live_view import LiveResearchView
 from qf.research_results import RUN_ID, compare_runs, read_run, run_details, summarize_run
 from qf.research_session import ResearchSession
+from qf.storage import prepare_results_root
 from qf.window_host import run_window
 from qf.workbench_store import WorkbenchStore
 
@@ -72,8 +74,9 @@ def _history_summary(raw):
 
 class WorkbenchBridge:
     def __init__(self, root: Path, session: MarketSession, *, credential_store=None,
-                 research_session=None):
+                 research_session=None, results_root=None):
         self._root, self._session = root, session
+        self._results_root = Path(results_root or root/'results').resolve()
         self._lock = threading.RLock()
         self._store = WorkbenchStore(root / "data/workbench")
         cached = self._store.load()
@@ -88,18 +91,18 @@ class WorkbenchBridge:
         self._indicator_jobs = IndicatorJobs()
         self._experiments = ExperimentStore(root / 'data/workbench/experiments')
         self._backtest_jobs_enabled = research_session is None
-        self._research = research_session or ResearchSession(root / 'results')
+        self._research = research_session or ResearchSession(self._results_root)
         self._research_credentials = None
-        self._replay = ReplayView(root / 'results')
+        self._replay = ReplayView(self._results_root)
         self._live_view = LiveResearchView(self._research.live_snapshot,
                                            state_provider=self._research.snapshot)
         self._live_job = None
         self._jobs_bridge = ResearchJobsBridge(
-            root, self._experiments, login=self._research_login,
+            root, self._experiments, results_root=self._results_root, login=self._research_login,
             contract_state=self._research.snapshot, replay=self._replay)
 
     def list_research_runs(self):
-        root = self._root / 'results'
+        root = self._results_root
         results = []
         for path in sorted(root.iterdir(), reverse=True) if root.exists() else []:
             if RUN_ID.fullmatch(path.name):
@@ -114,14 +117,14 @@ class WorkbenchBridge:
 
     def get_research_result(self, run_id):
         try:
-            return dict(ok=True, result=summarize_run(self._root/'results', run_id),
-                        details=run_details(self._root/'results', run_id))
+            return dict(ok=True, result=summarize_run(self._results_root, run_id),
+                        details=run_details(self._results_root, run_id))
         except (ValueError, OSError):
             return dict(ok=False, reason='结果缺失、版本不支持或记录不完整，未使用当前行情补造。')
 
     def compare_research_runs(self, run_ids):
         try:
-            return dict(ok=True, comparison=compare_runs(self._root/'results', run_ids))
+            return dict(ok=True, comparison=compare_runs(self._results_root, run_ids))
         except (ValueError, OSError):
             return dict(ok=False, reason='请选择两个有效的新实验运行结果。')
 
@@ -131,7 +134,7 @@ class WorkbenchBridge:
         from qf.continuous_results import ContinuousReader
         from qf.research_results import run_path
         try:
-            root = self._root/'results'
+            root = self._results_root
             if read_run(root, run_id)['config']['schema_version'] != 3:
                 raise ValueError('仅连续实验使用分页成交查询')
             return dict(ok=True, details=ContinuousReader(run_path(root, run_id)).fill_details(key))
@@ -144,7 +147,7 @@ class WorkbenchBridge:
         from qf.research_protection import trade_explanation
         from qf.research_results import run_path
         try:
-            root = self._root/'results'
+            root = self._results_root
             read_run(root, run_id)
             with sqlite3.connect(
                     (run_path(root, run_id)/'journal.sqlite3').as_uri()+'?mode=ro',
@@ -183,6 +186,14 @@ class WorkbenchBridge:
     def open_backtest_chart(self, job_id):
         with self._lock:
             return self._jobs_bridge.open_backtest_chart(job_id)
+
+    def open_backtest_window(self, job_id):
+        with self._lock:
+            return self._jobs_bridge.open_backtest_window(job_id)
+
+    def get_backtest_trade_ledger(self, job_id):
+        with self._lock:
+            return self._jobs_bridge.get_trade_ledger(job_id)
 
     def set_backtest_capacity(self, value):
         with self._lock:
@@ -586,6 +597,11 @@ class WorkbenchBridge:
                      "-B", str(self._root / "tools/gui_entry.py")], cwd=self._root,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
+            elif key == "results":
+                if os.name == 'nt':
+                    os.startfile(self._results_root)
+                else:
+                    webbrowser.open(self._results_root.as_uri())
             elif isinstance(key, str) and key in urls:
                 webbrowser.open(urls[key])
             else:
@@ -618,5 +634,5 @@ class WorkbenchBridge:
 
 def main():
     root = Path(__file__).resolve().parent.parent
-    bridge = WorkbenchBridge(root, MarketSession())
+    bridge = WorkbenchBridge(root, MarketSession(), results_root=prepare_results_root(root))
     run_window(root / "qf/web/index.html", bridge, bridge._request_close)

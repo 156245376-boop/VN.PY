@@ -32,6 +32,7 @@ from qf.research_account import (
     account_schema,
     account_snapshot,
     account_totals,
+    compact_account_snapshot,
     enable_account_evidence,
     save_account,
 )
@@ -157,9 +158,19 @@ class ContinuousLoop:
     def capture_account(self, trigger, *, status='active'):
         if not self.account_evidence or not self.now:
             return
+        detailed = trigger != 'bar_close' or self.latest_account is None
         snapshot = account_snapshot(self.api, time_ns=self.now, status=status,
-                                    totals=account_totals(self.j.db))
-        save_account(self.j, snapshot, trigger=trigger)
+                                    totals=account_totals(self.j.db),
+                                    details=detailed)
+        if trigger == 'bar_close' and not detailed:
+            snapshot.update(
+                positions=self.latest_account.get('positions', []),
+                orders=self.latest_account.get('orders', []),
+                trades=self.latest_account.get('trades', []),
+                truncated=self.latest_account.get('truncated', {}),
+                availability=self.latest_account.get('availability', {}))
+        stored = compact_account_snapshot(snapshot) if trigger == 'bar_close' else snapshot
+        save_account(self.j, stored, trigger=trigger)
         self.latest_account = snapshot
 
     def accept_fill(self, fill):

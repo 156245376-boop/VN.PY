@@ -22,6 +22,7 @@ from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
 from qf.research_journal import integrity_manifest
 from qf.research_protection import protection_window
+from qf.trade_ledger import trade_ledger as build_trade_ledger
 from qf.trade_risk import ContractSpec
 
 
@@ -136,6 +137,10 @@ class ContinuousReader:
                            risk=json.loads(r[3])) for r in (signal, saved) if r is not None]
         return dict(fill=fill, risk_events=events)
 
+    def trade_ledger(self, *, as_of_ns=None, limit=500):
+        with closing(self.connect()) as db:
+            return build_trade_ledger(db, as_of_ns=as_of_ns, limit=limit)
+
 
 def _spec(raw):
     data = dict(raw)
@@ -236,6 +241,7 @@ def read_continuous_run(root, run_id, *, details=False):
             result['protection'] = protection_window(
                 db, first_ns=span[0] or 0, as_of_ns=span[1] or 0,
                 series='signal', symbol=None)
+            result['trade_ledger'] = build_trade_ledger(db, as_of_ns=span[1])
     return result
 
 

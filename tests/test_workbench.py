@@ -151,6 +151,18 @@ def test_closing_window_waits_until_disconnect_finishes(bridge):
     assert bridge._request_close() is True
 
 
+def test_research_results_can_live_on_the_ssd_root(tmp_path, monkeypatch):
+    module = importlib.import_module('qf.workbench')
+    target = tmp_path/'ssd-results'
+    bridge = module.WorkbenchBridge(tmp_path, Session(), results_root=target)
+    assert bridge._research.root == target.resolve()
+    assert bridge._jobs_bridge._jobs_args[0] == target.resolve()
+    opened = []
+    monkeypatch.setattr(module.os, 'startfile', lambda path: opened.append(path), raising=False)
+    assert bridge.open_resource('results')['ok']
+    assert opened == [target.resolve()]
+
+
 def test_missing_credentials_and_bad_chart_never_escape(bridge):
     assert not bridge.login("", "")["ok"]
     bridge._session.state["chart_url"] = "https://example.com/?token=private-token"

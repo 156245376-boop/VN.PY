@@ -56,7 +56,7 @@
       if(binding?.run_id!==result.run_id){frame.hidden=true;frame.removeAttribute('src');binding=null;}
       const r=await api.get_research_result(result.run_id);if(disposed||current.run_id!==result.run_id)return;if(!r.ok){reason.textContent=r.reason;return;}
       details=r.details;tradeList.replaceChildren();accountRoot.hidden=!details.account;
-      if(details.account){if(!accountView&&globalThis.QfAccountView)accountView=QfAccountView.create(accountRoot,{scenario:'research'});accountView?.update(details.account,[]);}
+      if(details.account){if(!accountView&&globalThis.QfAccountView)accountView=QfAccountView.create(accountRoot,{scenario:'research'});accountView?.update(details.account,[],details.trade_ledger||null);}
       const t=table(['成交时间（北京时间）','操作','手数','成交价','原因'],[]);const body=t.querySelector('tbody');
       for(const f of details.fills){const tr=el('tr');for(const text of [time(f.time_ns),fillName(f)+(f.symbol?' · '+f.symbol:'')+(f.role==='roll_out'?'（移仓平旧）':f.role==='roll_in'?'（移仓开新）':''),number(f.volume),number(f.price),'点击查看并定位'])tr.append(el('td',text));
         tr.style.cursor='pointer';tr.onclick=async()=>{showFill(f.key);if(!binding){queued=f.key;await openReplay();}};body.append(tr);}tradeList.append(t);

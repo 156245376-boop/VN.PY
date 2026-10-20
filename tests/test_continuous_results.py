@@ -134,6 +134,33 @@ def test_fill_details_before_initial_window_use_indexed_id_lookup(tmp_path):
         j.close()
 
 
+def test_trade_ledger_reconciles_entry_exit_stop_fees_and_pnl(tmp_path):
+    j = finished(tmp_path)
+    try:
+        ledger = ContinuousReader(j.path).trade_ledger()
+        assert ledger['available'] is True
+        assert ledger['reconciled'] is True
+        assert len(ledger['trades']) == 1
+        trade = ledger['trades'][0]
+        assert trade['status'] == 'closed'
+        assert trade['direction'] == 1
+        assert trade['quantity'] == 1
+        assert trade['entry_price'] == '100'
+        assert trade['exit_price'] == '400'
+        assert trade['initial_stop'] == '90'
+        assert trade['exit_reason'] == 'strategy_close'
+        assert D(trade['gross_pnl']) == D('2000')
+        assert D(trade['fee']) == D('8')
+        assert D(trade['net_pnl']) == D('1992')
+        assert trade['fill_count'] == 4
+        assert [fill['role'] for fill in trade['fills']] == [
+            'strategy_open', 'roll_out', 'roll_in', 'strategy_close']
+        assert D(ledger['fee_total']) == D('8')
+        assert D(ledger['fee_reconciled_difference']) == D('0')
+    finally:
+        j.close()
+
+
 def test_million_bar_initial_page_and_live_snapshot_stay_bounded(tmp_path):
     j = journal(tmp_path)
     try:

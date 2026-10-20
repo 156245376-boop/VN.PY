@@ -15,6 +15,7 @@
 | `tools/gui_entry.py` | 保留的原研究窗口入口 |
 | `qf/gui.py`、`qf/desktop.py` | 内存凭证、后台运行、停止和结果展示 |
 | `qf/catalog_gui.py`、`qf/native_catalog.py` | 天勤现成功能目录、示例只读查看与资源核对 |
+| `qf/storage.py`、`qf/trade_ledger.py` | SSD研究结果目录与迁移；逐笔逻辑交易证据 |
 | `tools/setup.ps1` | 锁定安装，隔离旧环境变量 |
 | `tools/check.ps1` | 封存完整性、环境身份、依赖与开发检查 |
 | `tools/run.ps1` | data-check、backtest、paper；模拟默认观察 |
@@ -44,3 +45,6 @@
 连续实现集中在qf/continuous_*.py及web/continuous-replay.js，复盘按窗口读取；账户多年权限仍待联网核对。
 并行回测任务池、独立工作进程和账户证据按需查`docs/superpowers/specs/2026-10-19-parallel-backtest-observability-design.md`；
 任务卡与账户/止损观察的操作说明见`docs/research-paper-guide.md`第9节。
+任务卡可把单个任务图放进独立浏览器窗口；账户区增量刷新并提供逐笔交易明细。
+结果默认写入本机SSD应用数据目录，首次使用复制项目旧结果；回测账本使用WAL NORMAL，
+模拟执行仍使用FULL同步。

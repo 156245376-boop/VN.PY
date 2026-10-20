@@ -21,6 +21,7 @@ from qf.research_account import (
     account_schema,
     account_snapshot,
     account_totals,
+    compact_account_snapshot,
     enable_account_evidence,
     save_account,
 )
@@ -296,15 +297,25 @@ class ResearchLoop:
         self.total_fee += max(dec(0), commission-self.previous_day_fee)
         self.fee_day, self.previous_day_fee = day, commission
         self.last_equity_ns = now
-        self.journal.set('total_commission', str(self.total_fee))
-        self.journal.equity(now, float(account.balance), float(self.total_fee))
+        self.journal.equity(now, float(account.balance), float(self.total_fee),
+                            total_commission=self.total_fee)
 
     def capture_account(self, trigger, *, status='active'):
         if not self.account_evidence or not self.as_of_ns:
             return
+        detailed = trigger != 'bar_close' or self.latest_account is None
         snapshot = account_snapshot(self.api, time_ns=self.as_of_ns, status=status,
-                                    totals=account_totals(self.journal.db))
-        save_account(self.journal, snapshot, trigger=trigger)
+                                    totals=account_totals(self.journal.db),
+                                    details=detailed)
+        if trigger == 'bar_close' and not detailed:
+            snapshot.update(
+                positions=self.latest_account.get('positions', []),
+                orders=self.latest_account.get('orders', []),
+                trades=self.latest_account.get('trades', []),
+                truncated=self.latest_account.get('truncated', {}),
+                availability=self.latest_account.get('availability', {}))
+        stored = compact_account_snapshot(snapshot) if trigger == 'bar_close' else snapshot
+        save_account(self.journal, stored, trigger=trigger)
         self.latest_account = snapshot
 
     def step(self, quote, serial, *, minimum_bar, start_ns, end_ns, flatten):

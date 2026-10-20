@@ -41,6 +41,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
       jobs.splice(jobs.findIndex(job=>job.job_id===id),1);return {ok:true,reason:'已移除'};},
     set_backtest_watch:async(id,enabled)=>{calls.push(['watch',id,enabled]);return {ok:true};},
     open_backtest_chart:async id=>({ok:true,url:'http://127.0.0.1/chart',run_id:'run',generation:1}),
+    open_backtest_window:async id=>{calls.push(['window',id]);
+      return {ok:true,reason:'已在独立浏览器窗口打开'};},
   };
   const root=new Element('div');
   const panel=QfResearchJobs.create(root,api,{
@@ -53,6 +55,8 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
   byText(root,'观看').click();await tick();
   assert.deepEqual(calls.at(-1),['watch',active.job_id,true]);
   assert.deepEqual(watched.at(-1),[active.job_id,true]);
+  byText(root,'独立窗口').click();await tick();
+  assert.deepEqual(calls.at(-1),['window',active.job_id]);
   const remove=buttons(root).find(button=>button.textContent==='移除任务'&&!button.disabled);
   assert.ok(remove,'等待任务必须可以移除');
   assert.ok(buttons(root).filter(button=>button.textContent==='查看图')[1].disabled,

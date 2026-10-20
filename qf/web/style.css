@@ -54,6 +54,7 @@
 .account-tabs{display:flex;gap:6px;margin:8px 0}.account-tabs button{padding:5px 12px;font-size:11px}
 .account-tabs .selected{background:#e7f2ec}.account-view .table-scroll{min-height:0;max-height:180px}
 .account-empty{padding:8px}.account-view th{text-align:left}.account-view td{text-align:left}
+.account-ledger-warning{padding:7px 10px;background:#fff5df;color:#8a6427;border:1px solid #ecd9b4;border-radius:6px}
 .research-job-card{border:1px solid #d7e2db;border-radius:7px;margin:6px 0;padding:8px;display:flex;justify-content:space-between;gap:10px;align-items:center}
 .research-job-card.selected{border-color:#2d8165;background:#eef7f2}.research-job-select{border:0;background:transparent;text-align:left;flex:1;cursor:pointer}
 .research-job-card span{display:flex;gap:5px;flex-wrap:wrap}.research-job-card button{padding:4px 8px;font-size:11px}

@@ -19,6 +19,17 @@ def journal(root):
     return ResearchJournal.create(root, 'backtest', config_data())
 
 
+def test_backtest_uses_wal_normal_while_paper_keeps_full_sync(tmp_path):
+    backtest = ResearchJournal.create(tmp_path/'backtest', 'backtest', config_data())
+    paper = ResearchJournal.create(tmp_path/'paper', 'paper', config_data())
+    try:
+        assert backtest.db.execute('PRAGMA synchronous').fetchone()[0] == 1
+        assert paper.db.execute('PRAGMA synchronous').fetchone()[0] == 2
+    finally:
+        backtest.close()
+        paper.close()
+
+
 def test_fill_risk_and_exit_intent_commit_atomically(tmp_path):
     j = journal(tmp_path)
     j.db.execute("CREATE TRIGGER block_event BEFORE INSERT ON risk_events "

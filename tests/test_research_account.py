@@ -12,6 +12,7 @@ from test_continuous_runtime import config as continuous_config
 from qf.research_account import (
     account_snapshot,
     account_window,
+    compact_account_snapshot,
     costs_reconciled,
     enable_account_evidence,
     read_account,
@@ -67,6 +68,29 @@ def test_account_fields_zero_missing_and_no_credentials(tmp_path):
         assert snapshot['summary']['closed_trade_count'] == 80
         assert snapshot['summary']['open_position'] == 10
         assert 'private-password' not in json.dumps(snapshot)
+    finally:
+        j.close()
+
+
+def test_bar_snapshot_can_store_summary_without_repeating_detail_rows(tmp_path):
+    j = journal(tmp_path)
+    try:
+        enable_account_evidence(j)
+        snapshot = account_snapshot(Api(), time_ns=100, status='active', totals={
+            'commission_total': '1', 'roll_commission': '0',
+            'actual_fill_count': 1, 'closed_trade_count': 0, 'open_position': 10})
+        compact = compact_account_snapshot(snapshot)
+        summary_only = account_snapshot(Api(), time_ns=100, status='active', totals={
+            'commission_total': '1', 'roll_commission': '0',
+            'actual_fill_count': 1, 'closed_trade_count': 0, 'open_position': 10},
+            details=False)
+        assert compact['summary'] == snapshot['summary']
+        assert compact['positions'] == [] and compact['orders'] == []
+        assert summary_only['positions'] == [] and summary_only['orders'] == []
+        assert summary_only['availability']['positions'] == 'unrecorded'
+        assert compact['availability'] == {
+            'summary': 'recorded', 'positions': 'unrecorded',
+            'orders': 'unrecorded', 'trades': 'unrecorded'}
     finally:
         j.close()
 

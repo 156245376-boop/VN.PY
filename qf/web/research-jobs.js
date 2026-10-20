@@ -30,13 +30,17 @@
         const chart=el('button','查看图');chart.disabled=job.status==='waiting';
         chart.title=job.status==='waiting'?'任务尚未开始，暂无运行图':'查看保存的过程图或历史复盘';
         chart.onclick=async()=>{const answer=await api.open_backtest_chart?.(job.job_id);if(answer?.ok)options.onChart?.(answer,job);};
+        const separate=el('button','独立窗口');separate.disabled=job.status==='waiting';
+        separate.title='在独立浏览器窗口查看，可同时打开多个任务';
+        separate.onclick=async()=>{const answer=await api.open_backtest_window?.(job.job_id);
+          if(answer?.ok){job.watch=true;render();options.notice?.(answer.reason);}else if(answer)options.notice?.(answer.reason);};
         const remove=el('button','移除任务');
         remove.disabled=job.running||['starting','active','warmup','backtesting','stopping','saving'].includes(job.status);
         remove.title='只移除任务卡，不删除已保存的结果';
         remove.onclick=async()=>{const answer=await api.remove_backtest?.(job.job_id);if(answer?.ok){if(selected===job.job_id)selected=null;await refresh();}else if(answer)options.notice?.(answer.reason);};
         const stop=el('button','停止本任务');stop.disabled=!['starting','active','warmup','backtesting'].includes(job.status);
         stop.onclick=async()=>{const answer=await api.stop_backtest?.(job.job_id);if(answer?.ok)options.notice?.(answer.reason);};
-        actions.append(watch,chart,remove,stop);card.append(head,actions);list.append(card);}
+        actions.append(watch,chart,separate,remove,stop);card.append(head,actions);list.append(card);}
       if(!jobs.length)list.append(el('p','尚未启动回测任务。'));
     }
     capacity.onchange=async()=>{const answer=await api.set_backtest_capacity?.(Number(capacity.value));if(answer?.ok)capacity.value=String(answer.capacity);};

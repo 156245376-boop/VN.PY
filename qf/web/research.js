@@ -38,13 +38,17 @@
       showChart:researchState&&(!terminal||!!(p?.completed_bars||p?.fill_count))};
   }
   function create(root,api){
-    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false,acceptedRequest=null,lastTerminalKey='';
+    let ref=null,view='strategy',disposed=false,polling=false,contractKey='',lastResult='',stress=null,commandPending=false,acceptedRequest=null,lastTerminalKey='',selectedJob=null;
     const el=(tag,text,cls)=>{const e=document.createElement(tag);e.textContent=text||'';if(cls)e.className=cls;return e;};
     const heading=el('h2','双均线交叉 · 策略实验'),intro=el('p','金叉做多、死叉做空；使用已完成K线，反向时先平仓。');
     const picker=el('select');picker.setAttribute('aria-label','已保存实验');
     const formRoot=el('div'),actions=el('div',null,'research-actions'),notice=el('p',null,'research-notice'),state=el('p',null,'research-status'),risk=el('p');
     const progressBar=el('progress'),progressText=el('p');progressBar.max=100;progressBar.hidden=true;progressText.className='research-progress';
-    root.replaceChildren(heading,intro,picker,formRoot,actions,notice,state,progressBar,progressText,risk);
+    const jobsRoot=el('div');jobsRoot.id='research-jobs';root.replaceChildren(heading,intro,picker,formRoot,actions,notice,state,progressBar,progressText,risk,jobsRoot);
+    const jobsPanel=globalThis.QfResearchJobs?.create(jobsRoot,api,{
+      onSelect(job){selectedJob=job.job_id;if(job.account)ensureAccount?.(job.account);poll();},
+      onChart(answer){watch.checked=true;liveBinding=answer;liveJob=selectedJob;liveFrame.hidden=false;liveFrame.src=answer.url;},
+      notice(text){notice.textContent=text;}});
     const form=QfResearchForm.create(formRoot,{onChange(key){if(['continuous','start','end'].includes(key)){acceptedRequest=null;contractKey='';}}});
     function checked(response){if(response.ok){form.showErrors({});return response;}
       form.showErrors(response.field_errors||{});notice.textContent=response.reason||'操作未完成，请重新核对。';return null;}
@@ -92,12 +96,21 @@
       if(e.data.kind==='qf-research-account'&&e.data.account){accountRoot.hidden=false;accountView?.update(e.data.account,[]);}}
     addEventListener('message',liveMessage);
     const activateLabel=el('label','允许本实验产生快期模拟委托 '),activate=el('input');activate.type='checkbox';activateLabel.prepend(activate);actions.append(activateLabel);
-    const run=button('运行回测',async()=>{if(!await save())return;stress=cost.checked?{...ref}:null;
+    const run=button('运行回测',async()=>{if(!await save())return;
+      if(api.start_backtest){
+        const requestId=(globalThis.crypto?.randomUUID?.()||String(Date.now())+Math.random());
+        const response=await api.start_backtest(ref.experiment_id,ref.revision,cost.checked,requestId);
+        if(!checked(response))return;selectedJob=response.selected_job_id;
+        await jobsPanel?.refresh();jobsPanel?.select(selectedJob);lastTerminalKey='';notice.textContent='回测任务已提交，可在任务卡中切换查看。';return;
+      }
+      stress=cost.checked?{...ref}:null;
       const response=await api.start_research(ref.experiment_id,ref.revision,'backtest');if(!checked(response)){stress=null;return;}lastTerminalKey='';notice.textContent='回测任务已提交，正在核实运行状态。';});
     const paper=button('连接模拟并观察',async()=>{if(activate.checked&&!confirm('允许此策略控制快期主模拟账户并产生模拟委托？请确认账户空仓且无挂单。'))return;
       if(!await save())return;const response=await api.start_research(ref.experiment_id,ref.revision,'paper',activate.checked);checked(response);lastTerminalKey='';notice.textContent=response.reason;});
     activate.onchange=()=>paper.textContent=activate.checked?'启动模拟策略':'连接模拟并观察';
-    const stopButton=button('停止任务',async()=>{stress=null;notice.textContent=(await api.stop_research(false)).reason;});
+    const stopButton=button('停止任务',async()=>{stress=null;
+      if(selectedJob&&api.stop_backtest)notice.textContent=(await api.stop_backtest(selectedJob)).reason;
+      else notice.textContent=(await api.stop_research(false)).reason;});
     const flattenButton=button('平仓并停止',async()=>{stress=null;if(confirm('退出本实验拥有的快期模拟持仓并停止？需要等待真实成交确认。'))notice.textContent=(await api.stop_research(true)).reason;});
     const resultsRoot=el('div');resultsRoot.id='research-results';root.append(resultsRoot);
     let results=null;
@@ -107,10 +120,17 @@
       else {ref=null;form.render(QfResearchForm.defaults(view==='paper'?'fixed':'historical_main'));}
       form.setSaved(!!ref);
       copy.textContent=form.isLegacy?'复制为新版拐点实验':'复制实验';poll();};
-    async function poll(){if(disposed||polling)return;polling=true;try{const s=await api.get_research_state();if(disposed)return;
+    async function poll(){if(disposed||polling)return;polling=true;try{
+      let jobState=null;
+      if(api.list_backtest_jobs&&jobsPanel){await jobsPanel.refresh();
+        if(selectedJob){const response=await api.get_backtest_state?.(selectedJob);if(response?.ok)jobState=response.state;}}
+      const s=await api.get_research_state();if(disposed)return;
       const busy=s.running,description=describeState(s);form.setRunning(busy&&s.status!=='discovering');for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
-      stopButton.disabled=!busy;flattenButton.disabled=!busy||s.mode!=='paper'||!s.activate;
+      stopButton.disabled=!(busy||jobState?.running);flattenButton.disabled=!busy||s.mode!=='paper'||!s.activate;
       if(s.account)ensureAccount(s.account);else accountRoot.hidden=true;
+      if(jobState){state.textContent=(jobState.config?.name||'任务')+' · '+(jobState.status||'状态待核实')+(jobState.reason?' · '+jobState.reason:'');state.dataset.light=jobState.running?'green':['failed','frozen'].includes(jobState.status)?'red':'yellow';
+        if(jobState.account)ensureAccount(jobState.account);
+        if(jobState.progress){const jobPercent=jobState.progress.percent;progressBar.hidden=false;if(jobPercent==null)progressBar.removeAttribute('value');else progressBar.value=jobPercent;progressText.textContent=`任务进度 ${jobPercent==null?'待核实':jobPercent+'%'} · 已处理 ${jobState.progress.completed_bars||0} 根柱、${jobState.progress.fill_count||0} 笔成交`;}}
       const request=form.readContractRequest(),matches=JSON.stringify(request)===JSON.stringify(s.contract_request);
       const mainMode=form.read().schema_version===3;
       const valid=mainMode||(matches&&(s.contracts||[]).some(c=>c.symbol===form.read().symbol)&&!form.isLegacy);

@@ -10,6 +10,7 @@ import pytest
     ('continuous_form_node.js', 'CONTINUOUS_FORM_OK'),
     ('continuous_fill_details_node.js', 'CONTINUOUS_FILL_DETAILS_OK'),
     ('research_observation_node.js', 'RESEARCH_OBSERVATION_OK'),
+    ('research_jobs_node.js', 'RESEARCH_JOBS_OK'),
     ('pivot_form_node.js', 'PIVOT_FORM_OK'),
     ('research_terminal_node.js', 'RESEARCH_TERMINAL_OK'),
     ('live_research_render_node.js', 'LIVE_RESEARCH_RENDER_OK'),

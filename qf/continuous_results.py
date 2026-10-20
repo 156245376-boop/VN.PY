@@ -11,10 +11,17 @@ from tqsdk.tafunc import ma
 
 from qf.continuous_journal import logical_from_dict
 from qf.continuous_risk import logical_stop
-from qf.research_account import account_schema, costs_reconciled, fill_fee_total
+from qf.research_account import (
+    account_schema,
+    account_window,
+    costs_reconciled,
+    fill_fee_total,
+    read_account,
+)
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
 from qf.research_journal import integrity_manifest
+from qf.research_protection import protection_window
 from qf.trade_risk import ContractSpec
 
 
@@ -292,5 +299,11 @@ def continuous_snapshot(journal, config, quote, *, now, revision, progress, term
         as_of_ns=str(now), symbol=config.continuous, bar_seconds=config.bar_seconds,
         config=config.public(), bars=bars, ma_series=lines, quote=safe_quote,
         entry_plan=journal.get('entry_plan'),
+        protection=protection_window(journal.db,
+            first_ns=int(bars[0]['time_ns']) if bars else now, as_of_ns=now,
+            series='signal', symbol=None),
+        account=read_account(journal.db, at_ns=now),
+        account_history=account_window(journal.db,
+            first_ns=int(bars[0]['time_ns']) if bars else now, as_of_ns=now),
         contract_spec=json.loads(spec_raw[0]) if spec_raw else {}, first_bar_id=first_id,
         progress=progress, terminal=terminal, display_limit=dict(bars=500, events=5000)))

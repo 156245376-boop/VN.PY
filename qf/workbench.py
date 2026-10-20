@@ -130,6 +130,22 @@ class WorkbenchBridge:
         except (ValueError, OSError, sqlite3.Error):
             return dict(ok=False, reason='该成交或关联证据不存在，未使用当前行情补造。')
 
+    def get_research_trade(self, run_id, fill_key):
+        import sqlite3
+
+        from qf.research_protection import trade_explanation
+        from qf.research_results import run_path
+        try:
+            root = self._root/'results'
+            read_run(root, run_id)
+            with sqlite3.connect(
+                    (run_path(root, run_id)/'journal.sqlite3').as_uri()+'?mode=ro',
+                    uri=True) as db:
+                details = trade_explanation(db, fill_key=fill_key)
+            return dict(ok=True, details=details)
+        except (ValueError, OSError, sqlite3.Error):
+            return dict(ok=False, reason='该成交或关联风险证据不存在。')
+
     def open_research_replay(self, run_id):
         with self._lock:
             try:

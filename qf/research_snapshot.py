@@ -5,7 +5,9 @@ import json
 import pandas as pd
 from tqsdk.tafunc import ma
 
+from qf.research_account import account_window, read_account
 from qf.research_config import public_values
+from qf.research_protection import protection_window
 
 
 def view_snapshot(journal, config, quote, *, now, revision, progress, terminal=False):
@@ -43,5 +45,9 @@ def view_snapshot(journal, config, quote, *, now, revision, progress, terminal=F
         symbol=config.symbol, bar_seconds=config.bar_seconds, config=config.public(),
         contract_spec=journal.get('contract_spec', {}), quote=safe_quote, bars=bars,
         ma_series=lines, fills=fills, risk_events=events, entry_plan=journal.get('entry_plan'),
+        protection=protection_window(journal.db, first_ns=first, as_of_ns=now,
+                                     series='actual', symbol=config.symbol),
+        account=read_account(journal.db, at_ns=now),
+        account_history=account_window(journal.db, first_ns=first, as_of_ns=now),
         progress=progress, terminal=terminal, first_bar_id=first_id,
         display_limit=dict(bars=500, events=5000)))

@@ -12,8 +12,10 @@ import pandas as pd
 from aiohttp import web
 from tqsdk.tafunc import ma
 
+from qf.research_account import account_window, read_account
 from qf.research_chart_assets import chart_html
 from qf.research_config import decimal_value
+from qf.research_protection import protection_window
 from qf.research_results import read_run, run_path
 from qf.runtime import chart_address
 
@@ -80,12 +82,21 @@ class ReplayView:
                                  'ORDER BY symbol LIMIT 1').fetchone()
                 specs = {s: json.loads(data) for s, data in db.execute(
                     'SELECT * FROM contract_specs')}
+                span = db.execute('SELECT min(time_ns),max(time_ns) FROM signal_bars').fetchone()
+                first, last = span
+                observation = dict(
+                    protection=protection_window(
+                        db, first_ns=first or 0, as_of_ns=last or (first or 0),
+                        series='signal', symbol=None),
+                    account=read_account(db, at_ns=last),
+                    account_history=account_window(
+                        db, first_ns=first or 0, as_of_ns=last or (first or 0)))
             return dict(**self.summary, revision=self.revision,
                 symbol=self.summary['config']['continuous'],
                 bar_seconds=self.summary['config']['bar_seconds'],
                 contract_spec=json.loads(raw[0]) if raw else {},
                 contract_specs=specs,
-                fills=[], risk_events=[], ma_series=[])
+                fills=[], risk_events=[], ma_series=[], **observation)
         with closing(
             sqlite3.connect((self.path / "journal.sqlite3").as_uri() + "?mode=ro", uri=True)
         ) as db:
@@ -119,6 +130,14 @@ class ReplayView:
                 for r in db.execute("SELECT time_ns,data FROM research_bars ORDER BY time_ns")
             ]
             spec_raw = db.execute("SELECT value FROM state WHERE key='contract_spec'").fetchone()
+            span = db.execute('SELECT min(time_ns),max(time_ns) FROM research_bars').fetchone()
+            observation = dict(
+                protection=protection_window(
+                    db, first_ns=span[0] or 0, as_of_ns=span[1] or (span[0] or 0),
+                    series='actual', symbol=self.summary['config']['symbol']),
+                account=read_account(db, at_ns=span[1]),
+                account_history=account_window(
+                    db, first_ns=span[0] or 0, as_of_ns=span[1] or (span[0] or 0)))
         for fill in fills:
             fill["time_ns"] = str(fill["time_ns"])
         lines = []
@@ -146,6 +165,7 @@ class ReplayView:
             risk_events=events,
             ma_series=lines,
             contract_spec=json.loads(spec_raw[0]) if spec_raw else {},
+            **observation,
         )
 
     def _thread_main(self):
@@ -242,6 +262,35 @@ class ReplayView:
             except (ValueError, sqlite3.Error):
                 raise web.HTTPBadRequest(text="复盘分页无效") from None
 
+        async def account(request):
+            try:
+                stamp = request.query.get('time_ns')
+                stamp = int(stamp) if stamp is not None else None
+                with closing(sqlite3.connect(
+                        (self.path/'journal.sqlite3').as_uri()+'?mode=ro', uri=True)) as db:
+                    value = read_account(db, at_ns=stamp)
+                return web.json_response(dict(run_id=self.run_id, revision=self.revision,
+                    requested_time_ns=str(stamp) if stamp is not None else None,
+                    account=value))
+            except (ValueError, sqlite3.Error):
+                raise web.HTTPBadRequest(text="账户历史时点无效") from None
+
+        async def protection(request):
+            try:
+                first_ns = int(request.query['first_ns'])
+                as_of_ns = int(request.query.get('as_of_ns', first_ns))
+                series = request.query.get('series', 'signal')
+                symbol = request.query.get('symbol')
+                with closing(sqlite3.connect(
+                        (self.path/'journal.sqlite3').as_uri()+'?mode=ro', uri=True)) as db:
+                    value = protection_window(
+                        db, first_ns=first_ns, as_of_ns=as_of_ns,
+                        series=series, symbol=symbol)
+                return web.json_response(value | dict(
+                    run_id=self.run_id, revision=self.revision))
+            except (ValueError, KeyError, sqlite3.Error):
+                raise web.HTTPBadRequest(text="保护轨迹窗口无效") from None
+
         async def script(request):
             name = ('continuous-replay.js' if request.path == '/continuous.js'
                     else 'native-replay.js')
@@ -266,6 +315,8 @@ class ReplayView:
         app.router.add_get("/ws", websocket)
         app.router.add_get("/replay", replay)
         app.router.add_get("/bars", bars)
+        app.router.add_get("/account", account)
+        app.router.add_get("/protection", protection)
         app.router.add_get("/replay.js", script)
         app.router.add_get('/continuous.js', script)
         app.router.add_get('/locate', locate)

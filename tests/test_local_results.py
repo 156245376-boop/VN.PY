@@ -8,6 +8,7 @@ from qf.local_backtest import LocalBacktestEngine
 from qf.local_results import save_local_result
 from qf.research_results import compare_runs, read_run, summarize_run
 from qf.trade_ledger import trade_ledger
+from qf.workbench import WorkbenchBridge
 
 
 def source_fingerprint():
@@ -101,3 +102,18 @@ def test_local_runs_can_be_compared_without_losing_engine_identity(tmp_path):
     assert comparison['items'][0]['source_fingerprint']['dataset_sha256'] != (
         comparison['items'][1]['source_fingerprint']['dataset_sha256']
     )
+
+
+def test_workbench_reads_local_fill_and_trade_evidence(tmp_path):
+    run_id = save_local_result(tmp_path, result(), source_fingerprint())
+    bridge = WorkbenchBridge.__new__(WorkbenchBridge)
+    bridge._results_root = tmp_path
+    details = bridge.get_research_result(run_id)
+    assert details['ok'] is True
+    fill = details['details']['fills'][0]
+    packet = bridge.get_research_fill(run_id, fill['key'])
+    assert packet['ok'] is True
+    assert packet['details']['trade']['trade_id'] == fill['trade_id']
+    trade = bridge.get_research_trade(run_id, fill['key'])
+    assert trade['ok'] is True
+    assert trade['details']['initial_r'] == '960'

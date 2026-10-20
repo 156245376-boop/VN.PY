@@ -427,6 +427,7 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
     j = (ResearchJournal.resume(run_path(root, resume), config.public()) if resume else
          ResearchJournal.create(root, mode, config.public(),
                                 provenance() | {'experiment_ref': experiment_ref}))
+    j.set('engine_kind', 'tqsdk_validation')
     if mode == 'backtest':
         enable_account_evidence(j)
     if job_binding is not None:
@@ -649,4 +650,10 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
     publish('completed' if status == 'backtest_finished' else status, terminal=True,
             success=status == 'backtest_finished', force=True)
     j.close()
-    return dict(run_id=j.path.name, status=status, reason=reason, summary=summary)
+    return dict(
+        run_id=j.path.name,
+        status=status,
+        reason=reason,
+        engine_kind='tqsdk_validation',
+        summary=summary,
+    )

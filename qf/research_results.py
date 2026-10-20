@@ -99,6 +99,7 @@ def read_run(root, run_id):
         config=config.public(),
         status=state.get("status", "created"),
         reason=state.get("reason"),
+        engine_kind=state.get('engine_kind', 'tqsdk_validation'),
         fee_multiplier=state.get("fee_multiplier", 1),
         risk=state.get("risk_state", {}),
         experiment_ref=state.get("experiment_ref"),

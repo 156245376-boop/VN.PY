@@ -126,7 +126,10 @@ class ResearchSession:
                 experiment_ref=experiment_ref, stop_requested=self._stop.is_set,
                 flatten_requested=self._flatten.is_set, progress=self._progress,
                 view_progress=self._view_progress)
-            fields = ('status', 'reason', 'run_id', 'summary', 'failure_context')
+            fields = (
+                'status', 'reason', 'run_id', 'engine_kind', 'summary',
+                'failure_context',
+            )
             safe = {k: v for k, v in result.items() if k in fields}
             if isinstance(safe.get('failure_context'), dict):
                 safe['failure_context'] = {k: v for k, v in safe['failure_context'].items()

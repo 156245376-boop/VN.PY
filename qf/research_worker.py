@@ -94,7 +94,8 @@ def worker_main(task, credential_pipe, control_pipe, status_queue, frame_queue,
         except Exception:
             pass
     safe_result = {key: result[key] for key in ('status', 'reason', 'run_id',
-                                                 'failure_context', 'summary')
+                                                 'engine_kind', 'failure_context',
+                                                 'summary')
                    if key in result}
     sequences['terminal'] = 1
     terminal_pipe.send(message(task, run_id=safe_result.get('run_id'),

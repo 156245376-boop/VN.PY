@@ -28,6 +28,7 @@ def test_single_account_over_two_years_and_three_rolls(tmp_path):
     frames = []
     result = run(tmp_path, fixture, view_progress=frames.append)
     assert result['status'] == 'backtest_finished', result
+    assert result['engine_kind'] == 'tqsdk_validation'
     assert fixture.calls == {'TqApi': 1, 'TqSim': 1, 'TqBacktest': 1}
     assert result['summary']['roll_count'] == 3
     api = fixture.apis[0]

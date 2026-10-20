@@ -225,6 +225,7 @@ def read_continuous_run(root, run_id, *, details=False):
             result = dict(run_id=run_id, config=config.public(),
                 status=state.get('status', 'created'),
                 reason=state.get('reason'), fee_multiplier=state.get('fee_multiplier', 1),
+                engine_kind=state.get('engine_kind', 'tqsdk_validation'),
                 risk=state['logical_risk'], experiment_ref=state.get('experiment_ref'),
                 cost_source='SDK模拟模型（逐合约记录，非历史真实成本）', precision=config.precision,
                 coverage_check=state.get('coverage_check'), actual_symbols=symbols,

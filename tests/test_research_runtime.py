@@ -21,6 +21,7 @@ def config():
 def test_risk_runs_on_quote_without_new_bar(tmp_path):
     result = execute_research('backtest', config(), tmp_path, ('u', 'p'), sdk=sdk_for())
     assert result['status'] == 'backtest_finished'
+    assert result['engine_kind'] == 'tqsdk_validation'
     api = Api.instances[0]
     assert api.targets == [2, 0]
     assert api.positions['SHFE.rb2505'].pos_long == 0

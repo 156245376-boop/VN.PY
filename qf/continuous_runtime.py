@@ -454,6 +454,7 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
                        experiment_ref=None, view_requested=None, job_binding=None):
     j = ContinuousJournal.create(root, 'backtest', config,
                                  provenance() | {'experiment_ref': experiment_ref})
+    j.set('engine_kind', 'tqsdk_validation')
     enable_account_evidence(j)
     j.set('experiment_ref', experiment_ref)
     if job_binding is not None:
@@ -622,7 +623,13 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
             status, reason = 'failed', 'result_integrity_failed'
     publish('completed' if status == 'backtest_finished' else status,
             success=status == 'backtest_finished', terminal=True, force=True)
-    result = dict(run_id=j.path.name, status=status, reason=reason, summary=summary,
-                  failure_context=j.get('failure_context'))
+    result = dict(
+        run_id=j.path.name,
+        status=status,
+        reason=reason,
+        engine_kind='tqsdk_validation',
+        summary=summary,
+        failure_context=j.get('failure_context'),
+    )
     j.close()
     return result

@@ -128,6 +128,32 @@ class WorkbenchBridge:
         except (ValueError, OSError):
             return dict(ok=False, reason='请选择两个有效的新实验运行结果。')
 
+    def compare_research_parity(self, run_ids):
+        try:
+            if not isinstance(run_ids, list) or len(run_ids) != 2:
+                raise ValueError('请选择两个运行')
+            from qf.backtest_parity import compare_runs as compare_evidence
+            evidence = []
+            for run_id in run_ids:
+                summary = summarize_run(self._results_root, run_id)
+                details = run_details(self._results_root, run_id)
+                evidence.append({
+                    'run_id': run_id,
+                    'engine_kind': summary.get('engine_kind'),
+                    'status': summary.get('status'),
+                    'summary': summary,
+                    'details': details,
+                })
+            return dict(
+                ok=True,
+                comparison=compare_evidence(*evidence).public(),
+            )
+        except (ValueError, OSError):
+            return dict(
+                ok=False,
+                reason='一致性核对需要一项快速研究和一项TqSdk验证结果。',
+            )
+
     def get_research_fill(self, run_id, key):
         import sqlite3
 
@@ -135,7 +161,30 @@ class WorkbenchBridge:
         from qf.research_results import run_path
         try:
             root = self._results_root
-            if read_run(root, run_id)['config']['schema_version'] != 3:
+            run = read_run(root, run_id)
+            if run.get('engine_kind') == 'local_research':
+                details = run_details(root, run_id)
+                fill = next(
+                    (item for item in details.get('fills', [])
+                     if item.get('key') == key),
+                    None,
+                )
+                if fill is None:
+                    raise ValueError('成交不存在')
+                trade = next(
+                    (item for item in details.get('trades', [])
+                     if item.get('trade_id') == fill.get('trade_id')),
+                    None,
+                )
+                return dict(
+                    ok=True,
+                    details={
+                        'fill': fill,
+                        'risk_events': [],
+                        'trade': trade,
+                    },
+                )
+            if run['config']['schema_version'] != 3:
                 raise ValueError('仅连续实验使用分页成交查询')
             return dict(ok=True, details=ContinuousReader(run_path(root, run_id)).fill_details(key))
         except (ValueError, OSError, sqlite3.Error):
@@ -148,7 +197,29 @@ class WorkbenchBridge:
         from qf.research_results import run_path
         try:
             root = self._results_root
-            read_run(root, run_id)
+            run = read_run(root, run_id)
+            if run.get('engine_kind') == 'local_research':
+                details = run_details(root, run_id)
+                fill = next(
+                    (item for item in details.get('fills', [])
+                     if item.get('key') == fill_key),
+                    None,
+                )
+                trade = next(
+                    (item for item in details.get('trades', [])
+                     if item.get('trade_id') == fill.get('trade_id')),
+                    None,
+                ) if fill is not None else None
+                if trade is None:
+                    raise ValueError('成交或交易不存在')
+                return dict(
+                    ok=True,
+                    details=trade | {
+                        'initial_r': trade.get('initial_r'),
+                        'stop_price': trade.get('final_stop'),
+                        'stage': None,
+                    },
+                )
             with sqlite3.connect(
                     (run_path(root, run_id)/'journal.sqlite3').as_uri()+'?mode=ro',
                     uri=True) as db:

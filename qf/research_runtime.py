@@ -20,6 +20,7 @@ from qf.pivot_stop import latest_confirmed_pivot, plan_pivot_entry
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
 from qf.research_contract import contract_spec as contract_spec
+from qf.research_contract import make_target_task
 from qf.research_coverage import assess_coverage
 from qf.research_journal import ResearchJournal, bar_end_ns, research_trade_key
 from qf.research_progress import BacktestProgress
@@ -129,6 +130,7 @@ class ResearchLoop:
         self.risk = journal.load_risk()
         self.phase = 'holding' if self.risk.quantity else 'flat'
         self.task = None
+        self.quote = None
         self.target = self.risk.side*self.risk.quantity
         self.pending_since = None
         self.pending_direction = None
@@ -175,8 +177,7 @@ class ResearchLoop:
             self.guard.freeze('fill_risk_mismatch')
 
     def new_task(self):
-        self.task = self.sdk.TargetPosTask(self.api, self.config.symbol,
-            offset_priority='今,昨,开', support_open_min_volume=self.spec.min_open_lots > 1)
+        self.task = make_target_task(self.sdk, self.api, self.config.symbol, self.quote)
 
     def submit(self, target, now):
         if not self.active:
@@ -284,6 +285,7 @@ class ResearchLoop:
         self.journal.equity(now, float(account.balance), float(self.total_fee))
 
     def step(self, quote, serial, *, minimum_bar, start_ns, end_ns, flatten):
+        self.quote = quote
         check_connections(self.api, self.seen)
         for fill in trades_snapshot(self.api.get_trade()):
             self.guard.accept_fill(fill)

@@ -5,6 +5,20 @@ from qf.safety import Frozen
 from qf.trade_risk import ContractSpec
 
 
+def make_target_task(sdk, api, symbol, quote):
+    minimums = (
+        getattr(quote, 'open_min_limit_order_volume', 1),
+        getattr(quote, 'open_min_market_order_volume', 1),
+    )
+    return sdk.TargetPosTask(
+        api,
+        symbol,
+        offset_priority='今,昨,开',
+        support_open_min_volume=any(
+            type(value) in (int, float) and value > 1 for value in minimums),
+    )
+
+
 def contract_spec(api, account, symbol, quote, *, paper, multiplier):
     margin = getattr(quote, 'margin', float('nan')) if paper else account.get_margin(symbol)
     fee = getattr(quote, 'commission', float('nan')) if paper else account.get_commission(symbol)

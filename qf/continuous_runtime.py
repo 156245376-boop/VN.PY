@@ -30,7 +30,7 @@ from qf.ma_cross import completed_cross_closed
 from qf.pivot_stop import latest_confirmed_pivot, plan_pivot_entry
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values
-from qf.research_contract import contract_spec
+from qf.research_contract import contract_spec, make_target_task
 from qf.research_coverage import assess_coverage
 from qf.research_journal import bar_end_ns
 from qf.research_progress import BacktestProgress
@@ -95,6 +95,7 @@ class ContinuousLoop:
         self.tasks, self.targets, self.roles, self.cancelled = {}, {}, {}, set()
         self.deferred_targets = {}
         self.entry_plan, self.pending_mapping = None, None
+        self.pending_reverse = None
         self.now, self.last_signal, self.intent_since = 0, 0, None
         self.prewarmed = False
         self.roll_clock = 0
@@ -114,6 +115,11 @@ class ContinuousLoop:
             if bar is None:
                 continue
             self.j.capture_signal(bar)
+            if signal is not None:
+                self.record('skipped', dict(
+                    reason='historical_signal_superseded',
+                    signal=asdict(signal), symbol=symbol))
+                signal = None
             if self.start_ns <= raw['datetime']:
                 self.observed.add(bar['trading_day'])
             window = self.series.window()
@@ -121,7 +127,7 @@ class ContinuousLoop:
                 self.pivots[side] = latest_confirmed_pivot(window, side=side,
                     left=self.config.risk.pivot_left, right=self.config.risk.pivot_right,
                     as_of_ns=self.now, previous=self.pivots[side], allow_nonpositive=True)
-            if self.now >= self.start_ns:
+            if self.now >= self.start_ns and raw['datetime'] >= self.start_ns:
                 signal = completed_cross_closed(window, self.config.fast_period,
                     self.config.slow_period, completed_ns=self.now, allow_nonpositive=True)
         return signal
@@ -213,7 +219,8 @@ class ContinuousLoop:
         self.guard.authorize_target(symbol, volume)
         self.record('intent', dict(target_symbol=symbol, role=role), target=volume)
         if self.task_done(symbol):
-            self.tasks[symbol] = self.sdk.TargetPosTask(self.api, symbol)
+            self.tasks[symbol] = make_target_task(
+                self.sdk, self.api, symbol, self.quotes[symbol])
             self.cancelled.discard(symbol)
         self.targets[symbol] = volume
         self.tasks[symbol].set_target_volume(volume)
@@ -284,8 +291,12 @@ class ContinuousLoop:
     def step(self, main, now, *, stopping=False):
         self.now = now
         self.context['date'] = trading_day(now)
+        if stopping or self.roll.state.phase != 'idle':
+            self.pending_reverse = None
         positions, pending = self.reconcile()
         self.protect(positions)
+        if self.risk.exit_reason and self.risk.exit_reason != 'ma_reverse':
+            self.pending_reverse = None
         signal = None
         mapped = main.underlying_symbol
         if not mapped:
@@ -346,6 +357,7 @@ class ContinuousLoop:
             return
         if self.risk.quantity and (self.risk.exit_reason or reverse):
             if reverse and not self.risk.exit_reason:
+                self.pending_reverse = (signal, self.pivots[signal.direction])
                 self.risk = replace(self.risk, exit_reason='ma_reverse')
             symbol = next(s for s, pair in positions.items() if any(pair))
             if self.targets.get(symbol) != 0:
@@ -356,12 +368,21 @@ class ContinuousLoop:
                     > self.config.execution_timeout_seconds):
                 raise Frozen('execution_timeout')
             return
+        if self.pending_reverse is not None:
+            pending_signal, pending_pivot = self.pending_reverse
+            self.pending_reverse = None
+            self.enter_signal(pending_signal, pending_pivot, mapped)
+            return
         if now < self.start_ns or self.risk.quantity or signal is None or not signal.direction:
+            return
+        self.enter_signal(signal, self.pivots[signal.direction], mapped)
+
+    def enter_signal(self, signal, pivot, mapped):
+        if self.risk.quantity or signal is None or not signal.direction:
             return
         if signal.bar_start_ns <= self.last_signal:
             return
         self.last_signal = signal.bar_start_ns
-        pivot = self.pivots[signal.direction]
         if pivot:
             pivot = replace(pivot, price=pivot.price+self.series.offset)
             if pivot.price <= 0:

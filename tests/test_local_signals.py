@@ -66,6 +66,10 @@ def test_loading_applies_mapping_without_rewriting_actual_prices(tmp_path):
         'symbol': 'SHFE.rb2510', 'duration': 60, 'time_ns': 100,
         'open': 380, 'high': 381, 'low': 379, 'close': 380,
         'volume': 10, 'close_oi': 20, 'completed': True}])
+    store.write_instruments(dataset, [{
+        'symbol': 'SHFE.rb2510', 'price_tick': '1', 'volume_multiple': '10',
+        'margin_per_lot': '3000', 'commission_per_lot': '2',
+        'cost_source': 'fixture'}])
     store.write_mapping(dataset, [{
         'time_ns': 10, 'old_symbol': None, 'new_symbol': 'SHFE.rb2510',
         'offset': '100', 'reference_ns': None}])

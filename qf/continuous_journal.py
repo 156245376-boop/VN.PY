@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from qf.continuous_risk import LogicalRisk
+from qf.research_account import account_schema, insert_fill_fees, normalize_fill_fees
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
 from qf.research_journal import ResearchJournal, completed_at, dumps, research_trade_key
@@ -225,7 +226,7 @@ class ContinuousJournal(ResearchJournal):
                             (order_id, symbol, role))
 
     def commit_continuous(self, event_id, *, time_ns, kind, payload, logical_risk,
-                          roll_state, fills, target=None):
+                          roll_state, fills, target=None, fill_fees=None):
         if (kind not in KINDS or not isinstance(event_id, str) or not event_id
                 or type(time_ns) is not int or time_ns < 0 or set(payload)-PAYLOAD
                 or (target is not None and type(target) is not int)
@@ -265,6 +266,19 @@ class ContinuousJournal(ResearchJournal):
         if self.db.execute('SELECT 1 FROM risk_events WHERE event_id=?', (event_id,)).fetchone():
             return False
         keys = [values[0] for _, values in pairs]
+        evidence = account_schema(self.db)
+        fees = normalize_fill_fees(fill_fees, keys) if evidence and fills else []
+        if evidence and fills:
+            expected = {}
+            for _, values in pairs:
+                raw = self.db.execute('SELECT data FROM contract_specs WHERE symbol=?',
+                                      (values[2],)).fetchone()
+                if raw is None:
+                    raise ValueError('成交缺少已核实规格和费用模型')
+                expected[values[0]] = json.loads(raw[0])['commission_per_lot']
+            for entry in fees:
+                if dec(entry['amount']) != dec(expected[entry['fill_key']]):
+                    raise ValueError('成交费用证据与合约规格不一致')
         content = payload | ({'fill_keys': keys} if fills else {})
         with self.db:
             if (kind == 'closed' or (fills and payload.get('role') == 'strategy_close'
@@ -283,6 +297,8 @@ class ContinuousJournal(ResearchJournal):
                 self.db.execute('INSERT INTO fills VALUES (?,?,?,?,?,?,?,?)', values)
                 self.db.execute('INSERT INTO logical_fills VALUES (?,?,?,?,?)',
                     (values[0], logical_risk.trade_id, values[2], payload['role'], str(fee)))
+            if fees:
+                insert_fill_fees(self.db, fees)
             self.db.execute('INSERT INTO risk_events VALUES (?,?,?,?,?,?)',
                 (event_id, time_ns, kind, dumps(content), risk_json, target))
             roll_data = dumps(dict(roll=roll_state, payload=content))
@@ -298,7 +314,8 @@ class ContinuousJournal(ResearchJournal):
 
     def export(self):
         super().export()
-        for table in CONTINUOUS_TABLES:
+        tables = CONTINUOUS_TABLES
+        for table in tables:
             cursor = self.db.execute(f'SELECT * FROM {table}')
             with (self.path/f'{table}.csv').open('w', newline='', encoding='utf-8-sig') as out:
                 writer = csv.writer(out)

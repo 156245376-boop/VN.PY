@@ -28,11 +28,18 @@ from qf.continuous_roll import ContinuousGuard, RollCoordinator, RollState
 from qf.continuous_series import SignalSeries
 from qf.ma_cross import completed_cross_closed
 from qf.pivot_stop import latest_confirmed_pivot, plan_pivot_entry
+from qf.research_account import (
+    account_schema,
+    account_snapshot,
+    account_totals,
+    enable_account_evidence,
+    save_account,
+)
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values
 from qf.research_contract import contract_spec, make_target_task
 from qf.research_coverage import assess_coverage
-from qf.research_journal import bar_end_ns
+from qf.research_journal import bar_end_ns, research_trade_key
 from qf.research_progress import BacktestProgress
 from qf.runtime import (
     check_connections,
@@ -103,6 +110,7 @@ class ContinuousLoop:
         self.observed, self.captured = set(), {}
         self.context = dict(date=str(config.start), symbol=config.continuous, data_type='mapping')
         self.backtest = None
+        self.account_evidence = account_schema(journal.db)
 
     def closed_rows(self, symbol, now):
         return completed_rows(self.serials[symbol], self.config.bar_seconds, now,
@@ -115,6 +123,7 @@ class ContinuousLoop:
             if bar is None:
                 continue
             self.j.capture_signal(bar)
+            self.capture_account('bar_close')
             if signal is not None:
                 self.record('skipped', dict(
                     reason='historical_signal_superseded',
@@ -137,6 +146,13 @@ class ContinuousLoop:
             payload=payload or {}, logical_risk=self.risk, roll_state=asdict(self.roll.state),
             fills=[], target=target)
 
+    def capture_account(self, trigger, *, status='active'):
+        if not self.account_evidence or not self.now:
+            return
+        snapshot = account_snapshot(self.api, time_ns=self.now, status=status,
+                                    totals=account_totals(self.j.db))
+        save_account(self.j, snapshot, trigger=trigger)
+
     def accept_fill(self, fill):
         if self.j.has_fill(fill):
             return
@@ -148,10 +164,14 @@ class ContinuousLoop:
             raise Frozen('fill_intent_missing')
         risk = apply_logical_fill(self.risk, fill, role=role, spec=self.specs[symbol],
             entry_plan=self.entry_plan, risk=self.config.risk)
+        fee = dict(fill_key=research_trade_key(fill),
+                   amount=str(self.specs[symbol].commission_per_lot*fill['volume']),
+                   role=role)
         if self.j.commit_continuous('fill-'+uuid.uuid4().hex, time_ns=fill['time_ns'], kind='fill',
             payload=dict(role=role, symbol=symbol), logical_risk=risk,
-            roll_state=asdict(self.roll.state), fills=[fill]):
+            roll_state=asdict(self.roll.state), fills=[fill], fill_fees=[fee]):
             self.risk = risk
+            self.capture_account('fill')
 
     def bind_order(self, order_id, symbol):
         self.j.bind_order_role(order_id, symbol, self.roles.get(symbol))
@@ -259,6 +279,7 @@ class ContinuousLoop:
             if public_values(asdict(self.risk)) != previous:
                 self.record('protection', dict(symbol=held, price=dec(quote.last_price),
                                               quote_ns=self.now))
+                self.capture_account('protection')
 
     def trade_closed(self):
         return bool(self.risk.trade_id and self.j.db.execute(
@@ -287,6 +308,7 @@ class ContinuousLoop:
             elif action['kind'] == 'freeze':
                 raise Frozen(action['reason'])
             self.record('roll', dict(phase=self.roll.state.phase))
+            self.capture_account('roll')
 
     def step(self, main, now, *, stopping=False):
         self.now = now
@@ -411,6 +433,7 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
                        experiment_ref=None):
     j = ContinuousJournal.create(root, 'backtest', config,
                                  provenance() | {'experiment_ref': experiment_ref})
+    enable_account_evidence(j)
     j.set('experiment_ref', experiment_ref)
     j.set('fee_multiplier', fee_multiplier)
     needed = max(config.slow_period+2, config.risk.pivot_left+config.risk.pivot_right+2)
@@ -543,6 +566,7 @@ def execute_continuous(config, root, credentials, *, sdk, fee_multiplier=1,
                             loop.reconcile(execute_deferred=False)
                     loop.reconcile(execute_deferred=False)
                     loop.guard.enabled = False
+                    loop.capture_account('terminal', status='last_snapshot')
                 j.set('final_positions', positions_snapshot(api.get_position()))
                 if any(o.status != 'FINISHED' for o in api.get_order().values()):
                     status, reason = 'frozen', 'cancellation_unconfirmed'

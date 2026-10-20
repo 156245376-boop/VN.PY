@@ -12,6 +12,7 @@ from tqsdk.datetime import (
 )
 
 from qf.journal import Journal
+from qf.research_account import account_schema, insert_fill_fees, normalize_fill_fees
 from qf.research_config import decimal_value, public_values
 from qf.trade_risk import RiskState
 
@@ -72,6 +73,9 @@ def integrity_manifest(db):
     if schema and json.loads(schema[0]) == 2:
         tables += ('signal_bars', 'main_changes', 'roll_events', 'contract_specs',
                    'logical_fills', 'logical_trades', 'continuous_order_roles', 'signals', 'events')
+    marker = db.execute("SELECT value FROM state WHERE key='account_schema_version'").fetchone()
+    if marker is not None:
+        tables += ('research_accounts', 'research_fill_fees')
     for table in tables:
         digest, count = hashlib.sha256(), 0
         query = ("SELECT * FROM state WHERE key!='research_integrity' ORDER BY key"
@@ -114,7 +118,8 @@ class ResearchJournal(Journal):
         return self.db.execute('SELECT 1 FROM fills WHERE key=?',
                                (research_trade_key(fill),)).fetchone() is not None
 
-    def commit_update(self, event_id, *, time_ns, kind, payload, risk_state, fills, target=None):
+    def commit_update(self, event_id, *, time_ns, kind, payload, risk_state, fills, target=None,
+                      fill_fees=None):
         if (kind not in KINDS or not isinstance(event_id, str) or not event_id
                 or type(time_ns) is not int or time_ns < 0 or set(payload)-PAYLOAD_FIELDS
                 or (target is not None and type(target) is not int)):
@@ -127,13 +132,22 @@ class ResearchJournal(Journal):
             return False
         risk_json = dumps(asdict(risk_state))
         risk_from_dict(json.loads(risk_json))
+        keys = [research_trade_key(fill) for fill in fills]
+        evidence = account_schema(self.db)
+        fees = normalize_fill_fees(fill_fees, keys) if evidence and fills else []
+        if evidence and not fills and fill_fees not in (None, []):
+            raise ValueError('没有成交却提交了成交费用')
+        if fill_fees is not None and not evidence:
+            raise ValueError('账户证据模型尚未启用')
         if fills:
-            payload = payload | {'fill_keys': [research_trade_key(fill) for fill in fills]}
+            payload = payload | {'fill_keys': keys}
         with self.db:
             for fill in fills:
                 self.db.execute('INSERT INTO fills VALUES (?,?,?,?,?,?,?,?)', (
                     research_trade_key(fill), fill['order_id'], fill['symbol'], fill['direction'],
                     fill['offset'], fill['volume'], float(fill['price']), int(fill['time_ns'])))
+            if fees:
+                insert_fill_fees(self.db, fees)
             self.db.execute('INSERT INTO risk_events VALUES (?,?,?,?,?,?)',
                             (event_id, time_ns, kind, dumps(payload), risk_json, target))
             self.db.execute('INSERT OR REPLACE INTO state VALUES (?,?)', ('risk_state', risk_json))
@@ -189,6 +203,8 @@ class ResearchJournal(Journal):
     def export(self):
         self.checkpoint_integrity()
         tables = ('signals', 'fills', 'orders', 'equity', 'events', 'risk_events', 'research_bars')
+        if account_schema(self.db):
+            tables += ('research_accounts', 'research_fill_fees')
         for table in tables:
             cursor = self.db.execute(f'SELECT * FROM {table}')
             with (self.path / f'{table}.csv').open('w', newline='', encoding='utf-8-sig') as out:

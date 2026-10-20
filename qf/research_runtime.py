@@ -17,6 +17,13 @@ from qf.history import summarize_history
 from qf.journal import PaperLock
 from qf.ma_cross import completed_cross
 from qf.pivot_stop import latest_confirmed_pivot, plan_pivot_entry
+from qf.research_account import (
+    account_schema,
+    account_snapshot,
+    account_totals,
+    enable_account_evidence,
+    save_account,
+)
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
 from qf.research_contract import contract_spec as contract_spec
@@ -150,6 +157,7 @@ class ResearchLoop:
         self.trimming_entry = False
         self.total_fee = dec(journal.get('total_commission', 0))
         self.startup_equity = dec(journal.get('initial_equity', config.initial_balance))
+        self.account_evidence = account_schema(journal.db)
 
     def record(self, kind, now, payload=None, target=None):
         self.journal.commit_update(uuid.uuid4().hex, time_ns=now, kind=kind,
@@ -167,12 +175,18 @@ class ResearchLoop:
                     entry_plan=self.entry_plan)
             else:
                 state = close_trade_fills(self.risk, [fill])
+            role = 'strategy_open' if fill['offset'] == 'OPEN' else 'strategy_close'
+            fee = dict(fill_key=research_trade_key(fill),
+                       amount=str(self.spec.commission_per_lot*fill['volume']),
+                       role=role)
             self.journal.commit_update('fill-'+research_trade_key(fill), time_ns=fill['time_ns'],
                 kind='fill', payload={'phase': self.phase, **({'entry_plan':
                     public_values(asdict(self.entry_plan))} if self.entry_plan else {})},
-                risk_state=state, fills=[fill])
+                risk_state=state, fills=[fill],
+                fill_fees=[fee] if self.account_evidence else None)
             self.risk = state
             self.as_of_ns = max(self.as_of_ns, fill['time_ns'])
+            self.capture_account('fill')
         except ValueError:
             self.guard.freeze('fill_risk_mismatch')
 
@@ -284,6 +298,13 @@ class ResearchLoop:
         self.journal.set('total_commission', str(self.total_fee))
         self.journal.equity(now, float(account.balance), float(self.total_fee))
 
+    def capture_account(self, trigger, *, status='active'):
+        if not self.account_evidence or not self.as_of_ns:
+            return
+        snapshot = account_snapshot(self.api, time_ns=self.as_of_ns, status=status,
+                                    totals=account_totals(self.journal.db))
+        save_account(self.journal, snapshot, trigger=trigger)
+
     def step(self, quote, serial, *, minimum_bar, start_ns, end_ns, flatten):
         self.quote = quote
         check_connections(self.api, self.seen)
@@ -305,6 +326,7 @@ class ResearchLoop:
             if updated != self.risk:
                 self.risk = updated
                 self.record('protection', now, {'price': str(quote.last_price)})
+                self.capture_account('protection')
             if self.risk.exit_reason:
                 self.begin_exit(now, self.risk.exit_reason)
         self.reconcile_task(now, orders)
@@ -319,6 +341,7 @@ class ResearchLoop:
             ready_ns = max(finished_ns, rows[-1]['datetime'])
             if completed > self.last_bar and now >= ready_ns:
                 self.journal.capture_bars(self.config.symbol, self.config.bar_seconds, rows[:-1])
+                self.capture_account('bar_close')
                 self.last_bar = completed
                 self.journal.set('last_bar', completed)
                 if self.config.strategy_version == 2:
@@ -387,6 +410,8 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
     j = (ResearchJournal.resume(run_path(root, resume), config.public()) if resume else
          ResearchJournal.create(root, mode, config.public(),
                                 provenance() | {'experiment_ref': experiment_ref}))
+    if mode == 'backtest':
+        enable_account_evidence(j)
     if not resume:
         j.set('experiment_ref', experiment_ref)
     api, loop, account = None, None, None
@@ -564,6 +589,8 @@ def _run(sdk, mode, config, root, credentials, activate, resume, multiplier,
                         loop.guard.accept_fill(fill)
                     loop.guard.check(positions_snapshot(api.get_position()), api.get_order())
                     j.set('final_positions', positions_snapshot(api.get_position()))
+                    if not paper:
+                        loop.capture_account('terminal', status='last_snapshot')
             except Exception:
                 confirmed = False
             try:

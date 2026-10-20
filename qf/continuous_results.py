@@ -11,6 +11,7 @@ from tqsdk.tafunc import ma
 
 from qf.continuous_journal import logical_from_dict
 from qf.continuous_risk import logical_stop
+from qf.research_account import account_schema, costs_reconciled, fill_fee_total
 from qf.research_config import decimal_value as dec
 from qf.research_config import public_values, validate_research_config
 from qf.research_journal import integrity_manifest
@@ -233,7 +234,13 @@ def summarize_continuous_run(root, run_id):
         initial = dec(state.get('initial_equity', result['config']['initial_balance']))
         equity = [dec(r[0]) for r in db.execute('SELECT balance FROM equity ORDER BY time_ns')]
         final = state.get('sdk_statistics', {}).get('end_balance', equity[-1] if equity else None)
-        fee = state.get('total_commission', state.get('sdk_statistics', {}).get('commission'))
+        sdk_fee = state.get('sdk_statistics', {}).get('commission')
+        if account_schema(db):
+            fee = fill_fee_total(db)
+            fee_raw = str(fee)
+        else:
+            fee_raw = state.get('total_commission', sdk_fee)
+            fee = dec(fee_raw) if fee_raw is not None else None
         fees = [dec(r[0]) for r in db.execute(
             "SELECT fee FROM logical_fills WHERE role IN ('roll_in','roll_out')")]
         # 平旧换新期间数量暂时为零，不是逻辑交易结束；只统计最终策略退出。
@@ -248,6 +255,10 @@ def summarize_continuous_run(root, run_id):
                 pct = max(pct, (peak-value)/peak*100)
         net = dec(final)-initial if final is not None else None
     return public_values(result | dict(final_equity=final, net_pnl=net, commission=fee,
+        cost_reconciled=(costs_reconciled(sdk_fee, fee_raw)
+                         if sdk_fee is not None and fee_raw is not None else None),
+        cost_difference=(abs(dec(sdk_fee)-dec(fee_raw))
+                         if sdk_fee is not None and fee_raw is not None else None),
         gross_pnl=net+dec(fee) if net is not None and fee is not None else None,
         roll_commission=sum(fees, Decimal(0)), roll_count=state.get('roll_count', 0),
         closed_trade_count=closed, fill_count=count,

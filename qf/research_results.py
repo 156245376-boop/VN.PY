@@ -6,6 +6,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from qf.research_account import account_schema, costs_reconciled, fill_fee_total
 from qf.research_config import decimal_value, public_values, validate_research_config
 from qf.research_journal import integrity_manifest, risk_from_dict
 
@@ -117,11 +118,21 @@ def summarize_run(root, run_id):
     balances = [initial, *[decimal_value(r[1]) for r in equity]]
     final = decimal_value(state.get("sdk_statistics", {}).get("end_balance", balances[-1]))
     balances.append(final)
-    fee_raw = state.get(
+    sdk_raw = state.get("sdk_statistics", {}).get("commission")
+    legacy_raw = state.get(
         "total_commission",
-        state.get("sdk_statistics", {}).get("commission", equity[-1][2] if equity else None),
+        sdk_raw if sdk_raw is not None else equity[-1][2] if equity else None,
     )
-    fee = decimal_value(fee_raw) if fee_raw is not None else None
+    with closing(sqlite3.connect((run_path(root, run_id)/'journal.sqlite3').as_uri()
+                                 + '?mode=ro', uri=True)) as db:
+        if account_schema(db):
+            fee = fill_fee_total(db)
+            fee_raw = str(fee)
+        else:
+            fee_raw = legacy_raw
+            fee = decimal_value(fee_raw) if fee_raw is not None else None
+    cost_ok = (costs_reconciled(sdk_raw, fee_raw)
+               if sdk_raw is not None and fee_raw is not None else None)
     peak, max_amount, max_pct = initial, decimal_value(0), decimal_value(0)
     for value in balances:
         peak = max(peak, value)
@@ -147,6 +158,9 @@ def summarize_run(root, run_id):
             gross_pnl=net + fee if fee is not None and measured else None,
             net_pnl=net if measured else None,
             commission=fee,
+            cost_reconciled=cost_ok,
+            cost_difference=(abs(decimal_value(sdk_raw)-decimal_value(fee_raw))
+                             if sdk_raw is not None and fee_raw is not None else None),
             max_drawdown_amount=max_amount.normalize() if equity else None,
             max_drawdown_pct=max_pct.normalize() if equity else None,
             fill_count=len(fills),

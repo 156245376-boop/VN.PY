@@ -24,7 +24,7 @@ def _put_latest(target, value):
 
 
 def worker_main(task, credential_pipe, control_pipe, status_queue, frame_queue,
-                terminal_pipe, stop_event, *, results_root, execute_fn=None):
+                terminal_pipe, stop_event, results_root, *, execute_fn=None):
     demand = ViewDemand()
     safe = {'status', 'reason', 'run_id', 'failure_context', 'summary'}
     last_run = [None]

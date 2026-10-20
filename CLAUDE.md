@@ -42,3 +42,5 @@
 新版使用确认波峰／波谷动态止损、真实回测进度与可选运行图；旧实验只读复制升级，操作仍见上述指南。
 新建研究默认版本3历史主力连续，可跨年回测并串行平旧开新、延续原R；固定月份与模拟保留版本2。
 连续实现集中在qf/continuous_*.py及web/continuous-replay.js，复盘按窗口读取；账户多年权限仍待联网核对。
+并行回测任务池、独立工作进程和账户证据按需查`docs/superpowers/specs/2026-10-19-parallel-backtest-observability-design.md`；
+任务卡与账户/止损观察的操作说明见`docs/research-paper-guide.md`第9节。

@@ -45,9 +45,10 @@
     const formRoot=el('div'),actions=el('div',null,'research-actions'),notice=el('p',null,'research-notice'),state=el('p',null,'research-status'),risk=el('p');
     const progressBar=el('progress'),progressText=el('p');progressBar.max=100;progressBar.hidden=true;progressText.className='research-progress';
     const jobsRoot=el('div');jobsRoot.id='research-jobs';root.replaceChildren(heading,intro,picker,formRoot,actions,notice,state,progressBar,progressText,risk,jobsRoot);
+    let useBacktestJobs=false,capabilityChecked=false,jobChartOpen=false;
     const jobsPanel=globalThis.QfResearchJobs?.create(jobsRoot,api,{
-      onSelect(job){selectedJob=job.job_id;if(job.account)ensureAccount?.(job.account);poll();},
-      onChart(answer){watch.checked=true;liveBinding=answer;liveJob=selectedJob;liveFrame.hidden=false;liveFrame.src=answer.url;},
+      onSelect(job){selectedJob=job.job_id;jobChartOpen=false;liveFrame.hidden=true;liveFrame.removeAttribute('src');liveBinding=null;if(job.account)ensureAccount?.(job.account);poll();},
+      onChart(answer){jobChartOpen=true;watch.checked=true;liveBinding=answer;liveJob=selectedJob;liveFrame.hidden=false;liveFrame.src=answer.url;},
       notice(text){notice.textContent=text;}});
     const form=QfResearchForm.create(formRoot,{onChange(key){if(['continuous','start','end'].includes(key)){acceptedRequest=null;contractKey='';}}});
     function checked(response){if(response.ok){form.showErrors({});return response;}
@@ -97,7 +98,7 @@
     addEventListener('message',liveMessage);
     const activateLabel=el('label','允许本实验产生快期模拟委托 '),activate=el('input');activate.type='checkbox';activateLabel.prepend(activate);actions.append(activateLabel);
     const run=button('运行回测',async()=>{if(!await save())return;
-      if(api.start_backtest){
+      if(useBacktestJobs&&api.start_backtest){
         const requestId=(globalThis.crypto?.randomUUID?.()||String(Date.now())+Math.random());
         const response=await api.start_backtest(ref.experiment_id,ref.revision,cost.checked,requestId);
         if(!checked(response))return;selectedJob=response.selected_job_id;
@@ -109,7 +110,7 @@
       if(!await save())return;const response=await api.start_research(ref.experiment_id,ref.revision,'paper',activate.checked);checked(response);lastTerminalKey='';notice.textContent=response.reason;});
     activate.onchange=()=>paper.textContent=activate.checked?'启动模拟策略':'连接模拟并观察';
     const stopButton=button('停止任务',async()=>{stress=null;
-      if(selectedJob&&api.stop_backtest)notice.textContent=(await api.stop_backtest(selectedJob)).reason;
+      if(useBacktestJobs&&selectedJob&&api.stop_backtest)notice.textContent=(await api.stop_backtest(selectedJob)).reason;
       else notice.textContent=(await api.stop_research(false)).reason;});
     const flattenButton=button('平仓并停止',async()=>{stress=null;if(confirm('退出本实验拥有的快期模拟持仓并停止？需要等待真实成交确认。'))notice.textContent=(await api.stop_research(true)).reason;});
     const resultsRoot=el('div');resultsRoot.id='research-results';root.append(resultsRoot);
@@ -121,8 +122,9 @@
       form.setSaved(!!ref);
       copy.textContent=form.isLegacy?'复制为新版拐点实验':'复制实验';poll();};
     async function poll(){if(disposed||polling)return;polling=true;try{
+      if(!capabilityChecked&&api.get_research_capabilities){const capability=await api.get_research_capabilities();useBacktestJobs=capability?.ok&&capability.use_backtest_jobs===true;capabilityChecked=true;}
       let jobState=null;
-      if(api.list_backtest_jobs&&jobsPanel){await jobsPanel.refresh();
+      if(useBacktestJobs&&api.list_backtest_jobs&&jobsPanel){await jobsPanel.refresh();
         if(selectedJob){const response=await api.get_backtest_state?.(selectedJob);if(response?.ok)jobState=response.state;}}
       const s=await api.get_research_state();if(disposed)return;
       const busy=s.running,description=describeState(s);form.setRunning(busy&&s.status!=='discovering');for(const b of [query,saveButton,copy,run,paper])b.disabled=busy;
@@ -149,7 +151,7 @@
       const terminalKey=JSON.stringify([s.job_id,s.run_id,s.status,s.reason]);
       if(description.terminal&&terminalKey!==lastTerminalKey){lastTerminalKey=terminalKey;notice.textContent=description.notice;
         if(s.status!=='backtest_finished')stress=null;}
-      await syncLive(s);
+      if(!(useBacktestJobs&&jobChartOpen))await syncLive(s);
       const key=JSON.stringify([s.request_id,s.contract_request,s.contracts]);if(key!==contractKey&&s.status==='contracts_ready'&&matches&&(!acceptedRequest||acceptedRequest.request_id===s.request_id)){
         contractKey=key;const selection=form.setContracts(s.contracts,form.read().symbol);
         notice.textContent=!s.contracts.length?'区间内未返回实际合约，请核对权限与日期。':!selection.eligibleCount?'返回的月份合约均不能覆盖所选结束日，请缩短结束日后重新查询；软件不会自动修改日期。':!form.read().symbol?'请选择能覆盖结束日的实际月份；列表已标明到期日。':'已返回实际合约，请核对月份、到期日与历史覆盖。';}

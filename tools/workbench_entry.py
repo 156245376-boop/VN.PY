@@ -1,5 +1,6 @@
 """独立工作台入口：隔离环境后打开可信 WebView2 页面。"""
 
+import multiprocessing
 import os
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from tools.environment_probe import verify_environment  # noqa: E402
 
 if __name__ == "__main__":
     try:
+        multiprocessing.freeze_support()
         verify_environment(ROOT / ".venv-tqsdk")
         from qf.workbench import main
         main()

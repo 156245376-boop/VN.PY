@@ -131,8 +131,20 @@ class ResearchJobs:
             except queue.Empty:
                 pass
         terminal = job.get('terminal')
-        if terminal is not None and terminal.poll():
-            raw = terminal.recv()
+        try:
+            ready = terminal is not None and terminal.poll()
+        except (BrokenPipeError, EOFError, OSError):
+            ready = False
+            terminal = None
+        if terminal is not None and ready:
+            try:
+                raw = terminal.recv()
+            except (BrokenPipeError, EOFError, OSError):
+                raw = None
+            if raw is None:
+                job.update(status='failed', running=False, reason='worker_disconnected')
+                job['terminal'] = None
+                return
             if accept_message(job['task'], raw, last_seq=job['last_seq'],
                               bound_run_id=job['bound_run_id']):
                 job['last_seq']['terminal'] = raw['seq']

@@ -87,6 +87,7 @@ class WorkbenchBridge:
         self._indicator_store = IndicatorStore(root / 'data/workbench')
         self._indicator_jobs = IndicatorJobs()
         self._experiments = ExperimentStore(root / 'data/workbench/experiments')
+        self._backtest_jobs_enabled = research_session is None
         self._research = research_session or ResearchSession(root / 'results')
         self._research_credentials = None
         self._replay = ReplayView(root / 'results')
@@ -107,6 +108,9 @@ class WorkbenchBridge:
                 except ValueError:
                     results.append(dict(run_id=path.name, issue='旧版或损坏记录，无法按新实验复盘'))
         return dict(ok=True, runs=results)
+
+    def get_research_capabilities(self):
+        return dict(ok=True, use_backtest_jobs=self._backtest_jobs_enabled)
 
     def get_research_result(self, run_id):
         try:

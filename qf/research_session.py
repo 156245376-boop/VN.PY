@@ -110,7 +110,7 @@ class ResearchSession:
                 activate=activate or mode == 'backtest', config=config.public(),
                 experiment_ref=copy.deepcopy(experiment_ref), result=None, run_id=None,
                 job_id=uuid.uuid4().hex, progress=None, entry_plan=None, reason=None,
-                equity=None, commission=None)
+                equity=None, commission=None, account=None)
             self.thread = threading.Thread(target=self._run,
                 args=(mode, config, credentials, activate, resume, fee_multiplier,
                       copy.deepcopy(experiment_ref)), daemon=True)

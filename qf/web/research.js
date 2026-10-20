@@ -86,9 +86,10 @@
         }
         notice.textContent=`正在配置回测槽位 ${index+1}。`;
       },
-      async onStart(plan){
+      async onStart(plan,startOptions={}){
         const requestId=(globalThis.crypto?.randomUUID?.()||String(Date.now())+Math.random());
-        const response=await api.start_backtest_batch(plan,requestId);
+        const response=await api.start_backtest_batch(
+          plan,requestId,startOptions.allowPartial===true);
         if(!response.ok){planner.setErrors(response.field_errors||{});notice.textContent=response.reason;return response;}
         selectedJob=response.job_ids?.[0]||null;
         await jobsPanel?.refresh();if(selectedJob)jobsPanel?.select(selectedJob);

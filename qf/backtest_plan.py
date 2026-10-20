@@ -32,8 +32,6 @@ class BacktestPlan:
         values = raw['slots']
         if not isinstance(values, list) or not 1 <= len(values) <= 4:
             raise ValueError('回测槽位必须为1—4项')
-        if len(values) > capacity:
-            raise ValueError('回测槽位不能超过并发数')
         if not allow_partial and len(values) != capacity:
             raise ValueError('开始全部回测时，槽位数量必须等于并发数')
         slots = []

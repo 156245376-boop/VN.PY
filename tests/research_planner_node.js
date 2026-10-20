@@ -21,9 +21,9 @@ function byText(root,text){return all(root).find(node=>node.textContent===text);
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 
 (async()=>{
-  const root=new Element('div'),starts=[],configured=[];
+  const root=new Element('div'),starts=[],configured=[],startOptions=[];
   const planner=QfResearchPlanner.create(root,{},{
-    onStart:async plan=>{starts.push(plan);return {ok:true};},
+    onStart:async(plan,options)=>{starts.push(plan);startOptions.push(options);return {ok:true};},
     onConfigure:(index,item)=>configured.push([index,item]),
   });
   planner.setCapacity(2);
@@ -42,9 +42,22 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
     {experiment_id:'a'.repeat(32),revision:1,include_fee_stress:false},
     {experiment_id:'b'.repeat(32),revision:1,include_fee_stress:true},
   ]});
+  assert.equal(byText(root,'开始全部回测').hidden,true);
+  assert.equal(byText(root,'新增回测任务').hidden,false);
+  byText(root,'新增回测任务').click();
+  assert.equal(planner.slots().length,1,'新增任务不能改并发数');
+  planner.configure(0,{experiment_id:'c'.repeat(32),revision:1,name:'C'});
+  await byText(root,'开始新增任务').click();
+  assert.deepEqual(startOptions[1],{allowPartial:true});
+  assert.deepEqual(starts[1],{capacity:2,slots:[
+    {experiment_id:'c'.repeat(32),revision:1,include_fee_stress:false}]});
   assert.throws(()=>QfResearchPlanner.buildPlan(2,[
     {experiment_id:'a'.repeat(32),revision:1}]));
   assert.throws(()=>QfResearchPlanner.buildPlan(1,[
     {experiment_id:'private',revision:1}]));
+  assert.equal(QfResearchPlanner.buildPlan(1,[
+    {experiment_id:'a'.repeat(32),revision:1},
+    {experiment_id:'b'.repeat(32),revision:1},
+  ],{allowPartial:true}).slots.length,2);
   console.log('RESEARCH_PLANNER_OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

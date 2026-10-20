@@ -25,10 +25,14 @@ def test_added_batch_can_be_partial_but_still_bounded():
         'capacity': 3, 'slots': [item('b')],
     }, allow_partial=True)
     assert plan.capacity == 3 and len(plan.slots) == 1
+    queued = BacktestPlan.validate({
+        'capacity': 1, 'slots': [item('c'), item('d')],
+    }, allow_partial=True)
+    assert queued.capacity == 1 and len(queued.slots) == 2
     for bad in (
         {'capacity': 0, 'slots': []},
         {'capacity': 5, 'slots': [item('a')]},
-        {'capacity': 1, 'slots': [item('a')]*2},
+        {'capacity': 1, 'slots': [item('a')]*5},
         {'capacity': 1, 'slots': [{**item('a'), 'password': 'private'}]},
         {'capacity': 1, 'slots': [{**item('a'), 'revision': True}]},
     ):

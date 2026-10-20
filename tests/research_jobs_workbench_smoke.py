@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.stdout.reconfigure(encoding='utf-8')
 
 import webview  # noqa: E402
 from research_workbench_smoke import MarketFixture  # noqa: E402
@@ -87,6 +88,12 @@ class MemoryJobs:
     def stop(self, job_id):
         job = self._get(job_id)
         job.update(status='stopped', running=False, reason='requested_stop')
+        waiting = next((item for item in self.items if item['status'] == 'waiting'), None)
+        if waiting is not None:
+            waiting.update(status='active', running=True, reason=None,
+                           progress=copy.deepcopy(job['progress']),
+                           account=copy.deepcopy(job['account']),
+                           risk=copy.deepcopy(job['risk']))
 
     def remove(self, job_id):
         job = self._get(job_id)
@@ -207,10 +214,12 @@ def main():
               json.dumps(harness.result, ensure_ascii=False))
         if not harness.result or not harness.result.get('done'):
             raise SystemExit(1)
-        assert jobs.submits == 2
-        assert jobs.capacity == 2
-        assert jobs.removed == []
+        assert jobs.submits == 3
+        assert jobs.capacity == 1
+        assert jobs.removed == ['0'*31+'2']
         assert jobs.items[0]['status'] == 'stopped'
+        assert next(job for job in jobs.items
+                    if job['job_id'] == harness.result['stopCJob'])['status'] == 'stopped'
         print('RESEARCH_JOBS_WORKBENCH_OK')
 
 

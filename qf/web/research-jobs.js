@@ -40,8 +40,10 @@
         remove.disabled=job.running||['starting','active','warmup','backtesting','stopping','saving'].includes(job.status);
         remove.title='只移除任务卡，不删除已保存的结果';
         remove.onclick=async()=>{const answer=await api.remove_backtest?.(job.job_id);if(answer?.ok){if(selected===job.job_id)selected=null;await refresh();}else if(answer)options.notice?.(answer.reason);};
-        const stop=el('button','停止本任务');stop.disabled=!['starting','active','warmup','backtesting'].includes(job.status);
-        stop.onclick=async()=>{const answer=await api.stop_backtest?.(job.job_id);if(answer?.ok)options.notice?.(answer.reason);};
+        const stop=el('button','停止本任务');stop.dataset.job=job.job_id;
+        stop.disabled=!['starting','active','warmup','backtesting'].includes(job.status);
+        stop.onclick=async()=>{const answer=await api.stop_backtest?.(job.job_id);
+          if(answer?.ok)options.notice?.(answer.reason);return answer;};
         actions.append(watch,chart,separate,remove,stop);card.append(head,actions);list.append(card);}
       if(!jobs.length)list.append(el('p','尚未启动回测任务。'));
     }

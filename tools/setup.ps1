@@ -1,6 +1,11 @@
 # Lock-controlled installation into the isolated TqSdk environment.
 [CmdletBinding()]
-param([switch]$InitializeLock, [switch]$UpdateLock, [switch]$RepairSdk)
+param(
+    [switch]$InitializeLock,
+    [switch]$UpdateLock,
+    [switch]$RepairSdk,
+    [string[]]$RepairPackage = @()
+)
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -43,6 +48,12 @@ try {
     $syncOptions = @('--project', $projectRoot, '--python', '3.13.11', '--locked',
                      '--extra', 'dev', '--extra', 'official-examples', '--extra', 'desktop')
     if ($RepairSdk) { $syncOptions += @('--reinstall-package', 'tqsdk') }
+    foreach ($package in $RepairPackage) {
+        if ($package -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw "Invalid package name for repair: $package"
+        }
+        $syncOptions += @('--reinstall-package', $package)
+    }
     & uv sync @syncOptions
     if ($LASTEXITCODE -ne 0) { throw "uv sync failed: $LASTEXITCODE" }
     Write-Output 'TqSdk environment installation finished. Run tools/check.ps1 to verify.'
